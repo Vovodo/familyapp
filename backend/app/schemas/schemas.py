@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
 
 
 # --- Auth & User Schemas ---
@@ -10,10 +10,24 @@ class UserBase(BaseModel):
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
 
+    @field_validator('email', 'phone', 'avatar_url', mode='before')
+    @classmethod
+    def empty_str_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
 
 class UserCreate(UserBase):
     password: str
     nickname: Optional[str] = None
+
+    @field_validator('nickname', mode='before')
+    @classmethod
+    def empty_nickname_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 
 class UserLogin(BaseModel):
@@ -26,6 +40,13 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
     nickname: Optional[str] = None
+
+    @field_validator('full_name', 'phone', 'avatar_url', 'nickname', mode='before')
+    @classmethod
+    def empty_str_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 
 class UserResponse(UserBase):
