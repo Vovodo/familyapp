@@ -13,6 +13,7 @@ import { ShoppingPage } from './pages/shopping/ShoppingPage';
 import { NotesPage } from './pages/notes/NotesPage';
 import { RemindersPage } from './pages/reminders/RemindersPage';
 import { FamilySettingsPage } from './pages/family/FamilySettingsPage';
+import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { Loader2, Heart } from 'lucide-react';
 
 const queryClient = new QueryClient({
@@ -106,6 +107,7 @@ export const App: React.FC = () => {
                 <Route path="/notes" element={<NotesPage />} />
                 <Route path="/reminders" element={<RemindersPage />} />
                 <Route path="/family" element={<FamilySettingsPage />} />
+                <Route path="/admin" element={<AdminDashboardPage />} />
               </Route>
 
               {/* Fallback */}

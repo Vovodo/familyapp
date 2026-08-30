@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Heart, Users, Bell } from 'lucide-react';
+import { Heart, Users, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 
@@ -18,6 +18,7 @@ export const Header: React.FC = () => {
   };
 
   const displayName = activeMember?.nickname || user?.full_name?.split(' ')[0] || 'Ailem';
+  const isAdmin = user?.role === 'admin';
 
   return (
     <header className="bg-white border-b border-gray-100 px-4 py-3 sticky top-0 z-40 shadow-sm safe-area-top">
@@ -31,13 +32,24 @@ export const Header: React.FC = () => {
               <span>{getGreeting()}</span>
               <span>{displayName} ❤️</span>
             </div>
-            <h1 className="text-base font-bold text-gray-900 truncate max-w-[180px]">
+            <h1 className="text-base font-bold text-gray-900 truncate max-w-[170px]">
               {currentFamily ? currentFamily.name : 'Ailem'}
             </h1>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <button
+              onClick={() => navigate('/admin')}
+              className="w-11 h-11 rounded-2xl bg-amber-50 hover:bg-amber-100 active:scale-95 flex items-center justify-center text-amber-700 transition border border-amber-200"
+              title="Sistem Gösterge Paneli (Admin)"
+              aria-label="Admin Paneli"
+            >
+              <ShieldCheck className="w-5 h-5 text-amber-600" />
+            </button>
+          )}
+
           <button
             onClick={() => navigate('/family')}
             className="w-11 h-11 rounded-2xl bg-gray-50 hover:bg-gray-100 active:scale-95 flex items-center justify-center text-gray-700 transition border border-gray-100"

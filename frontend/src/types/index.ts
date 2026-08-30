@@ -111,3 +111,39 @@ export interface NotificationItem {
   data?: string;
   created_at: string;
 }
+
+export interface IntegrationItem {
+  name: string;
+  active: boolean;
+  status: string;
+  detail: string;
+  provider?: string;
+  bucket?: string;
+  from_email?: string;
+  latency_ms?: number;
+  project_url?: string;
+}
+
+export interface AdminDashboardData {
+  integrations: {
+    database: IntegrationItem;
+    supabase_auth: IntegrationItem;
+    storage: IntegrationItem;
+    resend_email: IntegrationItem;
+    capacitor_mobile: IntegrationItem;
+  };
+  stats: {
+    total_users: number;
+    total_families: number;
+    total_messages: number;
+    total_media: number;
+    total_shopping: number;
+    total_notes: number;
+    total_reminders: number;
+  };
+  server: {
+    environment: string;
+    debug: boolean;
+    cors_origins: string[];
+  };
+}

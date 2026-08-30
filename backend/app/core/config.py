@@ -1,17 +1,15 @@
 from typing import List, Union
-from pydantic import AnyHttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import os
 
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Aile Uygulaması"
-    ENVIRONMENT: str = "development"
-    DEBUG: bool = True
+    ENVIRONMENT: str = "production"
+    DEBUG: bool = False
     API_V1_STR: str = "/api/v1"
 
     # CORS
-    CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://localhost:3000,capacitor://localhost,http://localhost"
+    CORS_ORIGINS: Union[str, List[str]] = "https://family.rfqcollector.com,http://localhost:5173,http://localhost:3000,capacitor://localhost,http://localhost"
 
     @property
     def cors_origins_list(self) -> List[str]:
@@ -34,9 +32,16 @@ class Settings(BaseSettings):
 
     STORAGE_BUCKET_NAME: str = "family-media"
     UPLOAD_DIR: str = "./uploads"
+    MAX_UPLOAD_SIZE: int = 15 * 1024 * 1024  # 15MB
 
-    # Max upload size in bytes (15MB)
-    MAX_UPLOAD_SIZE: int = 15 * 1024 * 1024
+    # Resend Email Integration
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "Ailem <bildirim@rfqcollector.com>"
+
+    # Default Admin User
+    ADMIN_EMAIL: str = "admin@aile.com"
+    ADMIN_PASSWORD: str = "Admin1234!*"
+    ADMIN_NAME: str = "Sistem Yöneticisi (Ege)"
 
     model_config = SettingsConfigDict(
         env_file=".env",

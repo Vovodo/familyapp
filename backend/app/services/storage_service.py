@@ -1,6 +1,6 @@
 import os
 import uuid
-from typing import Tuple
+from typing import Tuple, Dict, Any
 from backend.app.core.config import settings
 from loguru import logger
 
@@ -12,6 +12,9 @@ os.makedirs(os.path.join(settings.UPLOAD_DIR, "thumbnails"), exist_ok=True)
 class StorageService:
     def __init__(self):
         self.supabase_client = None
+        self._init_client()
+
+    def _init_client(self):
         if settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
             try:
                 from supabase import create_client
@@ -22,6 +25,53 @@ class StorageService:
                 logger.info("Supabase storage client initialized.")
             except Exception as e:
                 logger.warning(f"Failed to initialize Supabase client: {e}. Falling back to local storage.")
+
+    def verify_connection(self) -> Dict[str, Any]:
+        """
+        Checks if Supabase Object Storage is configured and reachable.
+        """
+        if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
+            return {
+                "active": False,
+                "provider": "Yerel Disk (Local Storage)",
+                "status": "Yerel Depolama Aktif",
+                "bucket": settings.STORAGE_BUCKET_NAME,
+                "detail": "SUPABASE_URL veya SERVICE_ROLE_KEY tanımlanmamış. Fotoğraflar sunucu diskinde saklanıyor."
+            }
+
+        if not self.supabase_client:
+            self._init_client()
+
+        if self.supabase_client:
+            try:
+                # Test listing buckets
+                buckets = self.supabase_client.storage.list_buckets()
+                bucket_names = [b.name for b in buckets] if buckets else []
+                bucket_exists = settings.STORAGE_BUCKET_NAME in bucket_names
+
+                return {
+                    "active": True,
+                    "provider": "Supabase Object Storage",
+                    "status": "Aktif",
+                    "bucket": settings.STORAGE_BUCKET_NAME,
+                    "bucket_exists": bucket_exists,
+                    "detail": f"Supabase Storage bağlantısı başarılı. '{settings.STORAGE_BUCKET_NAME}' bucket'ı {'mevcut' if bucket_exists else 'oluşturulmalı'}."
+                }
+            except Exception as e:
+                return {
+                    "active": False,
+                    "provider": "Supabase (Hata)",
+                    "status": "Bağlantı Hatası",
+                    "bucket": settings.STORAGE_BUCKET_NAME,
+                    "detail": f"Supabase Storage sorgulanamadı: {str(e)}"
+                }
+
+        return {
+            "active": False,
+            "provider": "Yerel Disk",
+            "status": "Deaktif",
+            "detail": "İstemci başlatılamadı."
+        }
 
     def upload_image(
         self,
