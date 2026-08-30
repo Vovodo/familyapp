@@ -4,16 +4,13 @@ import {
   Plus,
   Trash2,
   ShoppingBag,
-  Sparkles,
   Loader2,
-  CheckCircle2,
-  Circle,
-  Tag,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { ShoppingItem } from '../../types';
 import { api } from '../../services/api';
+import { supabase } from '../../services/supabase';
 
 const CATEGORIES = ['Market', 'Manav', 'Eczane', 'Kasap', 'Fırın', 'Ev'];
 
@@ -41,25 +38,67 @@ export const ShoppingPage: React.FC = () => {
 
   useEffect(() => {
     fetchShoppingList();
-    const interval = setInterval(fetchShoppingList, 5000);
-    return () => clearInterval(interval);
-  }, [currentFamily]);
+
+    if (!currentFamily || !supabase) return;
+
+    // Realtime listener for shopping items
+    const channel = supabase
+      .channel(`family-shopping-${currentFamily.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'shopping_items',
+          filter: `family_id=eq.${currentFamily.id}`,
+        },
+        () => {
+          // Instantly sync list on any DB change
+          fetchShoppingList();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentFamily?.id]);
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || isAdding) return;
+    const itemTitle = title.trim();
+    if (!itemTitle || isAdding || !user || !currentFamily) return;
 
+    const itemQty = quantity.trim() || '1 adet';
+    setTitle('');
     setIsAdding(true);
+
+    // Optimistic item
+    const tempId = `temp-${Date.now()}`;
+    const optimisticItem: ShoppingItem = {
+      id: tempId,
+      family_id: currentFamily.id,
+      created_by: user.id,
+      title: itemTitle,
+      quantity: itemQty,
+      category,
+      is_completed: false,
+      created_at: new Date().toISOString(),
+      creator_name: user.full_name,
+    };
+
+    setItems((prev) => [optimisticItem, ...prev]);
+
     try {
       const res = await api.post<ShoppingItem>('/shopping/', {
-        title: title.trim(),
-        quantity: quantity.trim() || '1 adet',
-        category: category,
+        title: itemTitle,
+        quantity: itemQty,
+        category,
       });
-      setItems((prev) => [res.data, ...prev]);
-      setTitle('');
+      setItems((prev) => prev.map((i) => (i.id === tempId ? res.data : i)));
     } catch (err: any) {
       alert('Ürün eklenemedi: ' + err.message);
+      setItems((prev) => prev.filter((i) => i.id !== tempId));
     } finally {
       setIsAdding(false);
     }
@@ -67,7 +106,7 @@ export const ShoppingPage: React.FC = () => {
 
   const handleToggle = async (item: ShoppingItem) => {
     const nextState = !item.is_completed;
-    // Optimistic UI update
+    // Instant optimistic update
     setItems((prev) =>
       prev.map((i) =>
         i.id === item.id
@@ -85,17 +124,16 @@ export const ShoppingPage: React.FC = () => {
         is_completed: nextState,
       });
     } catch (err) {
-      // Revert on error
       fetchShoppingList();
     }
   };
 
   const handleDelete = async (itemId: string) => {
+    setItems((prev) => prev.filter((i) => i.id !== itemId));
     try {
       await api.delete(`/shopping/${itemId}`);
-      setItems((prev) => prev.filter((i) => i.id !== itemId));
     } catch (err: any) {
-      alert('Silinemedi: ' + err.message);
+      fetchShoppingList();
     }
   };
 
@@ -104,11 +142,12 @@ export const ShoppingPage: React.FC = () => {
     if (completedCount === 0) return;
 
     if (!confirm(`${completedCount} tamamlanan ürünü listeden kaldırmak istiyor musunuz?`)) return;
+    setItems((prev) => prev.filter((i) => !i.is_completed));
+
     try {
       await api.delete('/shopping/completed');
-      setItems((prev) => prev.filter((i) => !i.is_completed));
     } catch (err: any) {
-      alert('Temizlenemedi: ' + err.message);
+      fetchShoppingList();
     }
   };
 

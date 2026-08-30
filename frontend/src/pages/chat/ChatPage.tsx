@@ -1,21 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Send,
   Camera,
-  Image as ImageIcon,
   Trash2,
   Smile,
-  AlertCircle,
   Loader2,
-  RefreshCw,
+  Check,
+  CheckCheck,
 } from 'lucide-react';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { Message } from '../../types';
 import { api } from '../../services/api';
+import { supabase } from '../../services/supabase';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+
+interface TypingUser {
+  userId: string;
+  userName: string;
+  nickname?: string;
+  avatarUrl?: string;
+  timestamp: number;
+}
 
 export const ChatPage: React.FC = () => {
   const { user } = useAuth();
@@ -23,17 +31,20 @@ export const ChatPage: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isSending, setIsSending] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<any>(null);
+  const channelRef = useRef<any>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const scrollToBottom = useCallback((smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+  }, []);
 
+  // 1. Initial Load of Messages
   const fetchMessages = async () => {
     if (!currentFamily) return;
     try {
@@ -48,37 +59,188 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  // 2. Setup Realtime Supabase Channel & Listeners
   useEffect(() => {
     fetchMessages();
-    const interval = setInterval(fetchMessages, 4000); // 4-sec polling fallback
-    return () => clearInterval(interval);
-  }, [currentFamily]);
+
+    if (!currentFamily || !supabase) return;
+
+    const channelName = `family-chat-${currentFamily.id}`;
+    const channel = supabase.channel(channelName, {
+      config: {
+        broadcast: { ack: false, self: false },
+      },
+    });
+
+    // Listen for typing broadcast events
+    channel.on('broadcast', { event: 'typing' }, (payload) => {
+      const data = payload.payload as TypingUser;
+      if (data.userId === user?.id) return;
+
+      setTypingUsers((prev) => {
+        const filtered = prev.filter((u) => u.userId !== data.userId);
+        return [...filtered, { ...data, timestamp: Date.now() }];
+      });
+    });
+
+    // Listen for stop typing broadcast events
+    channel.on('broadcast', { event: 'stop_typing' }, (payload) => {
+      const { userId } = payload.payload;
+      setTypingUsers((prev) => prev.filter((u) => u.userId !== userId));
+    });
+
+    // Listen for new messages inserted in DB
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `family_id=eq.${currentFamily.id}`,
+      },
+      (payload) => {
+        const newMsg = payload.new as Message;
+        setMessages((prev) => {
+          // Check if message already exists (e.g. from optimistic update)
+          const exists = prev.some((m) => m.id === newMsg.id || (m.id.startsWith('temp-') && m.content === newMsg.content && m.sender_id === newMsg.sender_id));
+          if (exists) {
+            return prev.map((m) => (m.id.startsWith('temp-') && m.content === newMsg.content ? newMsg : m));
+          }
+
+          // Lookup sender info from family members
+          const senderMember = currentFamily.members?.find((m) => m.user_id === newMsg.sender_id);
+          const enrichedMsg: Message = {
+            ...newMsg,
+            sender_name: senderMember?.user?.full_name || 'Aile Üyesi',
+            sender_nickname: senderMember?.nickname,
+            sender_avatar: senderMember?.user?.avatar_url,
+          };
+          return [...prev, enrichedMsg];
+        });
+
+        // Remove sender from typing list
+        setTypingUsers((prev) => prev.filter((u) => u.userId !== newMsg.sender_id));
+        scrollToBottom();
+      }
+    );
+
+    // Listen for message deletions
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'messages',
+        filter: `family_id=eq.${currentFamily.id}`,
+      },
+      (payload) => {
+        const deletedId = (payload.old as any).id;
+        setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+      }
+    );
+
+    channel.subscribe();
+    channelRef.current = channel;
+
+    // Timer to clear stale typing indicators (> 3.5 seconds)
+    const cleanupTypingInterval = setInterval(() => {
+      const now = Date.now();
+      setTypingUsers((prev) => prev.filter((u) => now - u.timestamp < 3500));
+    }, 1500);
+
+    return () => {
+      clearInterval(cleanupTypingInterval);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
+    };
+  }, [currentFamily?.id, user?.id]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    scrollToBottom(false);
+  }, [messages.length]);
 
+  // 3. Handle Typing Broadcast
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const text = e.target.value;
+    setInputText(text);
+
+    if (channelRef.current && user) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: {
+          userId: user.id,
+          userName: user.full_name,
+          nickname: activeMember?.nickname || user.full_name?.split(' ')[0],
+          avatarUrl: user.avatar_url,
+        },
+      });
+
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+
+      typingTimeoutRef.current = setTimeout(() => {
+        channelRef.current?.send({
+          type: 'broadcast',
+          event: 'stop_typing',
+          payload: { userId: user.id },
+        });
+      }, 2500);
+    }
+  };
+
+  // 4. Instant Optimistic Send Message
   const handleSendText = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || isSending) return;
-
     const text = inputText.trim();
+    if (!text || !user || !currentFamily) return;
+
+    // Clear input immediately for instant responsiveness
     setInputText('');
-    setIsSending(true);
+
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'stop_typing',
+        payload: { userId: user.id },
+      });
+    }
+
+    // Create optimistic message
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg: Message = {
+      id: tempId,
+      family_id: currentFamily.id,
+      sender_id: user.id,
+      content: text,
+      is_edited: false,
+      created_at: new Date().toISOString(),
+      sender_name: user.full_name,
+      sender_nickname: activeMember?.nickname,
+      sender_avatar: user.avatar_url,
+    };
+
+    // Instant local state update (0 ms lag)
+    setMessages((prev) => [...prev, optimisticMsg]);
+    scrollToBottom();
 
     try {
       const res = await api.post<Message>('/messages/', {
         content: text,
       });
-      setMessages((prev) => [...prev, res.data]);
-      scrollToBottom();
+
+      // Replace temp message with server confirmed message
+      setMessages((prev) => prev.map((m) => (m.id === tempId ? res.data : m)));
     } catch (err: any) {
       setError('Mesaj gönderilemedi: ' + err.message);
-    } finally {
-      setIsSending(false);
+      // Remove temp message on error
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
     }
   };
 
+  // 5. Photo Upload with Optimistic Loading
   const handlePhotoUpload = async (file: File) => {
     setIsUploading(true);
     setError(null);
@@ -86,7 +248,7 @@ export const ChatPage: React.FC = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      // Upload via media endpoint
+      // Upload to storage
       const mediaRes = await api.post('/media/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -122,8 +284,7 @@ export const ChatPage: React.FC = () => {
         const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
         await handlePhotoUpload(file);
       }
-    } catch (err) {
-      // User cancelled or web fallback
+    } catch {
       fileInputRef.current?.click();
     }
   };
@@ -179,6 +340,7 @@ export const ChatPage: React.FC = () => {
         ) : (
           messages.map((msg) => {
             const isMe = msg.sender_id === user?.id;
+            const isTemp = msg.id.startsWith('temp-');
             const senderLabel = isMe
               ? 'Siz'
               : msg.sender_nickname || msg.sender_name?.split(' ')[0] || 'Aile Üyesi';
@@ -199,11 +361,11 @@ export const ChatPage: React.FC = () => {
                 )}
 
                 <div
-                  className={`relative max-w-[82%] rounded-3xl p-3.5 shadow-sm text-sm ${
+                  className={`relative max-w-[82%] rounded-3xl p-3.5 shadow-sm text-sm transition-all ${
                     isMe
                       ? 'bg-family-600 text-white rounded-br-xs'
                       : 'bg-white text-gray-900 rounded-bl-xs border border-gray-100'
-                  }`}
+                  } ${isTemp ? 'opacity-70' : 'opacity-100'}`}
                 >
                   {/* Photo content */}
                   {msg.media_url && (
@@ -220,7 +382,7 @@ export const ChatPage: React.FC = () => {
                   {/* Text content */}
                   {msg.content && <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>}
 
-                  {/* Message Time and Actions */}
+                  {/* Message Time and Status */}
                   <div
                     className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
                       isMe ? 'text-family-100' : 'text-gray-400'
@@ -228,12 +390,21 @@ export const ChatPage: React.FC = () => {
                   >
                     <span>{timeStr}</span>
                     {isMe && (
+                      <span className="ml-0.5">
+                        {isTemp ? (
+                          <Check className="w-3 h-3 opacity-60 inline" />
+                        ) : (
+                          <CheckCheck className="w-3 h-3 text-white inline" />
+                        )}
+                      </span>
+                    )}
+                    {isMe && !isTemp && (
                       <button
                         onClick={() => handleDeleteMessage(msg.id)}
-                        className="opacity-0 group-hover:opacity-100 hover:text-white p-0.5 transition"
+                        className="opacity-0 group-hover:opacity-100 hover:text-white p-0.5 transition ml-1"
                         title="Mesajı Sil"
                       >
-                        <Trash2 className="w-3.5 h-3.5 ml-1" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
@@ -242,6 +413,26 @@ export const ChatPage: React.FC = () => {
             );
           })
         )}
+
+        {/* Dynamic Animated Typing Indicator Bubble */}
+        {typingUsers.length > 0 && (
+          <div className="flex items-center gap-2 animate-fade-in pt-1">
+            <div className="w-7 h-7 rounded-full bg-family-100 text-family-700 flex items-center justify-center font-bold text-xs shadow-xs">
+              {typingUsers[0].nickname?.[0] || typingUsers[0].userName?.[0] || 'A'}
+            </div>
+            <div className="bg-white px-3.5 py-2 rounded-2xl rounded-bl-xs shadow-xs border border-gray-100 flex items-center gap-2">
+              <span className="text-xs font-semibold text-gray-700">
+                {typingUsers.map((u) => u.nickname || u.userName.split(' ')[0]).join(', ')} yazıyor
+              </span>
+              <div className="flex items-center gap-1 pt-0.5">
+                <span className="w-1.5 h-1.5 bg-family-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1.5 h-1.5 bg-family-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-1.5 h-1.5 bg-family-500 rounded-full animate-bounce" />
+              </div>
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -269,17 +460,17 @@ export const ChatPage: React.FC = () => {
           <input
             type="text"
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={handleInputChange}
             placeholder="Bir mesaj yazın..."
             className="flex-1 px-4 py-3 bg-gray-100 border-none rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-family-500 transition"
           />
 
           <button
             type="submit"
-            disabled={!inputText.trim() || isSending}
+            disabled={!inputText.trim()}
             className="w-11 h-11 rounded-2xl bg-family-600 hover:bg-family-700 active:scale-95 disabled:opacity-50 text-white flex items-center justify-center shadow-md shadow-family-600/30 transition flex-shrink-0"
           >
-            {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+            <Send className="w-5 h-5" />
           </button>
         </form>
       </div>
