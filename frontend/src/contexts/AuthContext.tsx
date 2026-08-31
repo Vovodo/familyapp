@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
 import { api, storage } from '../services/api';
+import { notificationService } from '../services/notificationService';
 
 interface AuthContextType {
   user: User | null;
@@ -131,6 +132,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       if (token) {
         await api.post('/auth/logout').catch(() => {});
+        await notificationService.unregisterToken().catch(() => {});
       }
     } finally {
       await storage.remove('auth_token');

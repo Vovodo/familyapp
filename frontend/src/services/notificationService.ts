@@ -1,6 +1,8 @@
 import { Capacitor } from '@capacitor/core';
+import { PushNotifications, Token, ActionPerformed } from '@capacitor/push-notifications';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { api, storage } from './api';
 
 export const HEART_CHANNEL_ID = 'family_heart_channel';
 export const GENERAL_CHANNEL_ID = 'family_general_channel';
@@ -51,7 +53,7 @@ class NotificationService {
     }
 
     try {
-      // 1. Create Android High Priority Notification Channels
+      // 1. Create Android High Priority Notification Channels (For both Local & FCM Push)
       await LocalNotifications.createChannel({
         id: HEART_CHANNEL_ID,
         name: 'Aile Kalp Bildirimleri ❤️',
@@ -76,9 +78,12 @@ class NotificationService {
         lightColor: '#3B82F6',
       }).catch(() => {});
 
-      // 2. Notification Click Handler
+      // 2. Setup Firebase Cloud Messaging (FCM) Push Listeners
+      await this.setupPushNotifications();
+
+      // 3. Local Notification Click Handler
       LocalNotifications.addListener('localNotificationActionPerformed', (notification) => {
-        console.log('[NotificationService] Notification tapped:', notification);
+        console.log('[NotificationService] Local notification tapped:', notification);
         const extra = notification.notification.extra || {};
         if (extra.type === 'heart') {
           playHeartVibration();
@@ -93,12 +98,91 @@ class NotificationService {
     }
   }
 
+  private async setupPushNotifications() {
+    if (!Capacitor.isNativePlatform()) return;
+
+    try {
+      // Register with Apple / Google (FCM) to receive push token
+      await PushNotifications.addListener('registration', async (token: Token) => {
+        console.log('[FCM] Push token received:', token.value);
+        await this.registerTokenWithBackend(token.value);
+      });
+
+      await PushNotifications.addListener('registrationError', (error: any) => {
+        console.warn('[FCM] Registration error:', error);
+      });
+
+      // Foreground FCM push received
+      await PushNotifications.addListener('pushNotificationReceived', (notification) => {
+        console.log('[FCM] Push received in foreground:', notification);
+        const data = notification.data || {};
+        if (data.type === 'heart') {
+          this.notifyHeartReceived({
+            sender_name: data.sender_name || 'Aile Bireyi',
+            event_id: data.heart_id || `heart-${Date.now()}`,
+          });
+        }
+      });
+
+      // User tapped push notification (from background / killed state)
+      await PushNotifications.addListener('pushNotificationActionPerformed', (action: ActionPerformed) => {
+        console.log('[FCM] Push action performed:', action);
+        const data = action.notification.data || {};
+        if (data.type === 'heart') {
+          this.notifyHeartReceived({
+            sender_name: data.sender_name || 'Aile Bireyi',
+            event_id: data.heart_id || `heart-${Date.now()}`,
+          });
+        }
+      });
+
+      // Check / request FCM permission
+      const status = await PushNotifications.checkPermissions();
+      if (status.receive === 'granted') {
+        await PushNotifications.register();
+      }
+    } catch (e) {
+      console.warn('[FCM] Setup error:', e);
+    }
+  }
+
+  public async registerTokenWithBackend(token: string) {
+    try {
+      let deviceId = await storage.get('device_uuid');
+      if (!deviceId) {
+        deviceId = `dev-${Math.random().toString(36).substring(2, 10)}-${Date.now()}`;
+        await storage.set('device_uuid', deviceId);
+      }
+
+      await api.post('/notifications/device-token', {
+        token,
+        device_id: deviceId,
+        platform: 'android',
+      });
+      console.log('[FCM] Device token registered with backend successfully.');
+    } catch (err) {
+      console.warn('[FCM] Failed to register device token with backend:', err);
+    }
+  }
+
+  public async unregisterToken() {
+    try {
+      const deviceId = await storage.get('device_uuid');
+      if (deviceId) {
+        await api.delete(`/notifications/device-token?device_id=${deviceId}`);
+        console.log('[FCM] Device token unregistered from backend.');
+      }
+    } catch (err) {
+      console.warn('[FCM] Failed to unregister device token:', err);
+    }
+  }
+
   public async notifyHeartReceived(data: { sender_name: string; event_id: string }) {
     // A. Trigger in-app floating animation & vibration
     this.onHeartReceivedCallbacks.forEach((cb) => cb(data));
     playHeartVibration();
 
-    // B. Native Android Notification
+    // B. Schedule local notification if needed (when app is in foreground)
     if (Capacitor.isNativePlatform()) {
       try {
         await LocalNotifications.schedule({
@@ -137,10 +221,15 @@ class NotificationService {
 
     if (Capacitor.isNativePlatform()) {
       try {
-        const notifStatus = await LocalNotifications.checkPermissions();
-        hasNotification = notifStatus.display === 'granted';
+        const notifStatus = await PushNotifications.checkPermissions();
+        hasNotification = notifStatus.receive === 'granted';
       } catch {
-        hasNotification = false;
+        try {
+          const localStatus = await LocalNotifications.checkPermissions();
+          hasNotification = localStatus.display === 'granted';
+        } catch {
+          hasNotification = false;
+        }
       }
     } else if (typeof window !== 'undefined' && 'Notification' in window) {
       hasNotification = Notification.permission === 'granted';
@@ -155,8 +244,12 @@ class NotificationService {
   public async requestAllPermissions(): Promise<boolean> {
     try {
       if (Capacitor.isNativePlatform()) {
-        const notifRes = await LocalNotifications.requestPermissions();
-        return notifRes.display === 'granted';
+        const pushRes = await PushNotifications.requestPermissions();
+        if (pushRes.receive === 'granted') {
+          await PushNotifications.register();
+        }
+        await LocalNotifications.requestPermissions();
+        return pushRes.receive === 'granted';
       } else if (typeof window !== 'undefined' && 'Notification' in window) {
         const res = await Notification.requestPermission();
         return res === 'granted';
