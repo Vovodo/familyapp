@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { App as CapApp } from '@capacitor/app';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { FamilyProvider } from './contexts/FamilyContext';
 import { MobileLayout } from './components/layout/MobileLayout';
@@ -14,6 +15,7 @@ import { NotesPage } from './pages/notes/NotesPage';
 import { RemindersPage } from './pages/reminders/RemindersPage';
 import { FamilySettingsPage } from './pages/family/FamilySettingsPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
+import { liveUpdateService } from './services/liveUpdate';
 import { Loader2, Heart } from 'lucide-react';
 
 const queryClient = new QueryClient({
@@ -68,6 +70,21 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 export const App: React.FC = () => {
+  // Check for Live OTA Updates on startup and on foreground resume
+  useEffect(() => {
+    liveUpdateService.checkForUpdate();
+
+    const stateListener = CapApp.addListener('appStateChange', (state) => {
+      if (state.isActive) {
+        liveUpdateService.checkForUpdate();
+      }
+    });
+
+    return () => {
+      stateListener.then((l) => l.remove()).catch(() => {});
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
