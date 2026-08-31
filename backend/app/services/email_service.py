@@ -78,6 +78,8 @@ class EmailService:
                 else:
                     return {"active": True, "status": "Aktif", "detail": "Resend API anahtarı mevcut"}
             except Exception as e:
+                return {"active": False, "status": "Hata", "detail": f"Bağlantı hatası: {str(e)}"}
+
     async def send_verification_email(self, to: str, code: str) -> Dict[str, Any]:
         """
         Sends an elegant email verification code OTP.
