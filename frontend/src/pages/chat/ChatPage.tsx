@@ -7,6 +7,8 @@ import { useFamily } from '../../contexts/FamilyContext';
 import { Message } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
+import { localChatStorage } from '../../services/localChatStorage';
+import { mediaStorage } from '../../services/mediaStorage';
 import { MessageBubble } from '../../components/chat/MessageBubble';
 import { ChatInput } from '../../components/chat/ChatInput';
 import { DateSeparator } from '../../components/chat/DateSeparator';
@@ -68,19 +70,35 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  // 2. Fetch Initial Messages (Latest 40)
-  const fetchInitialMessages = async () => {
+  // 2. Fetch Initial Messages: Instant Local Cache (0ms) + Background Sync
+  const loadMessagesInstantAndSync = async () => {
     if (!currentFamily) return;
-    setIsLoading(true);
+
+    // A. INSTANT 0ms LOAD FROM LOCAL DEVICE STORAGE
+    const cached = await localChatStorage.getMessages(currentFamily.id);
+    if (cached && cached.length > 0) {
+      setMessages(cached);
+      setIsLoading(false);
+      setTimeout(() => scrollToBottom(false), 20);
+    }
+
+    // B. BACKGROUND SYNC WITH SERVER
     try {
       const res = await api.get<Message[]>('/messages/', {
-        params: { limit: 40 },
+        params: { limit: 50 },
       });
-      setMessages(res.data.map((m) => ({ ...m, status: 'sent' })));
-      setHasMore(res.data.length >= 40);
-      setTimeout(() => scrollToBottom(false), 50);
+      
+      const merged = await localChatStorage.mergeMessages(currentFamily.id, res.data);
+      setMessages(merged);
+      setHasMore(res.data.length >= 50);
+      
+      if (!cached || cached.length === 0) {
+        setTimeout(() => scrollToBottom(false), 30);
+      }
     } catch (err: any) {
-      setError(err.message);
+      if (!cached || cached.length === 0) {
+        setError(err.message);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -105,14 +123,8 @@ export const ChatPage: React.FC = () => {
       if (res.data.length === 0) {
         setHasMore(false);
       } else {
-        setMessages((prev) => {
-          // Prepend older messages avoiding any duplicates
-          const existingIds = new Set(prev.map((m) => m.id));
-          const newOlder = res.data
-            .filter((m) => !existingIds.has(m.id))
-            .map((m) => ({ ...m, status: 'sent' as const }));
-          return [...newOlder, ...prev];
-        });
+        const merged = await localChatStorage.mergeMessages(currentFamily.id, res.data);
+        setMessages(merged);
 
         // Compensate scroll position immediately so user's view does not jump
         requestAnimationFrame(() => {
@@ -135,7 +147,7 @@ export const ChatPage: React.FC = () => {
 
   // 4. Setup Supabase Realtime Channel
   useEffect(() => {
-    fetchInitialMessages();
+    loadMessagesInstantAndSync();
 
     if (!currentFamily || !supabase) return;
 
@@ -148,21 +160,28 @@ export const ChatPage: React.FC = () => {
 
     // Listen for typing broadcast events
     channel.on('broadcast', { event: 'typing' }, (payload) => {
-      const data = payload.payload as TypingUser;
-      if (data.userId === user?.id) return;
+      const data = payload.payload;
+      if (!data || data.user_id === user?.id) return;
 
-      setTypingUsers((prev) => {
-        const filtered = prev.filter((u) => u.userId !== data.userId);
-        return [...filtered, { ...data, timestamp: Date.now() }];
-      });
+      if (data.is_typing) {
+        setTypingUsers((prev) => {
+          const filtered = prev.filter((u) => u.userId !== data.user_id);
+          return [
+            ...filtered,
+            {
+              userId: data.user_id,
+              userName: data.user_name || 'Aile Üyesi',
+              nickname: data.nickname,
+              timestamp: Date.now(),
+            },
+          ];
+        });
+      } else {
+        setTypingUsers((prev) => prev.filter((u) => u.userId !== data.user_id));
+      }
     });
 
-    channel.on('broadcast', { event: 'stop_typing' }, (payload) => {
-      const { userId } = payload.payload;
-      setTypingUsers((prev) => prev.filter((u) => u.userId !== userId));
-    });
-
-    // Realtime Postgres INSERT
+    // Listen for database inserts, updates, deletes with strict family_id filter
     channel.on(
       'postgres_changes',
       {
@@ -172,57 +191,28 @@ export const ChatPage: React.FC = () => {
         filter: `family_id=eq.${currentFamily.id}`,
       },
       (payload) => {
-        const newMsg = payload.new as Message;
-
-        setMessages((prev) => {
-          // Robust Multi-Key Deduplication check:
-          // 1. Exact ID match
-          // 2. Client message ID match
-          // 3. Optimistic match (same sender, same content, status sending/temp ID)
-          const matchIndex = prev.findIndex(
-            (m) =>
-              m.id === newMsg.id ||
-              (newMsg.client_message_id && m.client_message_id === newMsg.client_message_id) ||
-              ((m.status === 'sending' || m.id.startsWith('cmsg-') || m.id.startsWith('temp-')) &&
-                m.sender_id === newMsg.sender_id &&
-                m.content === newMsg.content)
-          );
-
-          // Lookup sender info from family members
-          const senderMember = currentFamily.members?.find((m) => m.user_id === newMsg.sender_id);
-          const enrichedMsg: Message = {
-            ...newMsg,
-            status: 'sent',
-            sender_name: senderMember?.user?.full_name || 'Aile Üyesi',
-            sender_nickname: senderMember?.nickname,
-            sender_avatar: senderMember?.user?.avatar_url,
-          };
-
-          if (matchIndex !== -1) {
-            // Replace the optimistic message in-place
-            const nextList = [...prev];
-            nextList[matchIndex] = enrichedMsg;
-            return nextList;
-          }
-
-          // If not found in current list, append as new message
-          return [...prev, enrichedMsg];
-        });
-
-        // Remove sender from typing list
-        setTypingUsers((prev) => prev.filter((u) => u.userId !== newMsg.sender_id));
-
-        // Auto-scroll if user is near bottom or if sender is current user
-        if (isNearBottomRef.current || newMsg.sender_id === user?.id) {
-          setTimeout(() => scrollToBottom(true), 30);
-        } else {
-          setUnreadCount((c) => c + 1);
-          setShowScrollBottom(true);
-        }
+        handleIncomingMessage(payload.new as Message);
       }
     );
 
-    // Realtime Postgres DELETE
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `family_id=eq.${currentFamily.id}`,
+      },
+      (payload) => {
+        const updated = payload.new as Message;
+        setMessages((prev) => {
+          const next: Message[] = prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m));
+          localChatStorage.saveMessages(currentFamily.id, next);
+          return next;
+        });
+      }
+    );
+
     channel.on(
       'postgres_changes',
       {
@@ -232,159 +222,227 @@ export const ChatPage: React.FC = () => {
         filter: `family_id=eq.${currentFamily.id}`,
       },
       (payload) => {
-        const deletedId = (payload.old as any).id;
-        setMessages((prev) => prev.filter((m) => m.id !== deletedId));
+        const deletedId = payload.old.id;
+        setMessages((prev) => {
+          const next = prev.filter((m) => m.id !== deletedId);
+          localChatStorage.saveMessages(currentFamily.id, next);
+          return next;
+        });
       }
     );
 
-    channel.subscribe();
-    channelRef.current = channel;
-
-    // Periodically clean stale typing users (> 3.5s)
-    const cleanupInterval = setInterval(() => {
-      const now = Date.now();
-      setTypingUsers((prev) => prev.filter((u) => now - u.timestamp < 3500));
-    }, 1500);
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        channelRef.current = channel;
+      }
+    });
 
     return () => {
-      clearInterval(cleanupInterval);
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
       }
     };
-  }, [currentFamily?.id, user?.id]);
+  }, [currentFamily?.id]);
 
-  // 5. Send Typing Broadcasts
-  const handleStartTyping = useCallback(() => {
-    if (channelRef.current && user) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'typing',
-        payload: {
-          userId: user.id,
-          userName: user.full_name,
-          nickname: activeMember?.nickname || user.full_name?.split(' ')[0],
-          avatarUrl: user.avatar_url,
-        },
+  // Clean stale typing indicators every 2 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setTypingUsers((prev) => prev.filter((u) => now - u.timestamp < 3500));
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 5. Deterministic Realtime Message Handler
+  const handleIncomingMessage = useCallback(
+    (newMsg: Message) => {
+      if (!currentFamily) return;
+
+      setMessages((prev) => {
+        // A. Match by permanent server ID
+        const existsByServerId = prev.some((m) => m.id === newMsg.id);
+        if (existsByServerId) {
+          return prev.map((m) => (m.id === newMsg.id ? { ...newMsg, status: 'sent' as const } : m));
+        }
+
+        // B. Match by client_message_id (Replace optimistic placeholder)
+        if (newMsg.client_message_id) {
+          const matchedIndex = prev.findIndex(
+            (m) => m.client_message_id === newMsg.client_message_id || m.id === newMsg.client_message_id
+          );
+          if (matchedIndex !== -1) {
+            const updated = [...prev];
+            updated[matchedIndex] = { ...newMsg, status: 'sent' as const };
+            localChatStorage.saveMessages(currentFamily.id, updated);
+            return updated;
+          }
+        }
+
+        // C. Clean fallback: Check duplicate optimistic text/media
+        if (newMsg.sender_id === user?.id) {
+          const optimisticIndex = prev.findIndex(
+            (m) =>
+              (m.status === 'sending' || m.status === 'failed') &&
+              m.sender_id === user?.id &&
+              ((newMsg.content && m.content === newMsg.content) ||
+                (newMsg.media_url && m.media_url === newMsg.media_url))
+          );
+          if (optimisticIndex !== -1) {
+            const updated = [...prev];
+            updated[optimisticIndex] = { ...newMsg, status: 'sent' as const };
+            localChatStorage.saveMessages(currentFamily.id, updated);
+            return updated;
+          }
+        }
+
+        // D. Brand new message from another user
+        const finalMsgs: Message[] = [...prev, { ...newMsg, status: 'sent' as const }];
+        localChatStorage.saveMessages(currentFamily.id, finalMsgs);
+        return finalMsgs;
       });
-    }
+
+      // Handle unread counts and auto-scroll
+      if (isNearBottomRef.current || newMsg.sender_id === user?.id) {
+        setTimeout(() => scrollToBottom(true), 30);
+      } else {
+        setUnreadCount((c) => c + 1);
+      }
+    },
+    [user?.id, currentFamily, scrollToBottom]
+  );
+
+  // 6. Typing Broadcast Handlers
+  const handleStartTyping = useCallback(() => {
+    if (!channelRef.current || !user) return;
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: {
+        user_id: user.id,
+        user_name: user.full_name,
+        nickname: activeMember?.nickname,
+        is_typing: true,
+      },
+    });
   }, [user, activeMember]);
 
   const handleStopTyping = useCallback(() => {
-    if (channelRef.current && user) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'stop_typing',
-        payload: { userId: user.id },
-      });
-    }
+    if (!channelRef.current || !user) return;
+    channelRef.current.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: {
+        user_id: user.id,
+        is_typing: false,
+      },
+    });
   }, [user]);
 
-  // 6. Instant Optimistic Message Send (<16ms)
-  const handleSendText = useCallback(
-    async (text: string) => {
-      if (!user || !currentFamily) return;
+  // 7. Optimistic Text Message Sending
+  const handleSendText = async (text: string) => {
+    if (!user || !currentFamily || !text.trim()) return;
 
-      const clientMsgId = `cmsg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      const optimisticMsg: Message = {
-        id: clientMsgId,
-        client_message_id: clientMsgId,
-        family_id: currentFamily.id,
-        sender_id: user.id,
+    const clientMsgId = `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const optimisticMsg: Message = {
+      id: clientMsgId,
+      client_message_id: clientMsgId,
+      family_id: currentFamily.id,
+      sender_id: user.id,
+      content: text,
+      is_edited: false,
+      created_at: new Date().toISOString(),
+      sender_name: user.full_name,
+      sender_nickname: activeMember?.nickname,
+      sender_avatar: user.avatar_url,
+      status: 'sending' as const,
+    };
+
+    setMessages((prev) => {
+      const next: Message[] = [...prev, optimisticMsg];
+      localChatStorage.saveMessages(currentFamily.id, next);
+      return next;
+    });
+    setTimeout(() => scrollToBottom(true), 20);
+
+    try {
+      const res = await api.post<Message>('/messages/', {
         content: text,
-        is_edited: false,
-        created_at: new Date().toISOString(),
-        sender_name: user.full_name,
-        sender_nickname: activeMember?.nickname,
-        sender_avatar: user.avatar_url,
-        status: 'sending',
-        retryPayload: { content: text },
-      };
+        client_message_id: clientMsgId,
+      });
 
-      // 0 ms local state update
-      setMessages((prev) => [...prev, optimisticMsg]);
-      setTimeout(() => scrollToBottom(true), 20);
+      const serverMsg = res.data;
+      setMessages((prev) => {
+        const alreadyHasServerId = prev.some((m) => m.id === serverMsg.id);
+        if (alreadyHasServerId) {
+          const filtered = prev.filter((m) => m.id !== clientMsgId && m.client_message_id !== clientMsgId);
+          localChatStorage.saveMessages(currentFamily.id, filtered);
+          return filtered;
+        }
 
-      try {
-        const res = await api.post<Message>('/messages/', {
-          content: text,
-          client_message_id: clientMsgId,
-        });
-
-        const serverMsg = res.data;
-
-        // Reconcile with state:
-        // If Realtime already added serverMsg.id, remove the optimistic clientMsgId
-        // Otherwise replace clientMsgId with serverMsg
-        setMessages((prev) => {
-          const alreadyHasServerId = prev.some((m) => m.id === serverMsg.id);
-          if (alreadyHasServerId) {
-            // Realtime already delivered it; remove the optimistic placeholder
-            return prev.filter((m) => m.id !== clientMsgId && m.client_message_id !== clientMsgId);
-          }
-          // Replace optimistic placeholder with server-confirmed message
-          return prev.map((m) =>
-            m.id === clientMsgId || m.client_message_id === clientMsgId
-              ? { ...serverMsg, status: 'sent' }
-              : m
-          );
-        });
-      } catch (err: any) {
-        console.error('Send message failed:', err);
-        // Mark as failed with retry action
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.client_message_id === clientMsgId || m.id === clientMsgId
-              ? { ...m, status: 'failed' }
-              : m
-          )
+        const next: Message[] = prev.map((m) =>
+          m.id === clientMsgId || m.client_message_id === clientMsgId
+            ? { ...serverMsg, status: 'sent' as const }
+            : m
         );
-      }
-    },
-    [user, currentFamily, activeMember, scrollToBottom]
-  );
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
+    } catch (err) {
+      setMessages((prev) => {
+        const next: Message[] = prev.map((m) => (m.id === clientMsgId ? { ...m, status: 'failed' as const } : m));
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
+    }
+  };
 
-  // 7. Retry Failed Message
   const handleRetry = useCallback(
     async (failedMsg: Message) => {
-      if (!failedMsg.retryPayload?.content) return;
+      if (!currentFamily || !user) return;
 
-      // Reset to sending
       setMessages((prev) =>
-        prev.map((m) => (m.id === failedMsg.id ? { ...m, status: 'sending' } : m))
+        prev.map((m) => (m.id === failedMsg.id ? { ...m, status: 'sending' as const } : m))
       );
 
       try {
-        const res = await api.post<Message>('/messages/', {
-          content: failedMsg.retryPayload.content,
-          client_message_id: failedMsg.client_message_id,
-        });
+        const payload: any = {
+          client_message_id: failedMsg.client_message_id || failedMsg.id,
+        };
+        if (failedMsg.content) payload.content = failedMsg.content;
+        if (failedMsg.media_url) payload.media_url = failedMsg.media_url;
+        if (failedMsg.media_type) payload.media_type = failedMsg.media_type;
 
+        const res = await api.post<Message>('/messages/', payload);
         const serverMsg = res.data;
+
         setMessages((prev) => {
-          const alreadyHasServerId = prev.some((m) => m.id === serverMsg.id && m.id !== failedMsg.id);
-          if (alreadyHasServerId) {
-            return prev.filter((m) => m.id !== failedMsg.id);
-          }
-          return prev.map((m) => (m.id === failedMsg.id ? { ...serverMsg, status: 'sent' } : m));
+          const next: Message[] = prev.map((m) => (m.id === failedMsg.id ? { ...serverMsg, status: 'sent' as const } : m));
+          localChatStorage.saveMessages(currentFamily.id, next);
+          return next;
         });
       } catch {
         setMessages((prev) =>
-          prev.map((m) => (m.id === failedMsg.id ? { ...m, status: 'failed' } : m))
+          prev.map((m) => (m.id === failedMsg.id ? { ...m, status: 'failed' as const } : m))
         );
       }
     },
-    []
+    [currentFamily, user]
   );
 
-  // 8. Photo Upload with Optimistic UI
-  const handlePhotoUpload = async (file: File) => {
+  // 8. Photo Upload with Local Phone Storage Backup
+  const handlePhotoUpload = async (file: File, base64Preview?: string) => {
     if (!user || !currentFamily) return;
     setIsUploading(true);
     setError(null);
 
     const clientMsgId = `cmsg-photo-${Date.now()}`;
-    const localPreviewUrl = URL.createObjectURL(file);
+    const localPreviewUrl = base64Preview ? `data:${file.type};base64,${base64Preview}` : URL.createObjectURL(file);
+
+    // Save a high-res copy to user's phone in 'Ailem' folder
+    if (base64Preview) {
+      mediaStorage.savePhotoLocally(base64Preview, `ailem_${Date.now()}.jpg`);
+    }
 
     const optimisticMsg: Message = {
       id: clientMsgId,
@@ -399,10 +457,14 @@ export const ChatPage: React.FC = () => {
       sender_name: user.full_name,
       sender_nickname: activeMember?.nickname,
       sender_avatar: user.avatar_url,
-      status: 'sending',
+      status: 'sending' as const,
     };
 
-    setMessages((prev) => [...prev, optimisticMsg]);
+    setMessages((prev) => {
+      const next: Message[] = [...prev, optimisticMsg];
+      localChatStorage.saveMessages(currentFamily.id, next);
+      return next;
+    });
     setTimeout(() => scrollToBottom(true), 20);
 
     try {
@@ -424,52 +486,80 @@ export const ChatPage: React.FC = () => {
       setMessages((prev) => {
         const alreadyHasServerId = prev.some((m) => m.id === serverMsg.id);
         if (alreadyHasServerId) {
-          return prev.filter((m) => m.id !== clientMsgId && m.client_message_id !== clientMsgId);
+          const filtered = prev.filter((m) => m.id !== clientMsgId && m.client_message_id !== clientMsgId);
+          localChatStorage.saveMessages(currentFamily.id, filtered);
+          return filtered;
         }
-        return prev.map((m) =>
+        const next: Message[] = prev.map((m) =>
           m.id === clientMsgId || m.client_message_id === clientMsgId
-            ? { ...serverMsg, status: 'sent' }
+            ? { ...serverMsg, status: 'sent' as const }
             : m
         );
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
       });
     } catch (err: any) {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === clientMsgId ? { ...m, status: 'failed' } : m))
-      );
+      setMessages((prev) => {
+        const next: Message[] = prev.map((m) => (m.id === clientMsgId ? { ...m, status: 'failed' as const } : m));
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
       setError('Fotoğraf yüklenemedi: ' + err.message);
     } finally {
       setIsUploading(false);
     }
   };
 
-  const handleCameraClick = async () => {
+  // Helper: Convert Base64 string to Blob
+  const base64ToBlob = (base64: string, mimeType = 'image/jpeg'): Blob => {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+  };
+
+  const handleCameraClick = async (source: 'camera' | 'photos') => {
     try {
       const image = await CapCamera.getPhoto({
         quality: 85,
         allowEditing: false,
-        resultType: CameraResultType.Uri,
-        source: CameraSource.Prompt,
+        resultType: CameraResultType.Base64,
+        source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
       });
 
-      if (image.webPath) {
-        const blob = await fetch(image.webPath).then((r) => r.blob());
-        const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        await handlePhotoUpload(file);
+      if (image.base64String) {
+        const mimeType = image.format ? `image/${image.format}` : 'image/jpeg';
+        const blob = base64ToBlob(image.base64String, mimeType);
+        const file = new File([blob], `photo_${Date.now()}.${image.format || 'jpg'}`, { type: mimeType });
+        await handlePhotoUpload(file, image.base64String);
       }
-    } catch {
+    } catch (err: any) {
+      console.warn('Capacitor camera error, using fallback:', err);
       fileInputRef.current?.click();
     }
   };
 
-  const handleDeleteMessage = useCallback(async (msgId: string) => {
-    if (!confirm('Bu mesajı silmek istiyor musunuz?')) return;
-    try {
-      await api.delete(`/messages/${msgId}`);
-      setMessages((prev) => prev.filter((m) => m.id !== msgId));
-    } catch (err: any) {
-      alert('Mesaj silinemedi: ' + err.message);
-    }
-  }, []);
+  const handleDeleteMessage = useCallback(
+    async (msgId: string) => {
+      if (!confirm('Bu mesajı silmek istiyor musunuz?')) return;
+      try {
+        await api.delete(`/messages/${msgId}`);
+        setMessages((prev) => {
+          const next = prev.filter((m) => m.id !== msgId);
+          if (currentFamily) {
+            localChatStorage.saveMessages(currentFamily.id, next);
+          }
+          return next;
+        });
+      } catch (err: any) {
+        alert('Mesaj silinemedi: ' + err.message);
+      }
+    },
+    [currentFamily]
+  );
 
   // 9. Memoized Grouping and Date Calculation
   const renderedMessageList = useMemo(() => {

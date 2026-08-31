@@ -7,9 +7,7 @@ import {
   Globe,
   Search,
   X,
-  Edit2,
   Loader2,
-  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -130,16 +128,16 @@ export const NotesPage: React.FC = () => {
   });
 
   return (
-    <div className="p-4 space-y-4 max-w-md mx-auto">
+    <div className="w-full max-w-full px-3 py-3 space-y-3.5 mx-auto overflow-x-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-black text-gray-900">Aile Notları 📝</h2>
-          <p className="text-xs text-gray-500">Ortak bilgiler ve özel notlarınız</p>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="text-lg font-black text-gray-900 truncate">Aile Notları 📝</h2>
+          <p className="text-xs text-gray-500 truncate">Ortak bilgiler ve özel notlarınız</p>
         </div>
         <button
           onClick={openCreateModal}
-          className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-xs rounded-2xl flex items-center gap-1.5 shadow-md shadow-sky-600/20"
+          className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm flex-shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span>Yeni Not</span>
@@ -147,22 +145,23 @@ export const NotesPage: React.FC = () => {
       </div>
 
       {/* Search and Filters */}
-      <div className="space-y-2">
-        <div className="relative">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
+      <div className="space-y-2 w-full">
+        <div className="relative w-full">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Notlarda ara..."
-            className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-2xl text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-xs"
+            className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs"
           />
         </div>
 
-        <div className="flex gap-1.5">
+        {/* 3-Column Responsive Filters (No Horizontal Overflow) */}
+        <div className="grid grid-cols-3 gap-1.5 w-full">
           <button
             onClick={() => setFilterType('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+            className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition text-center truncate ${
               filterType === 'all' ? 'bg-sky-600 text-white' : 'bg-gray-100 text-gray-600'
             }`}
           >
@@ -170,7 +169,7 @@ export const NotesPage: React.FC = () => {
           </button>
           <button
             onClick={() => setFilterType('public')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+            className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition text-center truncate ${
               filterType === 'public' ? 'bg-sky-600 text-white' : 'bg-gray-100 text-gray-600'
             }`}
           >
@@ -178,7 +177,7 @@ export const NotesPage: React.FC = () => {
           </button>
           <button
             onClick={() => setFilterType('private')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+            className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition text-center truncate ${
               filterType === 'private' ? 'bg-sky-600 text-white' : 'bg-gray-100 text-gray-600'
             }`}
           >
@@ -193,33 +192,33 @@ export const NotesPage: React.FC = () => {
           <Loader2 className="w-8 h-8 text-sky-600 animate-spin" />
         </div>
       ) : filteredNotes.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-3xl p-6 border border-gray-100 shadow-sm">
-          <StickyNote className="w-12 h-12 text-sky-300 mx-auto mb-2" />
+        <div className="text-center py-10 bg-white rounded-2xl p-5 border border-gray-100 shadow-2xs">
+          <StickyNote className="w-10 h-10 text-sky-300 mx-auto mb-2" />
           <h3 className="text-sm font-bold text-gray-800">Not bulunamadı</h3>
           <p className="text-xs text-gray-500 mt-1">Önemli şifreler, tarifler veya notlar ekleyin.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2.5 w-full">
           {filteredNotes.map((note) => {
             const style = COLOR_MAP[note.color] || COLOR_MAP.amber;
             return (
               <div
                 key={note.id}
                 onClick={() => openEditModal(note)}
-                className={`${style.bg} ${style.border} border rounded-3xl p-4 shadow-sm hover:shadow-md active:scale-98 transition cursor-pointer space-y-2`}
+                className={`${style.bg} ${style.border} border rounded-2xl p-3.5 shadow-2xs hover:shadow-xs active:scale-98 transition cursor-pointer space-y-1.5 w-full`}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
                     {note.is_private ? (
-                      <span className="p-1 bg-white/80 rounded-lg text-rose-600 shadow-2xs">
+                      <span className="p-1 bg-white/80 rounded-lg text-rose-600 flex-shrink-0">
                         <Lock className="w-3.5 h-3.5" />
                       </span>
                     ) : (
-                      <span className="p-1 bg-white/80 rounded-lg text-sky-600 shadow-2xs">
+                      <span className="p-1 bg-white/80 rounded-lg text-sky-600 flex-shrink-0">
                         <Globe className="w-3.5 h-3.5" />
                       </span>
                     )}
-                    <h3 className={`text-base font-bold ${style.text} truncate max-w-[200px]`}>
+                    <h3 className={`text-sm font-bold ${style.text} truncate`}>
                       {note.title}
                     </h3>
                   </div>
@@ -229,18 +228,18 @@ export const NotesPage: React.FC = () => {
                       e.stopPropagation();
                       handleDeleteNote(note.id);
                     }}
-                    className="p-1 text-gray-400 hover:text-red-600 transition"
+                    className="p-1 text-gray-400 hover:text-red-600 transition flex-shrink-0"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
 
-                <p className="text-xs text-gray-700 whitespace-pre-wrap line-clamp-4 leading-relaxed font-normal">
+                <p className="text-xs text-gray-700 whitespace-pre-wrap line-clamp-3 leading-relaxed font-normal break-words">
                   {note.content}
                 </p>
 
                 <div className="flex items-center justify-between pt-1 text-[10px] text-gray-400 border-t border-black/5">
-                  <span>{note.author_name}</span>
+                  <span className="truncate">{note.author_name}</span>
                   <span>{format(new Date(note.updated_at), 'd MMM yyyy', { locale: tr })}</span>
                 </div>
               </div>
@@ -249,82 +248,86 @@ export const NotesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Note Modal */}
+      {/* Create / Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl p-5 w-full max-w-sm shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3.5">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-gray-900">
-                {editingNote ? 'Notu Düzenle' : 'Yeni Not Ekle'}
+                {editingNote ? 'Notu Düzenle' : 'Yeni Aile Notu'}
               </h3>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button
+                onClick={() => setShowModal(false)}
+                className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveNote} className="space-y-3">
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Başlık (Örn: Wi-Fi Şifresi)"
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-bold focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-              />
-
-              <textarea
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                rows={5}
-                placeholder="Not içeriğini buraya yazın..."
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-              />
-
-              {/* Color Selector */}
               <div>
-                <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
-                  Not Rengi
-                </label>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Başlık</label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Örn: Wi-Fi Şifresi, Doğalgaz Vanası"
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">İçerik</label>
+                <textarea
+                  rows={4}
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="Notunuzu buraya yazın..."
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  required
+                />
+              </div>
+
+              {/* Color Picker */}
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Renk</label>
                 <div className="flex gap-2">
                   {Object.keys(COLOR_MAP).map((c) => (
                     <button
                       key={c}
                       type="button"
                       onClick={() => setColor(c)}
-                      className={`w-7 h-7 rounded-full border-2 transition ${COLOR_MAP[c].bg} ${
-                        color === c ? 'border-gray-900 scale-110' : 'border-transparent'
-                      }`}
+                      className={`w-7 h-7 rounded-full border-2 transition ${
+                        COLOR_MAP[c].bg
+                      } ${color === c ? 'border-sky-600 scale-110' : 'border-transparent'}`}
                     />
                   ))}
                 </div>
               </div>
 
-              {/* Private Checkbox */}
-              <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer pt-1">
+              {/* Privacy Toggle */}
+              <div className="flex items-center justify-between p-2.5 bg-gray-50 rounded-xl">
+                <div>
+                  <div className="text-xs font-bold text-gray-800">Gizli Not</div>
+                  <div className="text-[10px] text-gray-500">Sadece siz görebilirsiniz</div>
+                </div>
                 <input
                   type="checkbox"
                   checked={isPrivate}
                   onChange={(e) => setIsPrivate(e.target.checked)}
                   className="w-4 h-4 text-sky-600 rounded-md focus:ring-sky-500"
                 />
-                <span>Sadece ben görebileyim (Kişisel Not) 🔒</span>
-              </label>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-2xl text-xs"
-                >
-                  Vazgeç
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="flex-1 py-3 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-1 shadow-md"
-                >
-                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Kaydet'}
-                </button>
               </div>
+
+              <button
+                type="submit"
+                disabled={isSaving || !title.trim() || !content.trim()}
+                className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-95 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-md shadow-sky-600/20 flex items-center justify-center gap-1.5 transition"
+              >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                <span>{editingNote ? 'Güncelle' : 'Kaydet'}</span>
+              </button>
             </form>
           </div>
         </div>

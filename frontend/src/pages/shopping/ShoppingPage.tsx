@@ -53,7 +53,6 @@ export const ShoppingPage: React.FC = () => {
           filter: `family_id=eq.${currentFamily.id}`,
         },
         () => {
-          // Instantly sync list on any DB change
           fetchShoppingList();
         }
       )
@@ -73,7 +72,6 @@ export const ShoppingPage: React.FC = () => {
     setTitle('');
     setIsAdding(true);
 
-    // Optimistic item
     const tempId = `temp-${Date.now()}`;
     const optimisticItem: ShoppingItem = {
       id: tempId,
@@ -106,23 +104,12 @@ export const ShoppingPage: React.FC = () => {
 
   const handleToggle = async (item: ShoppingItem) => {
     const nextState = !item.is_completed;
-    // Instant optimistic update
     setItems((prev) =>
-      prev.map((i) =>
-        i.id === item.id
-          ? {
-              ...i,
-              is_completed: nextState,
-              completed_by_name: nextState ? user?.full_name?.split(' ')[0] : undefined,
-            }
-          : i
-      )
+      prev.map((i) => (i.id === item.id ? { ...i, is_completed: nextState } : i))
     );
 
     try {
-      await api.patch(`/shopping/${item.id}`, {
-        is_completed: nextState,
-      });
+      await api.patch(`/shopping/${item.id}`, { is_completed: nextState });
     } catch (err) {
       fetchShoppingList();
     }
@@ -132,21 +119,20 @@ export const ShoppingPage: React.FC = () => {
     setItems((prev) => prev.filter((i) => i.id !== itemId));
     try {
       await api.delete(`/shopping/${itemId}`);
-    } catch (err: any) {
+    } catch (err) {
       fetchShoppingList();
     }
   };
 
   const handleClearCompleted = async () => {
-    const completedCount = items.filter((i) => i.is_completed).length;
-    if (completedCount === 0) return;
+    const completedIds = items.filter((i) => i.is_completed).map((i) => i.id);
+    if (completedIds.length === 0) return;
 
-    if (!confirm(`${completedCount} tamamlanan ürünü listeden kaldırmak istiyor musunuz?`)) return;
     setItems((prev) => prev.filter((i) => !i.is_completed));
 
     try {
-      await api.delete('/shopping/completed');
-    } catch (err: any) {
+      await Promise.all(completedIds.map((id) => api.delete(`/shopping/${id}`)));
+    } catch {
       fetchShoppingList();
     }
   };
@@ -155,15 +141,15 @@ export const ShoppingPage: React.FC = () => {
   const completedItems = items.filter((i) => i.is_completed);
 
   return (
-    <div className="p-4 space-y-4 max-w-md mx-auto">
+    <div className="w-full max-w-full px-3 py-3 space-y-3.5 mx-auto overflow-x-hidden">
       {/* Header with Title & Clear */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-black text-gray-900 flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="text-lg font-black text-gray-900 flex items-center gap-1.5 truncate">
             <span>Alışveriş Listesi</span>
             <span className="text-emerald-600">🛒</span>
           </h2>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-500 truncate">
             {activeItems.length > 0
               ? `${activeItems.length} alınacak ürün var`
               : 'Tüm ihtiyaçlar alındı! 🎉'}
@@ -173,42 +159,43 @@ export const ShoppingPage: React.FC = () => {
         {completedItems.length > 0 && (
           <button
             onClick={handleClearCompleted}
-            className="text-xs font-bold text-gray-500 hover:text-red-600 px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-red-50 transition flex items-center gap-1"
+            className="text-xs font-bold text-gray-500 hover:text-red-600 px-2.5 py-1.5 rounded-xl bg-gray-100 hover:bg-red-50 transition flex items-center gap-1 flex-shrink-0"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>Alınanları Sil</span>
+            <span className="hidden xs:inline">Alınanları</span>
+            <span>Sil</span>
           </button>
         )}
       </div>
 
       {/* Add Item Form Card */}
-      <div className="bg-white rounded-3xl p-4 shadow-md border border-gray-100">
-        <form onSubmit={handleAddItem} className="space-y-3">
-          <div className="flex gap-2">
+      <div className="bg-white rounded-2xl p-3.5 shadow-sm border border-gray-100 w-full">
+        <form onSubmit={handleAddItem} className="space-y-2.5">
+          <div className="flex gap-2 w-full">
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Ne alınacak? (Örn: Süt, Ekmek)"
-              className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+              placeholder="Ne alınacak? (Örn: Süt)"
+              className="flex-1 min-w-0 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs sm:text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
             />
             <input
               type="text"
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
-              placeholder="1 kg, 2 paket vb."
-              className="w-24 px-3 py-3 bg-gray-50 border border-gray-200 rounded-2xl text-xs text-center focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+              placeholder="1 kg"
+              className="w-20 px-2 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs text-center focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition flex-shrink-0"
             />
           </div>
 
-          {/* Category Badges */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          {/* Fully Responsive 3x2 Grid for Categories (No Horizontal Scrolling) */}
+          <div className="grid grid-cols-3 gap-1.5 w-full">
             {CATEGORIES.map((cat) => (
               <button
                 key={cat}
                 type="button"
                 onClick={() => setCategory(cat)}
-                className={`px-3 py-1 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition text-center truncate ${
                   category === cat
                     ? 'bg-emerald-600 text-white shadow-xs'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -222,7 +209,7 @@ export const ShoppingPage: React.FC = () => {
           <button
             type="submit"
             disabled={!title.trim() || isAdding}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 text-white font-bold rounded-2xl text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 transition"
+            className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-sm flex items-center justify-center gap-1.5 transition"
           >
             {isAdding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             <span>Listeye Ekle</span>
@@ -236,32 +223,32 @@ export const ShoppingPage: React.FC = () => {
           <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
         </div>
       ) : items.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-3xl p-6 border border-gray-100">
-          <ShoppingBag className="w-12 h-12 text-emerald-300 mx-auto mb-2" />
+        <div className="text-center py-10 bg-white rounded-2xl p-5 border border-gray-100">
+          <ShoppingBag className="w-10 h-10 text-emerald-300 mx-auto mb-2" />
           <h3 className="text-sm font-bold text-gray-800">Alışveriş listeniz boş</h3>
           <p className="text-xs text-gray-500 mt-1">Evin ihtiyaçlarını yukarıdan ekleyin.</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2 w-full">
           {/* Active Items */}
           {activeItems.map((item) => (
             <div
               key={item.id}
               onClick={() => handleToggle(item)}
-              className="bg-white rounded-2xl p-3.5 border border-gray-100 shadow-xs flex items-center justify-between gap-3 active:scale-98 transition cursor-pointer hover:border-emerald-200"
+              className="bg-white rounded-2xl p-3 border border-gray-100 shadow-xs flex items-center justify-between gap-2.5 active:scale-98 transition cursor-pointer hover:border-emerald-200 w-full"
             >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-6 h-6 rounded-full border-2 border-emerald-500 flex items-center justify-center text-transparent hover:text-emerald-500">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <div className="w-6 h-6 rounded-full border-2 border-emerald-500 flex items-center justify-center text-transparent hover:text-emerald-500 flex-shrink-0">
                   <Check className="w-3.5 h-3.5" />
                 </div>
-                <div className="truncate">
-                  <div className="text-sm font-bold text-gray-900 truncate">{item.title}</div>
-                  <div className="text-[11px] text-gray-500 flex items-center gap-1.5">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs sm:text-sm font-bold text-gray-900 truncate">{item.title}</div>
+                  <div className="text-[10px] sm:text-[11px] text-gray-500 flex items-center gap-1.5 truncate">
                     <span className="font-semibold text-emerald-700">{item.quantity}</span>
                     <span>•</span>
-                    <span className="bg-gray-100 px-1.5 py-0.2 rounded-md">{item.category}</span>
+                    <span className="bg-gray-100 px-1 rounded-sm">{item.category}</span>
                     <span>•</span>
-                    <span>{item.creator_name?.split(' ')[0]}</span>
+                    <span className="truncate">{item.creator_name?.split(' ')[0]}</span>
                   </div>
                 </div>
               </div>
@@ -271,7 +258,7 @@ export const ShoppingPage: React.FC = () => {
                   e.stopPropagation();
                   handleDelete(item.id);
                 }}
-                className="text-gray-300 hover:text-red-500 p-1.5 rounded-lg transition"
+                className="text-gray-300 hover:text-red-500 p-1 rounded-lg transition flex-shrink-0"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -280,25 +267,25 @@ export const ShoppingPage: React.FC = () => {
 
           {/* Completed Items */}
           {completedItems.length > 0 && (
-            <div className="pt-4 space-y-2">
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">
+            <div className="pt-2 space-y-1.5 w-full">
+              <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider ml-1">
                 Alınanlar ({completedItems.length})
               </h3>
               {completedItems.map((item) => (
                 <div
                   key={item.id}
                   onClick={() => handleToggle(item)}
-                  className="bg-gray-50/80 rounded-2xl p-3 border border-gray-200 flex items-center justify-between gap-3 cursor-pointer opacity-70 hover:opacity-100 transition"
+                  className="bg-gray-50/80 rounded-2xl p-2.5 border border-gray-200 flex items-center justify-between gap-2.5 cursor-pointer opacity-70 hover:opacity-100 transition w-full"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center flex-shrink-0">
-                      <Check className="w-3.5 h-3.5" />
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <div className="w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center flex-shrink-0">
+                      <Check className="w-3 h-3" />
                     </div>
-                    <div className="truncate">
-                      <div className="text-sm font-medium text-gray-500 line-through truncate">
+                    <div className="min-w-0 flex-1 truncate">
+                      <div className="text-xs sm:text-sm font-medium text-gray-500 line-through truncate">
                         {item.title} ({item.quantity})
                       </div>
-                      <div className="text-[10px] text-emerald-600 font-medium">
+                      <div className="text-[10px] text-emerald-600 font-medium truncate">
                         ✓ {item.completed_by_name || 'Alındı'}
                       </div>
                     </div>
@@ -309,9 +296,9 @@ export const ShoppingPage: React.FC = () => {
                       e.stopPropagation();
                       handleDelete(item.id);
                     }}
-                    className="text-gray-300 hover:text-red-500 p-1.5"
+                    className="text-gray-300 hover:text-red-500 p-1 flex-shrink-0"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ))}

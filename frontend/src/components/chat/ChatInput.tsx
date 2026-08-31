@@ -1,9 +1,9 @@
 import React, { useState, useRef } from 'react';
-import { Send, Camera, Loader2 } from 'lucide-react';
+import { Send, Camera, Image as ImageIcon, Loader2, X } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (text: string) => void;
-  onCameraClick: () => void;
+  onCameraClick: (source: 'camera' | 'photos') => void;
   onTyping: () => void;
   onStopTyping: () => void;
   isUploading?: boolean;
@@ -20,6 +20,7 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
     disabled = false,
   }) => {
     const [text, setText] = useState('');
+    const [showAttachMenu, setShowAttachMenu] = useState(false);
     const typingTimeoutRef = useRef<any>(null);
     const isSubmittingRef = useRef(false);
 
@@ -71,7 +72,44 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
     };
 
     return (
-      <div className="bg-white/95 backdrop-blur-md border-t border-gray-200/80 p-2.5 sm:p-3 safe-area-bottom">
+      <div className="bg-white/95 backdrop-blur-md border-t border-gray-200/80 p-2.5 sm:p-3 safe-area-bottom relative">
+        {/* Attachment Options Popup */}
+        {showAttachMenu && (
+          <div className="absolute bottom-full left-4 mb-2 bg-white rounded-2xl shadow-xl border border-gray-100 p-2 flex items-center gap-2 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
+            <button
+              type="button"
+              onClick={() => {
+                setShowAttachMenu(false);
+                onCameraClick('camera');
+              }}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition active:scale-95"
+            >
+              <Camera className="w-4 h-4" />
+              <span>Fotoğraf Çek</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowAttachMenu(false);
+                onCameraClick('photos');
+              }}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs font-bold transition active:scale-95"
+            >
+              <ImageIcon className="w-4 h-4" />
+              <span>Galeriden Seç</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowAttachMenu(false)}
+              className="p-2 text-gray-400 hover:text-gray-600 rounded-xl"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         <form
           onSubmit={handleSubmit}
           className="flex items-center gap-2 max-w-lg mx-auto"
@@ -79,7 +117,7 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
           {/* Camera / Photo Button */}
           <button
             type="button"
-            onClick={onCameraClick}
+            onClick={() => setShowAttachMenu((prev) => !prev)}
             disabled={isUploading || disabled}
             className="w-11 h-11 rounded-2xl bg-gray-100/90 hover:bg-gray-200 active:scale-95 text-gray-600 flex items-center justify-center transition flex-shrink-0 disabled:opacity-50"
             title="Fotoğraf Çek / Yükle"
