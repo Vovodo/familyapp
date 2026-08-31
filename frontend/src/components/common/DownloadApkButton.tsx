@@ -50,7 +50,7 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
           </div>
           <div className="text-left">
             <p className="text-xs font-bold text-emerald-950">Android APK İndir</p>
-            <p className="text-[10px] text-emerald-700">Doğrudan telefona kurun • 13.6 MB</p>
+            <p className="text-[10px] text-emerald-700">Doğrudan telefona kurun • 9.0 MB (FCM Canlı Bildirim)</p>
           </div>
         </div>
         <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-xs">
