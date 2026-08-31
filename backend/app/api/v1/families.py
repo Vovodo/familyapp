@@ -3,6 +3,7 @@ import string
 import time
 import threading
 import uuid
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,6 +26,7 @@ from backend.app.schemas.schemas import (
     FamilyJoin,
     FamilyResponse,
     FamilyMemberResponse,
+    FamilySettingsUpdate,
     HeartEventRequest,
     HeartEventResponse
 )
@@ -39,7 +41,6 @@ _user_heart_timestamps: Dict[str, float] = {}
 _heart_lock = threading.Lock()
 
 
-
 def generate_invite_code(length: int = 6) -> str:
     digits = ''.join(random.choices(string.digits, k=length))
     return f"AILE-{digits}"
@@ -52,17 +53,17 @@ def create_family(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Creates a new family group and sets the current user as the admin.
+    Creates a new family group and sets current user as creator and admin.
     """
     invite_code = generate_invite_code()
-    # Ensure code uniqueness
     while db.query(Family).filter(Family.invite_code == invite_code).first():
         invite_code = generate_invite_code()
 
     family = Family(
         name=family_in.name,
         invite_code=invite_code,
-        created_by=current_user.id
+        created_by=current_user.id,
+        is_public=False
     )
     db.add(family)
     db.flush()
@@ -136,18 +137,93 @@ def get_current_family(
     return family
 
 
-@router.get("/my-families", response_model=List[FamilyResponse])
-def get_my_families(
+@router.patch("/settings", response_model=FamilyResponse)
+def update_family_settings(
+    settings_in: FamilySettingsUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Lists all families that the current user belongs to.
+    Updates family group settings (Name, Public/Private visibility). Only Admin can update.
     """
-    memberships = db.query(FamilyMember).filter(FamilyMember.user_id == current_user.id).all()
-    family_ids = [m.family_id for m in memberships]
-    families = db.query(Family).filter(Family.id.in_(family_ids)).all()
-    return families
+    if member.role != "admin" and member.family.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Aile ayarlarını yalnızca grup yöneticisi değiştirebilir."
+        )
+
+    family = member.family
+    if settings_in.name is not None:
+        clean_name = settings_in.name.strip()
+        if clean_name:
+            family.name = clean_name
+    if settings_in.is_public is not None:
+        family.is_public = settings_in.is_public
+
+    db.commit()
+    db.refresh(family)
+    return family
+
+
+@router.delete("/members/{member_id}", status_code=status.HTTP_200_OK)
+def remove_family_member(
+    member_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    admin_member: FamilyMember = Depends(get_current_admin_member)
+):
+    """
+    Allows the group admin to kick a member from the family group.
+    """
+    target_member = db.query(FamilyMember).filter(
+        FamilyMember.id == member_id,
+        FamilyMember.family_id == admin_member.family_id
+    ).first()
+
+    if not target_member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Üye bulunamadı."
+        )
+
+    if target_member.user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Kendinizi gruptan atamazsınız. 'Aileden Ayrıl' seçeneğini kullanın."
+        )
+
+    # If target is creator, cannot be removed
+    if admin_member.family.created_by == target_member.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Grup kurucusu gruptan çıkarılamaz."
+        )
+
+    db.delete(target_member)
+    db.commit()
+    return {"status": "success", "message": "Üye başarıyla gruptan çıkarıldı."}
+
+
+@router.post("/leave", status_code=status.HTTP_200_OK)
+def leave_family(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Allows a regular member to leave the family.
+    """
+    family = member.family
+    if family.created_by == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Grup kurucusu gruptan ayrılamaz. Grubu tamamen kapatabilir veya devredebilirsiniz."
+        )
+
+    db.delete(member)
+    db.commit()
+    return {"status": "success", "message": "Aile grubundan ayrıldınız."}
 
 
 @router.delete("/{family_id}", status_code=status.HTTP_200_OK)
@@ -157,9 +233,8 @@ def delete_family(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Permanently closes/deletes a family group and all associated cloud data
-    (messages, notes, reminders, shopping items, media, and memberships).
-    Guarantees strict multi-tenant isolation; other family groups remain untouched.
+    Permanently closes/deletes a family group.
+    STRICT RULE: ONLY the original creator of the group can close/delete it.
     """
     family = db.query(Family).filter(Family.id == family_id).first()
     if not family:
@@ -168,19 +243,14 @@ def delete_family(
             detail="Aile grubu bulunamadı."
         )
 
-    # Check permission: User must be a member of this family
-    membership = (
-        db.query(FamilyMember)
-        .filter(FamilyMember.family_id == family_id, FamilyMember.user_id == current_user.id)
-        .first()
-    )
-    if not membership:
+    # Strict Permission Check: Only the creator of the family can delete the group
+    if family.created_by != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu aile grubunu silme yetkiniz yok."
+            detail="Bu aile grubunu yalnızca grubu kuran kurucu üye kapatabilir."
         )
 
-    # Explicitly cascade delete all data belonging to this specific family_id
+    # Cascade delete data for this specific family
     db.query(Message).filter(Message.family_id == family_id).delete(synchronize_session=False)
     db.query(Note).filter(Note.family_id == family_id).delete(synchronize_session=False)
     db.query(Reminder).filter(Reminder.family_id == family_id).delete(synchronize_session=False)
@@ -188,11 +258,10 @@ def delete_family(
     db.query(Media).filter(Media.family_id == family_id).delete(synchronize_session=False)
     db.query(FamilyMember).filter(FamilyMember.family_id == family_id).delete(synchronize_session=False)
 
-    # Delete the family itself
     db.delete(family)
     db.commit()
 
-    logger.info(f"Family {family_id} and all related cloud records deleted by user {current_user.id}")
+    logger.info(f"Family {family_id} deleted by creator {current_user.id}")
     return {"message": "Aile grubu ve tüm verileri kalıcı olarak silindi."}
 
 
@@ -204,12 +273,7 @@ async def send_family_heart(
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Sends an instant love Heart notification and vibration to all other members in the sender's family.
-    1. Authenticated user and family_id are strictly verified server-side.
-    2. Rate limit: 1 heart per 3 seconds per sender.
-    3. Self-exclusion: Sender never receives their own heart notification.
-    4. Isolation: Only members belonging to the exact same family_id receive it.
-    5. Dispatches FCM push notifications to active device tokens + persists event.
+    Sends an instant love Heart notification and vibration to all other members in the family.
     """
     sender_id = current_user.id
     family_id = member.family_id
@@ -226,24 +290,18 @@ async def send_family_heart(
             )
         _user_heart_timestamps[sender_id] = now_ts
 
-    logger.info(f"HEART_SEND_REQUEST: User {sender_id} in Family {family_id}")
-
-    # 2. Resolve display name
     sender_display_name = member.nickname or current_user.full_name or "Aile Üyesi"
     event_id = f"heart-{uuid.uuid4()}"
     now_dt = datetime.now(timezone.utc)
     custom_msg = body.message.strip() if body and body.message else None
 
-    # 3. Find other family members (Excluding sender for self-notification prevention)
     family_members = db.query(FamilyMember).filter(
         FamilyMember.family_id == family_id,
         FamilyMember.user_id != sender_id
     ).all()
 
     recipient_user_ids = [m.user_id for m in family_members]
-    logger.info(f"FAMILY_MEMBERS_RESOLVED: Found {len(recipient_user_ids)} recipients for Family {family_id}")
 
-    # 4. Create Notification rows in DB for recipients
     notifications_to_add = []
     for r_id in recipient_user_ids:
         n = Notification(
@@ -262,9 +320,7 @@ async def send_family_heart(
     if notifications_to_add:
         db.add_all(notifications_to_add)
         db.commit()
-        logger.info(f"HEART_EVENT_CREATED: Persisted {len(notifications_to_add)} notification rows.")
 
-    # 5. Resolve active device tokens for recipients
     active_tokens = []
     if recipient_user_ids:
         active_tokens = db.query(DeviceToken).filter(
@@ -272,9 +328,6 @@ async def send_family_heart(
             DeviceToken.is_active == True
         ).all()
 
-    logger.info(f"DEVICE_TOKENS_RESOLVED: {len(active_tokens)} active tokens found.")
-
-    # 6. Dispatch Push Notifications (FCM-free - SSE is primary)
     push_sent_count = await push_service.send_heart_push(
         db=db,
         device_tokens=active_tokens,
@@ -285,7 +338,6 @@ async def send_family_heart(
         custom_message=custom_msg
     )
 
-    # 7. Publish to SSE streams for native Foreground Service listeners
     try:
         from backend.app.api.v1.events import publish_to_family
         sse_event = {
@@ -297,7 +349,6 @@ async def send_family_heart(
             "message": custom_msg or f"{sender_display_name} size bir kalp gönderdi ❤️",
         }
         asyncio.create_task(publish_to_family(family_id, sse_event))
-        logger.info(f"SSE_HEART_DISPATCHED: event {event_id} sent to SSE for family {family_id}")
     except Exception as e:
         logger.warning(f"SSE_HEART_DISPATCH_ERROR: {e}")
 
@@ -311,5 +362,3 @@ async def send_family_heart(
         push_sent_count=push_sent_count,
         created_at=now_dt
     )
-
-

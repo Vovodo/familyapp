@@ -99,6 +99,33 @@ class FamilyJoin(BaseModel):
     nickname: Optional[str] = None
 
 
+class SendVerificationCodeRequest(BaseModel):
+    email: EmailStr
+    purpose: str = "register" # "register" or "reset_password"
+
+
+class VerifyAndRegisterRequest(BaseModel):
+    email: EmailStr
+    code: str
+    full_name: str
+    password: str
+    family_action: Optional[str] = "create" # "create" or "join"
+    invite_code: Optional[str] = None
+    family_name: Optional[str] = "Bizim Aile ❤️"
+    nickname: Optional[str] = None
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str
+
+
+class FamilySettingsUpdate(BaseModel):
+    name: Optional[str] = None
+    is_public: Optional[bool] = None
+
+
 class FamilyMemberResponse(BaseModel):
     id: str
     family_id: str
@@ -113,10 +140,12 @@ class FamilyMemberResponse(BaseModel):
 class FamilyResponse(FamilyBase):
     id: str
     invite_code: str
+    is_public: bool = False
     created_by: Optional[str]
     created_at: datetime
     members: List[FamilyMemberResponse] = []
     model_config = ConfigDict(from_attributes=True)
+
 
 
 # --- Message & Chat Schemas ---

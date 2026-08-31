@@ -52,14 +52,16 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
     };
   }, [location.pathname, navigate]);
 
+  const isChat = location.pathname === '/chat';
+
   return (
-    <div className="flex flex-col min-h-screen w-full bg-warm-50 text-gray-900 relative shadow-2xl overflow-x-hidden">
+    <div className="flex flex-col h-screen w-full bg-warm-50 text-gray-900 relative shadow-2xl overflow-hidden">
       <PermissionAssistantModal />
       <HeartCelebrationOverlay />
       <OfflineBanner />
       {showHeader && <Header />}
       
-      <main className="flex-1 flex flex-col pb-20 overflow-y-auto">
+      <main className={`flex-1 flex flex-col ${isChat ? 'overflow-hidden pb-16' : 'overflow-y-auto pb-20'}`}>
         <Outlet />
       </main>
 
@@ -67,4 +69,5 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
     </div>
   );
 };
+
 

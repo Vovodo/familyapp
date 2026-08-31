@@ -50,6 +50,7 @@ class Family(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid)
     name = Column(String(100), nullable=False, default="Bizim Aile ❤️")
     invite_code = Column(String(12), unique=True, index=True, nullable=False)
+    is_public = Column(Boolean, default=False) # Public vs Private
     created_by = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=get_utc_now)
     updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
@@ -238,4 +239,20 @@ class DeviceToken(Base):
     )
 
     user = relationship("User", backref="device_tokens")
+
+
+class VerificationCode(Base):
+    __tablename__ = "verification_codes"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    email = Column(String(255), nullable=False, index=True)
+    code = Column(String(6), nullable=False)
+    purpose = Column(String(30), nullable=False) # 'register', 'reset_password'
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    is_used = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_verification_email_purpose", "email", "purpose", "is_used"),
+    )
 

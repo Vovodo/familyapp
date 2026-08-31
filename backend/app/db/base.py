@@ -8,7 +8,9 @@ from backend.app.models.models import (
     ShoppingItem,
     Note,
     Reminder,
-    Notification
+    Notification,
+    DeviceToken,
+    VerificationCode
 )
 
 __all__ = [
@@ -21,5 +23,7 @@ __all__ = [
     "ShoppingItem",
     "Note",
     "Reminder",
-    "Notification"
+    "Notification",
+    "DeviceToken",
+    "VerificationCode"
 ]

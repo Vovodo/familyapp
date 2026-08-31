@@ -14,6 +14,9 @@ import {
   AlertTriangle,
   X,
   ShieldAlert,
+  Globe,
+  Lock,
+  UserMinus,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -21,7 +24,7 @@ import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 
 export const FamilySettingsPage: React.FC = () => {
   const { user, logout, updateProfile } = useAuth();
-  const { currentFamily, deleteFamily } = useFamily();
+  const { currentFamily, deleteFamily, updateFamilySettings, removeMember, leaveFamily } = useFamily();
   const navigate = useNavigate();
 
   const [copied, setCopied] = useState(false);
@@ -30,10 +33,24 @@ export const FamilySettingsPage: React.FC = () => {
   const [phone, setPhone] = useState(user?.phone || '');
   const [isSaving, setIsSaving] = useState(false);
 
-  // Delete Group Modal State
+  // Group Delete Modal (Creator Only)
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Leave Group Modal (Non-Creator Members)
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+
+  // Kick Member Modal
+  const [memberToKick, setMemberToKick] = useState<{ id: string; name: string } | null>(null);
+  const [isKicking, setIsKicking] = useState(false);
+
+  // Privacy Toggle State
+  const [isUpdatingPrivacy, setIsUpdatingPrivacy] = useState(false);
+
+  const isCreator = currentFamily?.created_by === user?.id;
+  const isAdmin = currentFamily?.members?.some((m) => m.user_id === user?.id && m.role === 'admin') || isCreator;
 
   const copyInviteCode = () => {
     if (!currentFamily?.invite_code) return;
@@ -58,9 +75,47 @@ export const FamilySettingsPage: React.FC = () => {
     }
   };
 
+  const handleTogglePrivacy = async (newPublicVal: boolean) => {
+    if (!isAdmin) return;
+    setIsUpdatingPrivacy(true);
+    try {
+      await updateFamilySettings({ is_public: newPublicVal });
+    } catch (err: any) {
+      alert('Görünürlük ayarlanamadı: ' + err.message);
+    } finally {
+      setIsUpdatingPrivacy(false);
+    }
+  };
+
+  const handleKickMember = async () => {
+    if (!memberToKick) return;
+    setIsKicking(true);
+    try {
+      await removeMember(memberToKick.id);
+      setMemberToKick(null);
+    } catch (err: any) {
+      alert('Üye çıkarılamadı: ' + err.message);
+    } finally {
+      setIsKicking(false);
+    }
+  };
+
+  const handleLeaveFamily = async () => {
+    setIsLeaving(true);
+    try {
+      await leaveFamily();
+      setShowLeaveModal(false);
+      navigate('/');
+    } catch (err: any) {
+      alert('Gruptan ayrılamadı: ' + err.message);
+    } finally {
+      setIsLeaving(false);
+    }
+  };
+
   const handleDeleteFamily = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (confirmText.trim().toLowerCase() !== 'evet' || !currentFamily) return;
+    if (confirmText.trim().toLowerCase() !== 'evet' || !currentFamily || !isCreator) return;
 
     setIsDeleting(true);
     try {
@@ -81,15 +136,59 @@ export const FamilySettingsPage: React.FC = () => {
     <div className="p-4 space-y-4 max-w-md mx-auto">
       {/* Family Info Card */}
       <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-md space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-family-50 text-family-600 rounded-2xl flex items-center justify-center font-bold text-lg">
-            ❤️
-          </div>
-          <div>
-            <h2 className="text-lg font-black text-gray-900">{currentFamily?.name || 'Ailemiz'}</h2>
-            <p className="text-xs text-gray-500">{currentFamily?.members?.length || 1} Aile Üyesi</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-family-50 text-family-600 rounded-2xl flex items-center justify-center font-bold text-lg">
+              ❤️
+            </div>
+            <div>
+              <h2 className="text-lg font-black text-gray-900">{currentFamily?.name || 'Ailemiz'}</h2>
+              <p className="text-xs text-gray-500">
+                {currentFamily?.members?.length || 1} Aile Üyesi • {isCreator ? 'Kurucu Sizsiniz' : 'Üyesiniz'}
+              </p>
+            </div>
           </div>
         </div>
+
+        {/* Public / Private Visibility Toggle (Admin Only) */}
+        {isAdmin && (
+          <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {currentFamily?.is_public ? (
+                <Globe className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Lock className="w-4 h-4 text-amber-600" />
+              )}
+              <div>
+                <div className="text-xs font-bold text-gray-800">
+                  {currentFamily?.is_public ? 'Herkese Açık Grup' : 'Gizli Aile Grubu'}
+                </div>
+                <div className="text-[10px] text-gray-400">
+                  {currentFamily?.is_public ? 'Aramalarda ve keşfette görünür' : 'Yalnızca davet koduyla girilebilir'}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={isUpdatingPrivacy}
+              onClick={() => handleTogglePrivacy(!currentFamily?.is_public)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition active:scale-95 cursor-pointer ${
+                currentFamily?.is_public
+                  ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                  : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+              }`}
+            >
+              {isUpdatingPrivacy ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : currentFamily?.is_public ? (
+                'Gizli Yap'
+              ) : (
+                'Açık Yap'
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Invite Code Box */}
         {currentFamily?.invite_code && (
@@ -145,6 +244,8 @@ export const FamilySettingsPage: React.FC = () => {
         <div className="space-y-2">
           {currentFamily?.members?.map((member) => {
             const isCurrentUser = member.user_id === user?.id;
+            const isMemberCreator = member.user_id === currentFamily.created_by;
+
             return (
               <div
                 key={member.id}
@@ -162,6 +263,11 @@ export const FamilySettingsPage: React.FC = () => {
                           Siz
                         </span>
                       )}
+                      {isMemberCreator && (
+                        <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-1.5 py-0.2 rounded-md">
+                          Kurucu
+                        </span>
+                      )}
                     </div>
                     <div className="text-[11px] text-gray-500">
                       {member.user?.full_name} {member.user?.email && `• ${member.user.email}`}
@@ -169,7 +275,7 @@ export const FamilySettingsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1 text-xs">
+                <div className="flex items-center gap-1.5">
                   {member.role === 'admin' ? (
                     <span className="flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-xl border border-amber-200">
                       <Shield className="w-3.5 h-3.5" />
@@ -179,6 +285,23 @@ export const FamilySettingsPage: React.FC = () => {
                     <span className="text-[11px] text-gray-500 bg-gray-200/60 px-2 py-1 rounded-xl">
                       Üye
                     </span>
+                  )}
+
+                  {/* Kick Member Button (Admin only, cannot kick self or creator) */}
+                  {isAdmin && !isCurrentUser && !isMemberCreator && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMemberToKick({
+                          id: member.id,
+                          name: member.nickname || member.user?.full_name || 'Bu üye',
+                        })
+                      }
+                      className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-xl transition cursor-pointer"
+                      title="Gruptan Çıkar"
+                    >
+                      <UserMinus className="w-4 h-4" />
+                    </button>
                   )}
                 </div>
               </div>
@@ -266,29 +389,51 @@ export const FamilySettingsPage: React.FC = () => {
         )}
       </div>
 
-      {/* Danger Zone: Close / Permanently Delete Family Group */}
-      <div className="bg-red-50/70 rounded-3xl p-5 border border-red-200 space-y-3">
-        <div className="flex items-center gap-2 text-red-900 font-bold text-sm">
-          <ShieldAlert className="w-5 h-5 text-red-600" />
-          <span>Tehlikeli Bölge</span>
+      {/* Group Actions: Creator Delete vs Member Leave */}
+      {isCreator ? (
+        /* Danger Zone: Only the CREATOR can delete the family */
+        <div className="bg-red-50/70 rounded-3xl p-5 border border-red-200 space-y-3">
+          <div className="flex items-center gap-2 text-red-900 font-bold text-sm">
+            <ShieldAlert className="w-5 h-5 text-red-600" />
+            <span>Grup Kurucu Yetkisi (Tehlikeli Bölge)</span>
+          </div>
+          <p className="text-xs text-red-700 leading-relaxed">
+            Bu aile grubunu kuran kişi sizsiniz. Grubu kapattığınızda tüm konuşma geçmişi, notlar ve fotoğraflar kalıcı olarak silinir.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirmText('');
+              setShowDeleteModal(true);
+            }}
+            className="w-full py-3 bg-red-600 hover:bg-red-700 active:scale-98 text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Aile Grubunu Kapat / Kalıcı Sil</span>
+          </button>
         </div>
-        <p className="text-xs text-red-700 leading-relaxed">
-          Aile grubunu kapattığınızda bu grupta yapılan tüm konuşma geçmişi, notlar, hatırlatıcılar ve alışveriş listesi buluttan ve cihazlardan kalıcı olarak silinir.
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setConfirmText('');
-            setShowDeleteModal(true);
-          }}
-          className="w-full py-3 bg-red-600 hover:bg-red-700 active:scale-98 text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
-        >
-          <Trash2 className="w-4 h-4" />
-          <span>Grubu Kapat / Tüm Verileri Kalıcı Sil</span>
-        </button>
-      </div>
+      ) : (
+        /* Regular Member Leave Option */
+        <div className="bg-amber-50/70 rounded-3xl p-5 border border-amber-200 space-y-3">
+          <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+            <LogOut className="w-5 h-5 text-amber-600" />
+            <span>Aileden Ayrıl</span>
+          </div>
+          <p className="text-xs text-amber-700 leading-relaxed">
+            Bu aile grubundan ayrılmak istediğinizde diğer aile üyeleri etkilenmez, grup açık kalmaya devam eder.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowLeaveModal(true)}
+            className="w-full py-3 bg-amber-600 hover:bg-amber-700 active:scale-98 text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Aile Grubundan Ayrıl</span>
+          </button>
+        </div>
+      )}
 
-      {/* Download APK option on Web */}
+      {/* Web APK Download Banner */}
       <DownloadApkButton variant="compact" />
 
       {/* Logout Button */}
@@ -302,7 +447,75 @@ export const FamilySettingsPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Confirmation Modal for Permanent Family Deletion */}
+      {/* Modal: Confirm Kick Member */}
+      {memberToKick && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl border border-gray-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-gray-900">Üyeyi Gruptan Çıkar</h4>
+              <button onClick={() => setMemberToKick(null)} className="p-1 text-gray-400 hover:text-gray-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              <strong>{memberToKick.name}</strong> adlı üyeyi aile grubundan çıkarmak istediğinize emin misiniz?
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setMemberToKick(null)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-xs"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={isKicking}
+                onClick={handleKickMember}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5"
+              >
+                {isKicking ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Gruptan Çıkar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirm Leave Family */}
+      {showLeaveModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl border border-amber-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-gray-900">Aileden Ayrılma Onayı</h4>
+              <button onClick={() => setShowLeaveModal(false)} className="p-1 text-gray-400 hover:text-gray-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              <strong>{currentFamily?.name}</strong> grubundan ayrılmak istediğinize emin misiniz? Dilediğiniz zaman katılım kodu ile tekrar katılabilirsiniz.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowLeaveModal(false)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-xs"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={isLeaving}
+                onClick={handleLeaveFamily}
+                className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5"
+              >
+                {isLeaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Ayrıl'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Permanent Group Deletion (Creator Only) */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-150 border border-red-100">

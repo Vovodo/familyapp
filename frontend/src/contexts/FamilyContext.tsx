@@ -12,6 +12,9 @@ interface FamilyContextType {
   joinFamily: (inviteCode: string, nickname?: string) => Promise<Family>;
   refreshFamily: () => Promise<void>;
   selectFamily: (familyId: string) => Promise<void>;
+  updateFamilySettings: (data: { name?: string; is_public?: boolean }) => Promise<void>;
+  removeMember: (memberId: string) => Promise<void>;
+  leaveFamily: () => Promise<void>;
   deleteFamily: (familyId: string) => Promise<void>;
 }
 
@@ -102,12 +105,27 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const updateFamilySettings = async (data: { name?: string; is_public?: boolean }) => {
+    const res = await api.patch<Family>('/families/settings', data);
+    setCurrentFamily(res.data);
+  };
+
+  const removeMember = async (memberId: string) => {
+    await api.delete(`/families/members/${memberId}`);
+    await refreshFamily();
+  };
+
+  const leaveFamily = async () => {
+    await api.post('/families/leave');
+    await storage.remove('active_family_id');
+    await fetchFamilies();
+  };
+
   const deleteFamily = async (familyId: string) => {
     setIsLoading(true);
     try {
       await api.delete(`/families/${familyId}`);
 
-      // Purge all local device caches for this family
       try {
         localStorage.removeItem(`ailem_msgs_${familyId}`);
         localStorage.removeItem(`ailem_notes_${familyId}`);
@@ -146,6 +164,9 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         joinFamily,
         refreshFamily,
         selectFamily,
+        updateFamilySettings,
+        removeMember,
+        leaveFamily,
         deleteFamily,
       }}
     >

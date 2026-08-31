@@ -3,11 +3,25 @@ import { User } from '../types';
 import { api, storage } from '../services/api';
 import { notificationService } from '../services/notificationService';
 
+export interface VerifyAndRegisterPayload {
+  email: string;
+  code: string;
+  full_name: string;
+  password: string;
+  family_action?: 'create' | 'join';
+  invite_code?: string;
+  family_name?: string;
+  nickname?: string;
+}
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
-  login: (emailOrPhone: string, pass: string) => Promise<void>;
+  login: (email: string, pass: string) => Promise<void>;
+  sendVerificationCode: (email: string, purpose: 'register' | 'reset_password') => Promise<void>;
+  verifyAndRegister: (payload: VerifyAndRegisterPayload) => Promise<void>;
+  resetPassword: (email: string, code: string, newPass: string) => Promise<void>;
   quickJoin: (
     fullName: string,
     nickname: string,
@@ -15,7 +29,6 @@ interface AuthContextType {
     familyName?: string,
     inviteCode?: string
   ) => Promise<void>;
-  register: (fullName: string, emailOrPhone: string, pass: string, nickname?: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
 }
@@ -49,6 +62,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     initializeAuth();
   }, []);
 
+  const sendVerificationCode = async (email: string, purpose: 'register' | 'reset_password') => {
+    await api.post('/auth/send-verification-code', {
+      email: email.trim().toLowerCase(),
+      purpose,
+    });
+  };
+
+  const verifyAndRegister = async (payload: VerifyAndRegisterPayload) => {
+    setIsLoading(true);
+    try {
+      const response = await api.post<{ access_token: string; user: User }>('/auth/verify-and-register', {
+        ...payload,
+        email: payload.email.trim().toLowerCase(),
+        code: payload.code.trim(),
+      });
+
+      const { access_token, user: registeredUser } = response.data;
+      await storage.set('auth_token', access_token);
+      setToken(access_token);
+      setUser(registeredUser);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetPassword = async (email: string, code: string, newPass: string) => {
+    await api.post('/auth/reset-password', {
+      email: email.trim().toLowerCase(),
+      code: code.trim(),
+      new_password: newPass,
+    });
+  };
+
+  const login = async (email: string, pass: string) => {
+    setIsLoading(true);
+    try {
+      const response = await api.post<{ access_token: string; user: User }>('/auth/login', {
+        email_or_phone: email.trim().toLowerCase(),
+        password: pass,
+      });
+
+      const { access_token, user: loggedUser } = response.data;
+      await storage.set('auth_token', access_token);
+      setToken(access_token);
+      setUser(loggedUser);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const quickJoin = async (
     fullName: string,
     nickname: string,
@@ -58,7 +121,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ) => {
     setIsLoading(true);
     try {
-      // Create or retrieve persistent device UUID
       let deviceId = await storage.get('ailem_device_id');
       if (!deviceId) {
         deviceId = `dev-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -85,44 +147,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await storage.set('device_registered', 'true');
       setToken(access_token);
       setUser(loggedUser);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const login = async (emailOrPhone: string, pass: string) => {
-    setIsLoading(true);
-    try {
-      const response = await api.post<{ access_token: string; user: User }>('/auth/login', {
-        email_or_phone: emailOrPhone,
-        password: pass,
-      });
-
-      const { access_token, user: loggedUser } = response.data;
-      await storage.set('auth_token', access_token);
-      setToken(access_token);
-      setUser(loggedUser);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const register = async (fullName: string, emailOrPhone: string, pass: string, nickname?: string) => {
-    setIsLoading(true);
-    try {
-      const isEmail = emailOrPhone.includes('@');
-      const response = await api.post<{ access_token: string; user: User }>('/auth/register', {
-        full_name: fullName,
-        email: isEmail ? emailOrPhone : undefined,
-        phone: !isEmail ? emailOrPhone : undefined,
-        password: pass,
-        nickname: nickname,
-      });
-
-      const { access_token, user: registeredUser } = response.data;
-      await storage.set('auth_token', access_token);
-      setToken(access_token);
-      setUser(registeredUser);
     } finally {
       setIsLoading(false);
     }
@@ -155,8 +179,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         isLoading,
         login,
+        sendVerificationCode,
+        verifyAndRegister,
+        resetPassword,
         quickJoin,
-        register,
         logout,
         updateProfile,
       }}
