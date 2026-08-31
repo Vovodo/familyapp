@@ -57,7 +57,8 @@ android/local.properties
 *.apk
 *.aab
 !backend/app/static/ailem.apk
-!frontend/public/downloads/ailem.apk
+frontend/public/downloads/
+frontend/android/app/src/main/assets/public/downloads/
 .idea/
 .vscode/
 *.suo
