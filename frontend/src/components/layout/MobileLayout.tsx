@@ -4,6 +4,8 @@ import { App as CapApp } from '@capacitor/app';
 import { Header } from './Header';
 import { BottomNav } from './BottomNav';
 import { OfflineBanner } from './OfflineBanner';
+import { HeartCelebrationOverlay } from '../common/HeartCelebrationOverlay';
+import { pushNotificationService } from '../../services/pushNotification';
 
 interface MobileLayoutProps {
   showHeader?: boolean;
@@ -16,6 +18,11 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Initialize Push Notifications & Android Channels
+  useEffect(() => {
+    pushNotificationService.init();
+  }, []);
 
   // Android Back Button Handler
   useEffect(() => {
@@ -46,6 +53,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
   return (
     <div className="flex flex-col min-h-screen bg-warm-50 text-gray-900 max-w-md mx-auto relative shadow-2xl overflow-x-hidden border-x border-gray-100">
+      <HeartCelebrationOverlay />
       <OfflineBanner />
       {showHeader && <Header />}
       
@@ -57,3 +65,4 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
     </div>
   );
 };
+

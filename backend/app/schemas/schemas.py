@@ -273,3 +273,37 @@ class NotificationResponse(BaseModel):
     data: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class DeviceTokenCreate(BaseModel):
+    device_id: str
+    token: str
+    platform: Optional[str] = "android"
+
+
+class DeviceTokenResponse(BaseModel):
+    id: str
+    user_id: str
+    device_id: str
+    platform: str
+    token: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HeartEventRequest(BaseModel):
+    message: Optional[str] = None
+
+
+class HeartEventResponse(BaseModel):
+    status: str = "success"
+    event_id: str
+    sender_id: str
+    sender_name: str
+    family_id: str
+    recipients_count: int
+    push_sent_count: int
+    created_at: datetime
+

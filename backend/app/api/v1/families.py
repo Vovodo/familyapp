@@ -1,6 +1,10 @@
 import random
 import string
-from typing import List
+import time
+import threading
+import uuid
+from datetime import datetime, timezone
+from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
@@ -12,18 +16,28 @@ from backend.app.models.models import (
     Note,
     Reminder,
     ShoppingItem,
-    Media
+    Media,
+    Notification,
+    DeviceToken
 )
 from backend.app.schemas.schemas import (
     FamilyCreate,
     FamilyJoin,
     FamilyResponse,
-    FamilyMemberResponse
+    FamilyMemberResponse,
+    HeartEventRequest,
+    HeartEventResponse
 )
 from backend.app.api.deps import get_current_user, get_current_family_member, get_current_admin_member
+from backend.app.services.push_service import push_service
 from loguru import logger
 
 router = APIRouter()
+
+# Rate limiting for heart sending: Max 1 heart per 3 seconds per sender
+_user_heart_timestamps: Dict[str, float] = {}
+_heart_lock = threading.Lock()
+
 
 
 def generate_invite_code(length: int = 6) -> str:
@@ -180,4 +194,106 @@ def delete_family(
 
     logger.info(f"Family {family_id} and all related cloud records deleted by user {current_user.id}")
     return {"message": "Aile grubu ve tüm verileri kalıcı olarak silindi."}
+
+
+@router.post("/heart", response_model=HeartEventResponse, status_code=status.HTTP_200_OK)
+async def send_family_heart(
+    body: Optional[HeartEventRequest] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Sends an instant love Heart notification and vibration to all other members in the sender's family.
+    1. Authenticated user and family_id are strictly verified server-side.
+    2. Rate limit: 1 heart per 3 seconds per sender.
+    3. Self-exclusion: Sender never receives their own heart notification.
+    4. Isolation: Only members belonging to the exact same family_id receive it.
+    5. Dispatches FCM push notifications to active device tokens + persists event.
+    """
+    sender_id = current_user.id
+    family_id = member.family_id
+    now_ts = time.time()
+
+    # 1. Anti-Spam / Rate-limiting check (3 seconds debounce)
+    with _heart_lock:
+        last_ts = _user_heart_timestamps.get(sender_id, 0)
+        if now_ts - last_ts < 3.0:
+            retry_after = round(3.0 - (now_ts - last_ts), 1)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Lütfen biraz bekleyin ({retry_after} sn sonra tekrar kalp gönderebilirsiniz)."
+            )
+        _user_heart_timestamps[sender_id] = now_ts
+
+    logger.info(f"HEART_SEND_REQUEST: User {sender_id} in Family {family_id}")
+
+    # 2. Resolve display name
+    sender_display_name = member.nickname or current_user.full_name or "Aile Üyesi"
+    event_id = f"heart-{uuid.uuid4()}"
+    now_dt = datetime.now(timezone.utc)
+    custom_msg = body.message.strip() if body and body.message else None
+
+    # 3. Find other family members (Excluding sender for self-notification prevention)
+    family_members = db.query(FamilyMember).filter(
+        FamilyMember.family_id == family_id,
+        FamilyMember.user_id != sender_id
+    ).all()
+
+    recipient_user_ids = [m.user_id for m in family_members]
+    logger.info(f"FAMILY_MEMBERS_RESOLVED: Found {len(recipient_user_ids)} recipients for Family {family_id}")
+
+    # 4. Create Notification rows in DB for recipients
+    notifications_to_add = []
+    for r_id in recipient_user_ids:
+        n = Notification(
+            id=str(uuid.uuid4()),
+            family_id=family_id,
+            recipient_id=r_id,
+            title="❤️ Aileden bir kalp",
+            body=custom_msg or f"{sender_display_name} size bir kalp gönderdi ❤️",
+            type="heart",
+            is_read=False,
+            data=f'{{"event_id":"{event_id}","sender_id":"{sender_id}","sender_name":"{sender_display_name}"}}',
+            created_at=now_dt
+        )
+        notifications_to_add.append(n)
+
+    if notifications_to_add:
+        db.add_all(notifications_to_add)
+        db.commit()
+        logger.info(f"HEART_EVENT_CREATED: Persisted {len(notifications_to_add)} notification rows.")
+
+    # 5. Resolve active device tokens for recipients
+    active_tokens = []
+    if recipient_user_ids:
+        active_tokens = db.query(DeviceToken).filter(
+            DeviceToken.user_id.in_(recipient_user_ids),
+            DeviceToken.is_active == True
+        ).all()
+
+    logger.info(f"DEVICE_TOKENS_RESOLVED: {len(active_tokens)} active tokens found.")
+
+    # 6. Dispatch Push Notifications
+    push_sent_count = await push_service.send_heart_push(
+        db=db,
+        device_tokens=active_tokens,
+        sender_name=sender_display_name,
+        sender_id=sender_id,
+        family_id=family_id,
+        event_id=event_id,
+        custom_message=custom_msg
+    )
+
+    return HeartEventResponse(
+        status="success",
+        event_id=event_id,
+        sender_id=sender_id,
+        sender_name=sender_display_name,
+        family_id=family_id,
+        recipients_count=len(recipient_user_ids),
+        push_sent_count=push_sent_count,
+        created_at=now_dt
+    )
+
 

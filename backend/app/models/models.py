@@ -205,11 +205,37 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
     recipient_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(200), nullable=False)
     body = Column(Text, nullable=False)
-    type = Column(String(50), default="general") # chat, reminder, shopping, system
+    type = Column(String(50), default="general") # chat, reminder, shopping, heart, system
     is_read = Column(Boolean, default=False)
     data = Column(Text, nullable=True) # JSON payload string
     created_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_notifications_family_recipient", "family_id", "recipient_id"),
+        Index("idx_notifications_created", "created_at"),
+    )
+
+
+class DeviceToken(Base):
+    __tablename__ = "device_tokens"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_id = Column(String(100), nullable=False)
+    platform = Column(String(20), default="android") # android, ios, web
+    token = Column(String(500), nullable=False, index=True)
+    is_active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_device_user_active", "user_id", "is_active"),
+        Index("idx_device_token_unique", "user_id", "device_id", unique=True),
+    )
+
+    user = relationship("User", backref="device_tokens")
+
