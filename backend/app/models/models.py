@@ -55,7 +55,7 @@ class Family(Base):
     updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
 
     # Relationships
-    members = relationship("FamilyMember", back_populates="family", cascade="all, delete-orphan")
+    members = relationship("FamilyMember", back_populates="family", cascade="all, delete-orphan", lazy="joined")
     messages = relationship("Message", back_populates="family", cascade="all, delete-orphan")
     media = relationship("Media", back_populates="family", cascade="all, delete-orphan")
     shopping_items = relationship("ShoppingItem", back_populates="family", cascade="all, delete-orphan")
@@ -80,7 +80,7 @@ class FamilyMember(Base):
 
     # Relationships
     family = relationship("Family", back_populates="members")
-    user = relationship("User", back_populates="family_memberships")
+    user = relationship("User", back_populates="family_memberships", lazy="joined")
 
 
 class Message(Base):
