@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "856921346242",
+    "project_id": "ailem-b2489",
+    "storage_bucket": "ailem-b2489.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:856921346242:android:3ae31cf622ac08b095ab5b",
+        "android_client_info": {
+          "package_name": "com.aile.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCE24gticCsAxhn2H9JM_T_ENmNFwfNa7I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

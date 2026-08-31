@@ -1,4 +1,4 @@
-# Environment variables
+# Environment variables & Secrets
 .env
 .env.local
 .env.*.local
@@ -6,6 +6,8 @@
 *.db
 *.sqlite
 *.sqlite3
+*firebase_service_account*.json
+*service_account*.json
 
 # Python
 __pycache__/
