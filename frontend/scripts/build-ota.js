@@ -1,57 +1,57 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const AdmZip = require('adm-zip');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const frontendDir = path.resolve(__dirname, '..');
 const distDir = path.join(frontendDir, 'dist');
-const liveUpdatesDir = path.join(distDir, 'live-updates');
+const liveUpdatesDist = path.join(distDir, 'live-updates');
+const liveUpdatesPublic = path.join(frontendDir, 'public', 'live-updates');
 
-async function buildOta() {
-  console.log('🚀 Generating Live Update (OTA) bundle...');
+function buildOta() {
+  console.log('🚀 Generating Live Update (OTA) bundle with pure Node.js (adm-zip)...');
 
   if (!fs.existsSync(distDir)) {
-    console.error('❌ dist/ directory does not exist! Run `npm run build` first.');
+    console.error('❌ dist/ directory does not exist! Run vite build first.');
     process.exit(1);
   }
 
-  // Create live-updates directory in dist and public
-  fs.mkdirSync(liveUpdatesDir, { recursive: true });
-  const publicLiveUpdatesDir = path.join(frontendDir, 'public', 'live-updates');
-  fs.mkdirSync(publicLiveUpdatesDir, { recursive: true });
+  fs.mkdirSync(liveUpdatesDist, { recursive: true });
+  fs.mkdirSync(liveUpdatesPublic, { recursive: true });
 
   const timestamp = Date.now();
   const bundleId = `bundle-${timestamp}`;
-  const zipPathInDist = path.join(liveUpdatesDir, 'bundle.zip');
-  const zipPathInPublic = path.join(publicLiveUpdatesDir, 'bundle.zip');
+  const zipPathInDist = path.join(liveUpdatesDist, 'bundle.zip');
+  const zipPathInPublic = path.join(liveUpdatesPublic, 'bundle.zip');
 
-  // Create zip using python zipfile module (cross-platform)
-  const pythonScript = `
-import zipfile, os
+  const zip = new AdmZip();
 
-dist_dir = r"${distDir}"
-zip_path = r"${zipPathInDist}"
+  // Recursively add all dist files except downloads and live-updates
+  function addFiles(currentDir, zipSubDir = '') {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === 'downloads' || entry.name === 'live-updates') {
+        continue;
+      }
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        addFiles(fullPath, zipSubDir ? `${zipSubDir}/${entry.name}` : entry.name);
+      } else if (entry.isFile()) {
+        const fileContent = fs.readFileSync(fullPath);
+        zip.addFile(zipSubDir ? `${zipSubDir}/${entry.name}` : entry.name, fileContent);
+      }
+    }
+  }
 
-with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-    for root, dirs, files in os.walk(dist_dir):
-        # Exclude downloads and live-updates folder from inside the zip
-        if 'downloads' in root or 'live-updates' in root:
-            continue
-        for file in files:
-            file_path = os.path.join(root, file)
-            arcname = os.path.relpath(file_path, dist_dir)
-            zipf.write(file_path, arcname)
-
-print(f"Created bundle.zip size: {os.path.getsize(zip_path)} bytes")
-`;
-
-  execSync(`python -c "${pythonScript.replace(/\n/g, ' ')}"`, { stdio: 'inherit' });
-
-  // Copy to public as well so it's committed / preserved
-  fs.copyFileSync(zipPathInDist, zipPathInPublic);
+  addFiles(distDir);
+  zip.writeZip(zipPathInDist);
+  zip.writeZip(zipPathInPublic);
 
   const manifest = {
     version: '1.0.0',
@@ -61,14 +61,16 @@ print(f"Created bundle.zip size: {os.path.getsize(zip_path)} bytes")
   };
 
   const manifestJson = JSON.stringify(manifest, null, 2);
-  fs.writeFileSync(path.join(liveUpdatesDir, 'version.json'), manifestJson, 'utf-8');
-  fs.writeFileSync(path.join(publicLiveUpdatesDir, 'version.json'), manifestJson, 'utf-8');
+  fs.writeFileSync(path.join(liveUpdatesDist, 'version.json'), manifestJson, 'utf-8');
+  fs.writeFileSync(path.join(liveUpdatesPublic, 'version.json'), manifestJson, 'utf-8');
 
-  console.log(`✅ Live Update Manifest created: ${bundleId}`);
-  console.log(`📦 OTA Bundle ready at: ${zipPathInDist}`);
+  console.log(`✅ Live Update Manifest created for: ${bundleId}`);
+  console.log(`📦 OTA Bundle size: ${fs.statSync(zipPathInDist).size} bytes`);
 }
 
-buildOta().catch((err) => {
+try {
+  buildOta();
+} catch (err) {
   console.error('Failed to build OTA bundle:', err);
   process.exit(1);
-});
+}
