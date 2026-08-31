@@ -1,6 +1,19 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Heart, Lock, Mail, ArrowRight, AlertCircle, Loader2, Sparkles, UserCheck, ShieldCheck } from 'lucide-react';
+import {
+  Heart,
+  Lock,
+  Mail,
+  ArrowRight,
+  AlertCircle,
+  Loader2,
+  Sparkles,
+  UserCheck,
+  ShieldCheck,
+  Home,
+  Link as LinkIcon,
+  KeyRound,
+} from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 
@@ -13,6 +26,9 @@ export const LoginPage: React.FC = () => {
   const [fullName, setFullName] = useState('');
   const [nickname, setNickname] = useState('Baba');
   const [customNickname, setCustomNickname] = useState('');
+  const [familyAction, setFamilyAction] = useState<'create' | 'join'>('create');
+  const [familyName, setFamilyName] = useState('Bizim Aile ❤️');
+  const [inviteCode, setInviteCode] = useState('');
 
   // Admin Login State
   const [emailOrPhone, setEmailOrPhone] = useState('');
@@ -32,12 +48,23 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
+    if (familyAction === 'join' && !inviteCode.trim()) {
+      setError('Lütfen ailenizden aldığınız Katılım Kodunu girin.');
+      return;
+    }
+
     const finalNickname = (nickname === 'other' ? customNickname.trim() : nickname) || 'Aile Üyesi';
 
     try {
       setError(null);
       setIsSubmitting(true);
-      await quickJoin(finalName, finalNickname);
+      await quickJoin(
+        finalName,
+        finalNickname,
+        familyAction,
+        familyAction === 'create' ? (familyName.trim() || 'Bizim Aile ❤️') : undefined,
+        familyAction === 'join' ? inviteCode.trim().toUpperCase() : undefined
+      );
       navigate('/');
     } catch (err: any) {
       setError(err.message || 'Bağlantı kurulamadı. Lütfen tekrar deneyin.');
@@ -66,18 +93,18 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-warm-50 flex flex-col justify-center px-4 sm:px-6 py-8 max-w-md mx-auto space-y-5">
+    <div className="min-h-screen bg-warm-50 flex flex-col justify-center px-4 sm:px-6 py-6 max-w-md mx-auto space-y-4">
       {/* Header Logo */}
-      <div className="text-center space-y-1.5">
-        <div className="inline-flex items-center justify-center w-18 h-18 rounded-3xl bg-family-100 text-family-600 shadow-md shadow-family-100 mb-1 animate-bounce">
-          <Heart className="w-9 h-9 fill-family-500 text-family-500" />
+      <div className="text-center space-y-1">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-family-100 text-family-600 shadow-md shadow-family-100 mb-1 animate-bounce">
+          <Heart className="w-8 h-8 fill-family-500 text-family-500" />
         </div>
-        <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">Ailemize Hoş Geldiniz</h1>
-        <p className="text-xs sm:text-sm font-medium text-gray-500">Aile içi özel, güvenli ve hızlı alanınız</p>
+        <h1 className="text-2xl font-black text-gray-900 tracking-tight">Ailemize Hoş Geldiniz</h1>
+        <p className="text-xs font-medium text-gray-500">Aile içi özel, güvenli ve bağımsız alanınız</p>
       </div>
 
       {/* Main Card */}
-      <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-xl border border-gray-100 space-y-4">
+      <div className="bg-white rounded-3xl p-5 shadow-xl border border-gray-100 space-y-4">
         {/* Navigation Tabs */}
         <div className="grid grid-cols-2 p-1 bg-gray-100 rounded-2xl">
           <button
@@ -86,7 +113,7 @@ export const LoginPage: React.FC = () => {
               setTab('quick');
               setError(null);
             }}
-            className={`py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 ${
+            className={`py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
               tab === 'quick' ? 'bg-white text-family-700 shadow-xs' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -100,7 +127,7 @@ export const LoginPage: React.FC = () => {
               setTab('admin');
               setError(null);
             }}
-            className={`py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 ${
+            className={`py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer ${
               tab === 'admin' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -118,7 +145,7 @@ export const LoginPage: React.FC = () => {
 
         {/* Tab 1: Instant Quick Join Flow */}
         {tab === 'quick' ? (
-          <form onSubmit={handleQuickJoinSubmit} className="space-y-4">
+          <form onSubmit={handleQuickJoinSubmit} className="space-y-3.5">
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5 ml-1">
                 Adınız ve Soyadınız
@@ -132,7 +159,7 @@ export const LoginPage: React.FC = () => {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Örn: Ahmet Yılmaz"
-                  className="w-full pl-10 pr-3.5 py-3 bg-gray-50 border border-gray-200 rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-family-500 transition"
+                  className="w-full pl-10 pr-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs sm:text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-family-500 transition"
                   required
                 />
               </div>
@@ -148,7 +175,7 @@ export const LoginPage: React.FC = () => {
                     key={r}
                     type="button"
                     onClick={() => setNickname(r)}
-                    className={`py-2 px-1 rounded-xl text-xs font-bold transition text-center truncate ${
+                    className={`py-2 px-1 rounded-xl text-xs font-bold transition text-center truncate cursor-pointer ${
                       nickname === r
                         ? 'bg-family-600 text-white shadow-xs scale-102'
                         : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200/60'
@@ -160,7 +187,7 @@ export const LoginPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setNickname('other')}
-                  className={`py-2 px-1 rounded-xl text-xs font-bold transition text-center truncate ${
+                  className={`py-2 px-1 rounded-xl text-xs font-bold transition text-center truncate cursor-pointer ${
                     nickname === 'other'
                       ? 'bg-family-600 text-white shadow-xs scale-102'
                       : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200/60'
@@ -175,9 +202,78 @@ export const LoginPage: React.FC = () => {
                   type="text"
                   value={customNickname}
                   onChange={(e) => setCustomNickname(e.target.value)}
-                  placeholder="Hitabınızı yazın (Örn: Teyze, Dayı, Enişte)"
+                  placeholder="Hitabınızı yazın (Örn: Teyze, Dayı)"
                   className="w-full mt-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-family-500 transition"
                 />
+              )}
+            </div>
+
+            {/* Family Setup Selection (Create vs Join) */}
+            <div className="pt-1 space-y-2 border-t border-gray-100">
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider ml-1">
+                Aile Grubu Seçimi
+              </label>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setFamilyAction('create')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 border cursor-pointer ${
+                    familyAction === 'create'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs font-black'
+                      : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  <Home className="w-3.5 h-3.5" />
+                  <span>Yeni Aile Kur</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFamilyAction('join')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 border cursor-pointer ${
+                    familyAction === 'join'
+                      ? 'bg-sky-50 text-sky-800 border-sky-300 shadow-2xs font-black'
+                      : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  <LinkIcon className="w-3.5 h-3.5" />
+                  <span>Aileye Katıl</span>
+                </button>
+              </div>
+
+              {familyAction === 'create' ? (
+                <div>
+                  <input
+                    type="text"
+                    value={familyName}
+                    onChange={(e) => setFamilyName(e.target.value)}
+                    placeholder="Örn: Yılmaz Ailesi ❤️"
+                    className="w-full px-3 py-2 bg-emerald-50/40 border border-emerald-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                  />
+                  <span className="text-[10px] text-gray-400 block mt-1 ml-1">
+                    ✨ Size özel izole bir aile grubu ve katılım kodu üretilecektir.
+                  </span>
+                </div>
+              ) : (
+                <div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-500">
+                      <KeyRound className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      type="text"
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                      placeholder="Örn: AILE-123456"
+                      className="w-full pl-9 pr-3 py-2 bg-sky-50/40 border border-sky-200 rounded-xl text-xs font-mono font-bold uppercase focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                      required
+                    />
+                  </div>
+                  <span className="text-[10px] text-sky-600 block mt-1 ml-1">
+                    🔑 Ailenizin Ayarlar sayfasından paylaştığı 6 haneli kodu girin.
+                  </span>
+                </div>
               )}
             </div>
 
@@ -190,14 +286,14 @@ export const LoginPage: React.FC = () => {
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <>
-                  <span>Kullanıma Başla</span>
+                  <span>{familyAction === 'create' ? 'Ailemi Oluştur ve Başla' : 'Aileye Katıl ve Başla'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
 
             <p className="text-[11px] text-gray-400 text-center leading-relaxed">
-              🔒 Bu cihaz bir daha sizden şifre veya giriş istemeyecektir. Profilinizi istediğiniz zaman ayarlardan güncelleyebilirsiniz.
+              🔒 Bu cihaz bir daha sizden şifre istemeyecektir. Bilgilerinizi dilediğiniz an ayarlardan değiştirebilirsiniz.
             </p>
           </form>
         ) : (

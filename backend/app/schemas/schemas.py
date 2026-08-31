@@ -67,6 +67,9 @@ class QuickJoinRequest(BaseModel):
     nickname: Optional[str] = None
     avatar_url: Optional[str] = None
     device_id: Optional[str] = None
+    action: Optional[str] = "create"  # "create" or "join"
+    family_name: Optional[str] = "Bizim Aile ❤️"
+    invite_code: Optional[str] = None
 
 
 class QuickJoinResponse(BaseModel):

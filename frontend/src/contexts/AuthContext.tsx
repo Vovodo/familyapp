@@ -7,7 +7,13 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (emailOrPhone: string, pass: string) => Promise<void>;
-  quickJoin: (fullName: string, nickname: string) => Promise<void>;
+  quickJoin: (
+    fullName: string,
+    nickname: string,
+    action?: 'create' | 'join',
+    familyName?: string,
+    inviteCode?: string
+  ) => Promise<void>;
   register: (fullName: string, emailOrPhone: string, pass: string, nickname?: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
@@ -42,7 +48,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     initializeAuth();
   }, []);
 
-  const quickJoin = async (fullName: string, nickname: string) => {
+  const quickJoin = async (
+    fullName: string,
+    nickname: string,
+    action: 'create' | 'join' = 'create',
+    familyName?: string,
+    inviteCode?: string
+  ) => {
     setIsLoading(true);
     try {
       // Create or retrieve persistent device UUID
@@ -61,6 +73,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         full_name: fullName.trim(),
         nickname: nickname.trim(),
         device_id: deviceId,
+        action,
+        family_name: familyName?.trim() || 'Bizim Aile ❤️',
+        invite_code: inviteCode?.trim() || undefined,
       });
 
       const { access_token, user: loggedUser, family_id } = response.data;

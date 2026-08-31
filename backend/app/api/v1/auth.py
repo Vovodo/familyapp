@@ -18,6 +18,8 @@ from backend.app.core.security import (
 )
 from backend.app.api.deps import get_current_user
 import uuid
+import random
+import string
 
 router = APIRouter()
 
@@ -25,8 +27,10 @@ router = APIRouter()
 @router.post("/quick-join", response_model=QuickJoinResponse, status_code=status.HTTP_201_CREATED)
 def quick_join(req: QuickJoinRequest, db: Session = Depends(get_db)):
     """
-    Direct 1-click onboarding: Creates user by name & nickname, assigns to primary family,
-    and returns a long-lived JWT token.
+    Direct 1-click onboarding:
+    - If action == 'join' & invite_code: Joins the existing family with that specific code.
+    - Otherwise: Creates a brand new, 100% isolated family group with a unique invite code.
+    Returns long-lived JWT token.
     """
     clean_name = req.full_name.strip()
     if not clean_name:
@@ -35,17 +39,34 @@ def quick_join(req: QuickJoinRequest, db: Session = Depends(get_db)):
             detail="Lütfen adınızı girin."
         )
 
-    # 1. Ensure a primary family exists
-    family = db.query(Family).first()
-    if not family:
+    # 1. Determine Family (Join existing via code OR create fresh isolated family)
+    if req.action == "join" and req.invite_code:
+        clean_code = req.invite_code.strip().upper()
+        family = db.query(Family).filter(Family.invite_code == clean_code).first()
+        if not family:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Geçersiz katılım kodu. Lütfen aile bireyinizden aldığınız kodu kontrol edin."
+            )
+        is_admin = False
+    else:
+        # Create brand new isolated family
+        fam_name = (req.family_name or "Bizim Aile ❤️").strip()
+        digits = ''.join(random.choices(string.digits, k=6))
+        code = f"AILE-{digits}"
+        while db.query(Family).filter(Family.invite_code == code).first():
+            digits = ''.join(random.choices(string.digits, k=6))
+            code = f"AILE-{digits}"
+
         family = Family(
             id=str(uuid.uuid4()),
-            name="Bizim Aile ❤️",
-            invite_code=uuid.uuid4().hex[:8].upper()
+            name=fam_name,
+            invite_code=code
         )
         db.add(family)
         db.commit()
         db.refresh(family)
+        is_admin = True
 
     # 2. Create User Profile
     unique_suffix = req.device_id[:12] if req.device_id else uuid.uuid4().hex[:8]
@@ -69,7 +90,7 @@ def quick_join(req: QuickJoinRequest, db: Session = Depends(get_db)):
         family_id=family.id,
         user_id=user.id,
         nickname=req.nickname.strip() if req.nickname else None,
-        role="member"
+        role="admin" if is_admin else "member"
     )
     db.add(member)
     db.commit()
