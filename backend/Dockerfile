@@ -27,8 +27,10 @@ ENV PYTHONPATH=/app
 
 COPY . /app/backend
 
-# Create uploads directory
-RUN mkdir -p /app/uploads
+# Create uploads and static directory
+RUN mkdir -p /app/uploads /app/static && \
+    (cp /app/backend/app/static/ailem.apk /app/static/ailem.apk || true) && \
+    (cp /app/backend/app/static/ailem.apk /app/ailem.apk || true)
 
 EXPOSE 8000
 

@@ -115,11 +115,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static file serving for uploads (local storage mode)
+# Static file serving for uploads and public assets (APK)
 if not os.path.exists(settings.UPLOAD_DIR):
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir, exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 # Global Exception Handler for friendly error responses

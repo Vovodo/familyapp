@@ -16,33 +16,34 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
     return null;
   }
 
-  // Direct backend streaming download endpoint with application/vnd.android.package-archive
   const apkDownloadUrl = 'https://familyapi.rfqcollector.com/api/v1/downloads/apk';
+
+  const handleDownload = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // Direct window location navigation guarantees mobile Chrome/Safari triggers native download manager
+    window.location.href = apkDownloadUrl;
+  };
 
   if (variant === 'button') {
     return (
-      <a
-        href={apkDownloadUrl}
-        target="_self"
-        rel="noopener noreferrer"
-        download="ailem.apk"
-        className={`inline-flex items-center justify-center gap-2.5 px-5 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-emerald-700/20 transition duration-150 ${className}`}
+      <button
+        type="button"
+        onClick={handleDownload}
+        className={`inline-flex items-center justify-center gap-2.5 px-5 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-emerald-700/20 transition duration-150 cursor-pointer ${className}`}
       >
         <Smartphone className="w-5 h-5 text-emerald-200" />
         <span>Android Uygulamasını İndir (APK)</span>
         <Download className="w-4 h-4 text-emerald-200 ml-auto" />
-      </a>
+      </button>
     );
   }
 
   if (variant === 'compact') {
     return (
-      <a
-        href={apkDownloadUrl}
-        target="_self"
-        rel="noopener noreferrer"
-        download="ailem.apk"
-        className={`flex items-center justify-between p-3.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-2xl text-emerald-900 transition ${className}`}
+      <button
+        type="button"
+        onClick={handleDownload}
+        className={`w-full flex items-center justify-between p-3.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-2xl text-emerald-900 transition cursor-pointer ${className}`}
       >
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
@@ -50,13 +51,13 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
           </div>
           <div className="text-left">
             <p className="text-xs font-bold text-emerald-950">Android APK İndir</p>
-            <p className="text-[10px] text-emerald-700">Doğrudan telefona kurun • 9.0 MB (FCM Canlı Bildirim)</p>
+            <p className="text-[10px] text-emerald-700">Doğrudan telefona kurun • 8.98 MB (FCM Canlı Bildirim)</p>
           </div>
         </div>
         <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-xs">
           <Download className="w-4 h-4" />
         </div>
-      </a>
+      </button>
     );
   }
 
@@ -76,7 +77,7 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
             <span>Mobil Deneyim</span>
           </div>
           <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-200 border border-emerald-500/30">
-            Android APK
+            Android APK (8.98 MB)
           </span>
         </div>
 
@@ -104,16 +105,14 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
           </span>
         </div>
 
-        <a
-          href={apkDownloadUrl}
-          target="_self"
-          rel="noopener noreferrer"
-          download="ailem.apk"
+        <button
+          type="button"
+          onClick={handleDownload}
           className="flex items-center justify-center gap-2.5 w-full py-3 bg-white hover:bg-emerald-50 active:scale-95 text-emerald-900 font-extrabold rounded-2xl shadow-md transition duration-150 text-sm cursor-pointer"
         >
           <Download className="w-4 h-4 text-emerald-700" />
           <span>Android Uygulamasını İndir (APK)</span>
-        </a>
+        </button>
       </div>
     </div>
   );
