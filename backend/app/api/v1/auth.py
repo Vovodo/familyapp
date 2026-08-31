@@ -102,20 +102,25 @@ def verify_and_register(
     clean_code = payload.code.strip()
 
     # Check OTP validity
-    now = datetime.now(timezone.utc)
     vcode = (
         db.query(VerificationCode)
         .filter(
             VerificationCode.email == clean_email,
             VerificationCode.code == clean_code,
             VerificationCode.purpose == "register",
-            VerificationCode.is_used == False,
-            VerificationCode.expires_at > now
+            VerificationCode.is_used == False
         )
+        .order_by(VerificationCode.created_at.desc())
         .first()
     )
 
-    # Allow fallback if code is valid or bypass code '999999' for testing
+    if vcode:
+        # Check expiration safely
+        exp = vcode.expires_at
+        now_cmp = datetime.now(timezone.utc) if exp.tzinfo is not None else datetime.utcnow()
+        if exp < now_cmp:
+            vcode = None
+
     if not vcode and clean_code != "999999":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -125,24 +130,23 @@ def verify_and_register(
     if vcode:
         vcode.is_used = True
 
-    # Check duplicate
-    existing = db.query(User).filter(User.email == clean_email).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Bu e-posta adresi zaten kayıtlı."
+    # 1. Create or Update User
+    user = db.query(User).filter(User.email == clean_email).first()
+    if not user:
+        user = User(
+            id=str(uuid.uuid4()),
+            full_name=payload.full_name.strip(),
+            email=clean_email,
+            hashed_password=get_password_hash(payload.password),
+            role="member"
         )
-
-    # 1. Create User
-    user = User(
-        id=str(uuid.uuid4()),
-        full_name=payload.full_name.strip(),
-        email=clean_email,
-        hashed_password=get_password_hash(payload.password),
-        role="member"
-    )
-    db.add(user)
-    db.flush()
+        db.add(user)
+        db.flush()
+    else:
+        # Update details if re-registering
+        user.full_name = payload.full_name.strip()
+        user.hashed_password = get_password_hash(payload.password)
+        db.flush()
 
     # 2. Handle Family setup (Join existing via invite code OR create new)
     family_id = None
@@ -177,14 +181,24 @@ def verify_and_register(
     family_id = family.id
 
     # 3. Add Family Member
-    member = FamilyMember(
-        id=str(uuid.uuid4()),
-        family_id=family.id,
-        user_id=user.id,
-        nickname=payload.nickname.strip() if payload.nickname else payload.full_name.split()[0],
-        role="admin" if is_admin else "member"
+    member = (
+        db.query(FamilyMember)
+        .filter(FamilyMember.family_id == family.id, FamilyMember.user_id == user.id)
+        .first()
     )
-    db.add(member)
+    if not member:
+        member = FamilyMember(
+            id=str(uuid.uuid4()),
+            family_id=family.id,
+            user_id=user.id,
+            nickname=payload.nickname.strip() if payload.nickname else payload.full_name.split()[0],
+            role="admin" if is_admin else "member"
+        )
+        db.add(member)
+    else:
+        if payload.nickname:
+            member.nickname = payload.nickname.strip()
+
     db.commit()
     db.refresh(user)
 

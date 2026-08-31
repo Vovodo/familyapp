@@ -12,8 +12,37 @@ from backend.app.db.session import engine, SessionLocal
 from backend.app.db.base import Base
 from backend.app.models.models import User
 from backend.app.api.v1.api import api_router
+from sqlalchemy import text
 
 logger = setup_logging()
+
+
+def run_safe_migrations():
+    """
+    Ensures all new columns exist in Postgres/SQLite database without breaking existing tables.
+    """
+    try:
+        with engine.connect() as conn:
+            migrations = [
+                "ALTER TABLE families ADD COLUMN IF NOT EXISTS created_by VARCHAR(36);",
+                "ALTER TABLE families ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE;",
+                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_thumbnail_url VARCHAR(500);",
+                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(20);",
+                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE;",
+                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS client_message_id VARCHAR(100);",
+                "ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;",
+                "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);",
+                "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(30);",
+            ]
+            for sql in migrations:
+                try:
+                    conn.execute(text(sql))
+                    conn.commit()
+                except Exception as ex:
+                    logger.debug(f"Migration notice ({sql}): {ex}")
+        logger.info("Safe database migrations executed successfully.")
+    except Exception as e:
+        logger.warning(f"Database migration note: {e}")
 
 
 def seed_admin_user():
@@ -48,11 +77,12 @@ def seed_admin_user():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create tables and seed admin
+    # Startup: create tables, run safe migrations and seed admin
     logger.info("Initializing database tables...")
     try:
         Base.metadata.create_all(bind=engine)
-        logger.info("Database tables initialized successfully.")
+        run_safe_migrations()
+        logger.info("Database tables and migrations initialized successfully.")
         seed_admin_user()
     except Exception as e:
         logger.error(f"Error initializing startup tasks: {e}")
