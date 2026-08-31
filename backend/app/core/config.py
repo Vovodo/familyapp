@@ -8,8 +8,16 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     API_V1_STR: str = "/api/v1"
 
-    # CORS
-    CORS_ORIGINS: Union[str, List[str]] = "https://family.rfqcollector.com,http://localhost:5173,http://localhost:3000,capacitor://localhost,http://localhost"
+    # CORS configuration for Web and Capacitor Android
+    CORS_ORIGINS: Union[str, List[str]] = (
+        "https://family.rfqcollector.com,"
+        "https://familyapi.rfqcollector.com,"
+        "capacitor://localhost,"
+        "http://localhost,"
+        "https://localhost,"
+        "http://localhost:5173,"
+        "http://localhost:3000"
+    )
 
     @property
     def cors_origins_list(self) -> List[str]:
