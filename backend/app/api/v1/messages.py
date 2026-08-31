@@ -73,6 +73,7 @@ def get_messages(
         results.append(
             MessageResponse(
                 id=msg.id,
+                client_message_id=msg.client_message_id,
                 family_id=msg.family_id,
                 sender_id=msg.sender_id,
                 content=msg.content,
@@ -97,7 +98,7 @@ def send_message(
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Sends a new text or media message to the family group with zero-overhead query path.
+    Sends a new text or media message to the family group with idempotent client_message_id deduplication.
     """
     if not msg_in.content and not msg_in.media_url:
         raise HTTPException(
@@ -105,9 +106,37 @@ def send_message(
             detail="Mesaj metni veya medya içeriği gereklidir."
         )
 
+    # Idempotency Guard: If client_message_id already exists for this family, return existing record
+    if msg_in.client_message_id:
+        existing = (
+            db.query(Message)
+            .filter(
+                Message.family_id == member.family_id,
+                Message.client_message_id == msg_in.client_message_id
+            )
+            .first()
+        )
+        if existing:
+            return MessageResponse(
+                id=existing.id,
+                client_message_id=existing.client_message_id,
+                family_id=existing.family_id,
+                sender_id=existing.sender_id,
+                content=existing.content,
+                media_url=existing.media_url,
+                media_thumbnail_url=existing.media_thumbnail_url,
+                media_type=existing.media_type,
+                is_edited=existing.is_edited,
+                created_at=existing.created_at,
+                sender_name=current_user.full_name,
+                sender_avatar=current_user.avatar_url,
+                sender_nickname=member.nickname
+            )
+
     msg = Message(
         family_id=member.family_id,
         sender_id=current_user.id,
+        client_message_id=msg_in.client_message_id,
         content=msg_in.content,
         media_url=msg_in.media_url,
         media_thumbnail_url=msg_in.media_thumbnail_url,
@@ -119,6 +148,7 @@ def send_message(
 
     return MessageResponse(
         id=msg.id,
+        client_message_id=msg.client_message_id,
         family_id=msg.family_id,
         sender_id=msg.sender_id,
         content=msg.content,
@@ -129,8 +159,7 @@ def send_message(
         created_at=msg.created_at,
         sender_name=current_user.full_name,
         sender_avatar=current_user.avatar_url,
-        sender_nickname=member.nickname,
-        client_message_id=msg_in.client_message_id
+        sender_nickname=member.nickname
     )
 
 

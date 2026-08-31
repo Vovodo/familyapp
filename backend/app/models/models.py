@@ -87,6 +87,7 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
+    client_message_id = Column(String(64), nullable=True, index=True)
     family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
     sender_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=True)

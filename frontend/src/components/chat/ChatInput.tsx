@@ -21,6 +21,7 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
   }) => {
     const [text, setText] = useState('');
     const typingTimeoutRef = useRef<any>(null);
+    const isSubmittingRef = useRef(false);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = e.target.value;
@@ -37,10 +38,11 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
       }, 2500);
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
-      e.preventDefault();
+    const submitMessage = () => {
       const trimmed = text.trim();
-      if (!trimmed || disabled) return;
+      if (!trimmed || disabled || isSubmittingRef.current) return;
+
+      isSubmittingRef.current = true;
 
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
@@ -49,12 +51,22 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
 
       setText('');
       onSend(trimmed);
+
+      // Release guard on next event tick
+      setTimeout(() => {
+        isSubmittingRef.current = false;
+      }, 100);
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+      e.preventDefault();
+      submitMessage();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        handleSubmit(e);
+        submitMessage();
       }
     };
 

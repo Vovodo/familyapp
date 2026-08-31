@@ -76,7 +76,7 @@ export const ChatPage: React.FC = () => {
       const res = await api.get<Message[]>('/messages/', {
         params: { limit: 40 },
       });
-      setMessages(res.data);
+      setMessages(res.data.map((m) => ({ ...m, status: 'sent' })));
       setHasMore(res.data.length >= 40);
       setTimeout(() => scrollToBottom(false), 50);
     } catch (err: any) {
@@ -106,13 +106,15 @@ export const ChatPage: React.FC = () => {
         setHasMore(false);
       } else {
         setMessages((prev) => {
-          // Prepend older messages avoiding duplicates
+          // Prepend older messages avoiding any duplicates
           const existingIds = new Set(prev.map((m) => m.id));
-          const newOlder = res.data.filter((m) => !existingIds.has(m.id));
+          const newOlder = res.data
+            .filter((m) => !existingIds.has(m.id))
+            .map((m) => ({ ...m, status: 'sent' as const }));
           return [...newOlder, ...prev];
         });
 
-        // Compensate scroll position immediately so user doesn't jump
+        // Compensate scroll position immediately so user's view does not jump
         requestAnimationFrame(() => {
           if (container) {
             const newScrollHeight = container.scrollHeight;
@@ -173,27 +175,18 @@ export const ChatPage: React.FC = () => {
         const newMsg = payload.new as Message;
 
         setMessages((prev) => {
-          // Deterministic deduplication via id or client_message_id
-          const exists = prev.some(
+          // Robust Multi-Key Deduplication check:
+          // 1. Exact ID match
+          // 2. Client message ID match
+          // 3. Optimistic match (same sender, same content, status sending/temp ID)
+          const matchIndex = prev.findIndex(
             (m) =>
               m.id === newMsg.id ||
               (newMsg.client_message_id && m.client_message_id === newMsg.client_message_id) ||
-              (m.id.startsWith('temp-') &&
+              ((m.status === 'sending' || m.id.startsWith('cmsg-') || m.id.startsWith('temp-')) &&
                 m.sender_id === newMsg.sender_id &&
                 m.content === newMsg.content)
           );
-
-          if (exists) {
-            return prev.map((m) =>
-              m.id === newMsg.id ||
-              (newMsg.client_message_id && m.client_message_id === newMsg.client_message_id) ||
-              (m.id.startsWith('temp-') &&
-                m.sender_id === newMsg.sender_id &&
-                m.content === newMsg.content)
-                ? { ...newMsg, status: 'sent' }
-                : m
-            );
-          }
 
           // Lookup sender info from family members
           const senderMember = currentFamily.members?.find((m) => m.user_id === newMsg.sender_id);
@@ -204,6 +197,15 @@ export const ChatPage: React.FC = () => {
             sender_nickname: senderMember?.nickname,
             sender_avatar: senderMember?.user?.avatar_url,
           };
+
+          if (matchIndex !== -1) {
+            // Replace the optimistic message in-place
+            const nextList = [...prev];
+            nextList[matchIndex] = enrichedMsg;
+            return nextList;
+          }
+
+          // If not found in current list, append as new message
           return [...prev, enrichedMsg];
         });
 
@@ -309,14 +311,24 @@ export const ChatPage: React.FC = () => {
           client_message_id: clientMsgId,
         });
 
-        // Confirm sent status and replace with server ID
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.client_message_id === clientMsgId || m.id === clientMsgId
-              ? { ...res.data, status: 'sent' }
+        const serverMsg = res.data;
+
+        // Reconcile with state:
+        // If Realtime already added serverMsg.id, remove the optimistic clientMsgId
+        // Otherwise replace clientMsgId with serverMsg
+        setMessages((prev) => {
+          const alreadyHasServerId = prev.some((m) => m.id === serverMsg.id);
+          if (alreadyHasServerId) {
+            // Realtime already delivered it; remove the optimistic placeholder
+            return prev.filter((m) => m.id !== clientMsgId && m.client_message_id !== clientMsgId);
+          }
+          // Replace optimistic placeholder with server-confirmed message
+          return prev.map((m) =>
+            m.id === clientMsgId || m.client_message_id === clientMsgId
+              ? { ...serverMsg, status: 'sent' }
               : m
-          )
-        );
+          );
+        });
       } catch (err: any) {
         console.error('Send message failed:', err);
         // Mark as failed with retry action
@@ -348,9 +360,14 @@ export const ChatPage: React.FC = () => {
           client_message_id: failedMsg.client_message_id,
         });
 
-        setMessages((prev) =>
-          prev.map((m) => (m.id === failedMsg.id ? { ...res.data, status: 'sent' } : m))
-        );
+        const serverMsg = res.data;
+        setMessages((prev) => {
+          const alreadyHasServerId = prev.some((m) => m.id === serverMsg.id && m.id !== failedMsg.id);
+          if (alreadyHasServerId) {
+            return prev.filter((m) => m.id !== failedMsg.id);
+          }
+          return prev.map((m) => (m.id === failedMsg.id ? { ...serverMsg, status: 'sent' } : m));
+        });
       } catch {
         setMessages((prev) =>
           prev.map((m) => (m.id === failedMsg.id ? { ...m, status: 'failed' } : m))
@@ -403,13 +420,18 @@ export const ChatPage: React.FC = () => {
         client_message_id: clientMsgId,
       });
 
-      setMessages((prev) =>
-        prev.map((m) =>
+      const serverMsg = chatRes.data;
+      setMessages((prev) => {
+        const alreadyHasServerId = prev.some((m) => m.id === serverMsg.id);
+        if (alreadyHasServerId) {
+          return prev.filter((m) => m.id !== clientMsgId && m.client_message_id !== clientMsgId);
+        }
+        return prev.map((m) =>
           m.id === clientMsgId || m.client_message_id === clientMsgId
-            ? { ...chatRes.data, status: 'sent' }
+            ? { ...serverMsg, status: 'sent' }
             : m
-        )
-      );
+        );
+      });
     } catch (err: any) {
       setMessages((prev) =>
         prev.map((m) => (m.id === clientMsgId ? { ...m, status: 'failed' } : m))
