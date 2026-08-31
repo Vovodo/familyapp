@@ -120,6 +120,27 @@ def join_family(
     return family
 
 
+@router.get("/my-families", response_model=List[FamilyResponse])
+@router.get("/", response_model=List[FamilyResponse])
+def get_my_families(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns all families that the current user is a member of.
+    """
+    memberships = db.query(FamilyMember).filter(FamilyMember.user_id == current_user.id).all()
+    family_ids = [m.family_id for m in memberships]
+
+    if not family_ids and current_user.role == "admin":
+        return db.query(Family).all()
+
+    if not family_ids:
+        return []
+
+    return db.query(Family).filter(Family.id.in_(family_ids)).all()
+
+
 @router.get("/me", response_model=FamilyResponse)
 def get_current_family(
     db: Session = Depends(get_db),
