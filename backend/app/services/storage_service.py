@@ -22,7 +22,18 @@ class StorageService:
                     settings.SUPABASE_URL,
                     settings.SUPABASE_SERVICE_ROLE_KEY
                 )
-                logger.info("Supabase storage client initialized.")
+                try:
+                    buckets = self.supabase_client.storage.list_buckets()
+                    names = [b.name for b in buckets] if buckets else []
+                    if settings.STORAGE_BUCKET_NAME not in names:
+                        self.supabase_client.storage.create_bucket(
+                            settings.STORAGE_BUCKET_NAME,
+                            options={"public": True}
+                        )
+                        logger.info(f"Created public Supabase storage bucket: {settings.STORAGE_BUCKET_NAME}")
+                except Exception as b_err:
+                    logger.debug(f"Bucket check note: {b_err}")
+                logger.info("Supabase storage client initialized successfully.")
             except Exception as e:
                 logger.warning(f"Failed to initialize Supabase client: {e}. Falling back to local storage.")
 
