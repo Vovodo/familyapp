@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { Clock, CheckCheck, AlertCircle, Trash2, RotateCw, Check, Heart, Laugh, ThumbsUp, PartyPopper, Flame } from 'lucide-react';
+import { Clock, Check, CheckCheck, AlertCircle, RotateCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Message } from '../../types';
@@ -19,10 +19,7 @@ interface MessageBubbleProps {
   onDelete?: (id: string) => void;
   onRetry?: (message: Message) => void;
   onImageClick?: (url: string) => void;
-  onReact?: (messageId: string, emoji: string) => void;
 }
-
-const QUICK_REACTIONS = ['❤️', '😂', '👍', '🙏', '🥳', '👏'];
 
 // Extracts first http/https link from content
 const extractFirstUrl = (text?: string | null): string | null => {
@@ -45,12 +42,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     onDelete,
     onRetry,
     onImageClick,
-    onReact,
   }) => {
     const [imageLoaded, setImageLoaded] = useState(false);
-    const [showReactions, setShowReactions] = useState(false);
     const longPressTimerRef = useRef<any>(null);
-    const isLongPressTriggeredRef = useRef(false);
+    const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
 
     const isDeleted = message.content === '🚫 Bu mesaj silindi' || (message as any).is_deleted;
     const firstUrl = useMemo(() => (!isDeleted ? extractFirstUrl(message.content) : null), [message.content, isDeleted]);
@@ -72,24 +67,47 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
         ? 'text-lg leading-relaxed font-medium'
         : 'text-sm';
 
-    // Touch handlers for Long-Press
-    const handleTouchStart = () => {
-      isLongPressTriggeredRef.current = false;
+    // Touch handlers with strict SCROLL PROTECTION (Cancel long-press if finger moves)
+    const handleTouchStart = (e: React.TouchEvent) => {
+      // Only allow long-press selection on YOUR OWN messages
+      if (!isMe || isDeleted) return;
+
+      const touch = e.touches[0];
+      touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+      }
+
       longPressTimerRef.current = setTimeout(() => {
-        isLongPressTriggeredRef.current = true;
         if (navigator.vibrate) navigator.vibrate(40);
         onLongPress?.(message.id);
-      }, 450);
+      }, 600);
+    };
+
+    const handleTouchMove = (e: React.TouchEvent) => {
+      if (!touchStartPosRef.current || !longPressTimerRef.current) return;
+      const touch = e.touches[0];
+      const deltaX = Math.abs(touch.clientX - touchStartPosRef.current.x);
+      const deltaY = Math.abs(touch.clientY - touchStartPosRef.current.y);
+
+      // If user moved finger more than 8 pixels, it's a scroll -> cancel long press immediately!
+      if (deltaX > 8 || deltaY > 8) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
     };
 
     const handleTouchEnd = () => {
       if (longPressTimerRef.current) {
         clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
       }
+      touchStartPosRef.current = null;
     };
 
     const handleBubbleClick = (e: React.MouseEvent) => {
-      if (isSelectionMode) {
+      if (isSelectionMode && isMe) {
         e.stopPropagation();
         onToggleSelect?.(message.id);
       }
@@ -119,15 +137,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
         }`}
         onClick={handleBubbleClick}
         onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
         onContextMenu={(e) => {
-          e.preventDefault();
-          onLongPress?.(message.id);
+          if (isMe && !isDeleted) {
+            e.preventDefault();
+            onLongPress?.(message.id);
+          }
         }}
       >
-        {/* Selection Checkbox */}
-        {isSelectionMode && (
+        {/* Selection Checkbox (Only shown on YOUR OWN messages) */}
+        {isSelectionMode && isMe && (
           <div
             onClick={(e) => {
               e.stopPropagation();
@@ -177,7 +198,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
               : 'bg-white text-gray-900 border border-gray-200/90 shadow-gray-200/30'
           }`}
         >
-          {/* Sender Header (Only first in group for incoming) */}
+          {/* Sender Header */}
           {!isMe && isFirstInGroup && !isDeleted && (
             <div className="text-[11px] font-black mb-1 text-family-600 leading-none">
               {senderDisplayName}
@@ -189,7 +210,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
             <div className="mb-2 -mx-1.5 -mt-1.5 rounded-2xl overflow-hidden bg-black/5 relative">
               {!imageLoaded && (
                 <div className="w-full h-44 sm:h-52 bg-black/10 animate-pulse flex items-center justify-center text-xs text-gray-400">
-                  Fotoğraf yükleniyor...
+                  Yükleniyor...
                 </div>
               )}
               <img
@@ -218,7 +239,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
           {/* Rich OpenGraph Link Preview Card */}
           {firstUrl && <LinkPreviewCard url={firstUrl} isMe={isMe} />}
 
-          {/* Footer Metadata: Time + Delivery Ticks */}
+          {/* Footer Metadata: Time + Delivery Status Ticks */}
           <div
             className={`flex items-center justify-end gap-1 mt-1 text-[10px] select-none ${
               isMe ? 'text-white/70' : 'text-gray-400'
@@ -227,10 +248,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
             {message.is_edited && !isDeleted && <span>(düzenlendi)</span>}
             <span>{timeStr}</span>
 
-            {isMe && (
-              <span>
+            {isMe && !isDeleted && (
+              <span className="inline-flex items-center ml-0.5">
                 {message.status === 'sending' ? (
-                  <Clock className="w-3 h-3 text-white/50 animate-pulse" />
+                  <span title="Gönderiliyor...">
+                    <Clock className="w-3 h-3 text-white/60 animate-pulse" />
+                  </span>
                 ) : message.status === 'failed' ? (
                   <button
                     type="button"
@@ -238,13 +261,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                       e.stopPropagation();
                       onRetry?.(message);
                     }}
-                    className="flex items-center gap-0.5 text-rose-200 hover:text-white"
+                    className="flex items-center gap-0.5 text-rose-200 hover:text-white cursor-pointer"
+                    title="Yeniden Dene"
                   >
                     <AlertCircle className="w-3 h-3 text-rose-300" />
                     <RotateCw className="w-2.5 h-2.5" />
                   </button>
                 ) : (
-                  <CheckCheck className="w-3.5 h-3.5 text-sky-200" />
+                  <span title="İletildi">
+                    <CheckCheck className="w-3.5 h-3.5 text-sky-200" />
+                  </span>
                 )}
               </span>
             )}

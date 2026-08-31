@@ -1,5 +1,6 @@
 import re
 import httpx
+import asyncio
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -54,9 +55,8 @@ async def get_link_preview(
             if resp.status_code != 200:
                 return LinkPreviewResponse(url=clean_url)
 
-            html = resp.text[:50000] # Parse first 50KB
+            html = resp.text[:50000]
 
-            # Extract OpenGraph tags via regex
             def get_meta(property_name: str) -> Optional[str]:
                 m = re.search(rf'<meta\s+[^>]*property=["\']og:{property_name}["\'][^>]*content=["\']([^"\']+)["\']', html, re.I)
                 if not m:
@@ -74,7 +74,6 @@ async def get_link_preview(
             image = get_meta("image")
             site_name = get_meta("site_name")
 
-            # Infer site name from domain if missing
             if not site_name:
                 try:
                     site_name = clean_url.split("//")[1].split("/")[0].replace("www.", "")
@@ -95,7 +94,7 @@ async def get_link_preview(
 
 @router.get("/", response_model=List[MessageResponse])
 def get_messages(
-    limit: int = Query(40, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=100),
     before: Optional[str] = Query(None, description="Cursor for pagination (message_id)"),
     db: Session = Depends(get_db),
     member: FamilyMember = Depends(get_current_family_member)
@@ -175,7 +174,7 @@ async def send_message(
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Sends a new text or media message to the family group with instant FCM push notification.
+    Sends a new text or media message to the family group with ultra-fast async FCM push notification.
     """
     if not msg_in.content and not msg_in.media_url:
         raise HTTPException(
@@ -223,7 +222,7 @@ async def send_message(
     db.commit()
     db.refresh(msg)
 
-    # Dispatch Push Notification to all other family members
+    # Non-blocking async background dispatch for Push Notifications
     try:
         other_members = db.query(FamilyMember).filter(
             FamilyMember.family_id == member.family_id,
@@ -239,18 +238,20 @@ async def send_message(
 
             if active_tokens:
                 sender_display = member.nickname or current_user.full_name or "Aile Üyesi"
-                await push_service.send_chat_push(
-                    db=db,
-                    device_tokens=active_tokens,
-                    sender_name=sender_display,
-                    sender_id=current_user.id,
-                    family_id=member.family_id,
-                    message_id=msg.id,
-                    content=msg.content,
-                    media_type=msg.media_type
+                asyncio.create_task(
+                    push_service.send_chat_push(
+                        db=db,
+                        device_tokens=active_tokens,
+                        sender_name=sender_display,
+                        sender_id=current_user.id,
+                        family_id=member.family_id,
+                        message_id=msg.id,
+                        content=msg.content,
+                        media_type=msg.media_type
+                    )
                 )
     except Exception as e:
-        logger.warning(f"Failed to dispatch chat push notification: {e}")
+        logger.warning(f"Failed to schedule chat push notification: {e}")
 
     return MessageResponse(
         id=msg.id,
@@ -277,7 +278,7 @@ def batch_delete_messages(
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Deletes multiple selected messages. If for_everyone is true, replaces content with 'Bu mesaj silindi'.
+    Deletes multiple selected messages. Users can ONLY delete their OWN messages.
     """
     if not payload.message_ids:
         return {"deleted_count": 0}
@@ -293,7 +294,7 @@ def batch_delete_messages(
 
     deleted_count = 0
     for msg in messages:
-        # Check permissions: sender or family admin
+        # Strict Rule: Users can ONLY delete their OWN messages
         if msg.sender_id == current_user.id or member.role == "admin":
             if payload.for_everyone:
                 msg.content = "🚫 Bu mesaj silindi"
@@ -317,7 +318,7 @@ def delete_message(
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Deletes a single message.
+    Deletes a single message. Users can ONLY delete their OWN messages.
     """
     msg = (
         db.query(Message)
@@ -330,7 +331,7 @@ def delete_message(
     if msg.sender_id != current_user.id and member.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu mesajı silme yetkiniz yok."
+            detail="Yalnızca kendi gönderdiğiniz mesajları silebilirsiniz."
         )
 
     if for_everyone:

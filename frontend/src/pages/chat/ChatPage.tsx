@@ -31,7 +31,7 @@ export const ChatPage: React.FC = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  // Multi-Selection State
+  // Multi-Selection State (Only user's own messages)
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
@@ -105,14 +105,16 @@ export const ChatPage: React.FC = () => {
   };
 
   // Load Messages Instant & Sync
-  const loadMessagesInstantAndSync = async () => {
+  const loadMessagesInstantAndSync = async (silent = false) => {
     if (!currentFamily) return;
 
-    const cached = await localChatStorage.getMessages(currentFamily.id);
-    if (cached && cached.length > 0) {
-      setMessages(cached);
-      setIsLoading(false);
-      setTimeout(() => scrollToBottom(false), 20);
+    if (!silent) {
+      const cached = await localChatStorage.getMessages(currentFamily.id);
+      if (cached && cached.length > 0) {
+        setMessages(cached);
+        setIsLoading(false);
+        setTimeout(() => scrollToBottom(false), 20);
+      }
     }
 
     try {
@@ -128,20 +130,31 @@ export const ChatPage: React.FC = () => {
 
       setHasMore(res.data.length >= 50);
 
-      if (!cached || cached.length === 0) {
+      if (!silent) {
         setTimeout(() => scrollToBottom(false), 30);
       }
     } catch (err: any) {
-      if (!cached || cached.length === 0) {
+      if (!silent) {
         setError('Mesajlar yüklenirken bir problem oluştu.');
       }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadMessagesInstantAndSync();
+    loadMessagesInstantAndSync(false);
+  }, [currentFamily?.id]);
+
+  // Silent background reconciliation every 6 seconds for guaranteed message delivery
+  useEffect(() => {
+    if (!currentFamily) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadMessagesInstantAndSync(true);
+      }
+    }, 6000);
+    return () => clearInterval(interval);
   }, [currentFamily?.id]);
 
   // Fetch Older Messages (Infinite Scroll)
@@ -469,13 +482,19 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  // Long-Press & Multi-Selection Handlers
+  // Long-Press & Multi-Selection Handlers (ONLY for user's own messages)
   const handleLongPressMessage = (id: string) => {
-    setIsSelectionMode(true);
-    setSelectedMessageIds((prev) => new Set(prev).add(id));
+    const targetMsg = messages.find((m) => m.id === id);
+    if (targetMsg && targetMsg.sender_id === user?.id) {
+      setIsSelectionMode(true);
+      setSelectedMessageIds(new Set([id]));
+    }
   };
 
   const handleToggleSelectMessage = (id: string) => {
+    const targetMsg = messages.find((m) => m.id === id);
+    if (!targetMsg || targetMsg.sender_id !== user?.id) return;
+
     setSelectedMessageIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -491,7 +510,7 @@ export const ChatPage: React.FC = () => {
   };
 
   const handleSelectAll = () => {
-    const myMessages = messages.filter((m) => m.sender_id === user?.id || activeMember?.role === 'admin');
+    const myMessages = messages.filter((m) => m.sender_id === user?.id);
     setSelectedMessageIds(new Set(myMessages.map((m) => m.id)));
   };
 
@@ -500,7 +519,7 @@ export const ChatPage: React.FC = () => {
     setSelectedMessageIds(new Set());
   };
 
-  // Batch Delete Messages (WhatsApp Style)
+  // Batch Delete Messages
   const handleBatchDelete = async () => {
     const ids = Array.from(selectedMessageIds);
     if (ids.length === 0 || isDeletingBatch) return;
@@ -520,7 +539,6 @@ export const ChatPage: React.FC = () => {
         )
       );
 
-      // Broadcast delete to group
       channelRef.current?.send({
         type: 'broadcast',
         event: 'message_deleted',
@@ -574,74 +592,77 @@ export const ChatPage: React.FC = () => {
         onChange={handleFileInputChange}
       />
 
-      {/* TOP BAR / SELECTION HEADER */}
-      {isSelectionMode ? (
-        <div className="bg-family-700 text-white px-4 py-3 flex items-center justify-between shadow-md z-30 animate-in slide-in-from-top duration-150">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleCancelSelection}
-              className="p-1.5 rounded-xl hover:bg-white/20 transition cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            <span className="font-extrabold text-sm sm:text-base">
-              {selectedMessageIds.size} mesaj seçildi
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleSelectAll}
-              className="text-xs font-bold px-2.5 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 transition cursor-pointer"
-            >
-              Tümünü Seç
-            </button>
-
-            <button
-              type="button"
-              onClick={handleBatchDelete}
-              disabled={isDeletingBatch}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
-            >
-              {isDeletingBatch ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Trash2 className="w-4 h-4" />
-              )}
-              <span>Sil</span>
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white/90 backdrop-blur-md border-b border-gray-200/80 px-4 py-2.5 flex items-center justify-between z-20">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-family-500 to-rose-500 text-white flex items-center justify-center shadow-xs">
-              <MessageCircle className="w-5 h-5" />
+      {/* STICKY TOP BAR / SELECTION HEADER (Glued to top at all times) */}
+      <div className="sticky top-0 z-40 w-full shadow-xs">
+        {isSelectionMode ? (
+          <div className="bg-family-700 text-white px-4 py-3 flex items-center justify-between shadow-md animate-in slide-in-from-top duration-150">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleCancelSelection}
+                className="p-1.5 rounded-xl hover:bg-white/20 transition cursor-pointer"
+                title="Vazgeç"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <span className="font-extrabold text-sm sm:text-base">
+                {selectedMessageIds.size} mesaj seçildi
+              </span>
             </div>
-            <div>
-              <h2 className="text-sm font-black text-gray-900 leading-tight">
-                {currentFamily?.name || 'Aile Sohbeti'}
-              </h2>
-              <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Canlı & Uçtan Uca Aile</span>
-              </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                className="text-xs font-bold px-2.5 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 transition cursor-pointer"
+              >
+                Tümünü Seç
+              </button>
+
+              <button
+                type="button"
+                onClick={handleBatchDelete}
+                disabled={isDeletingBatch || selectedMessageIds.size === 0}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-extrabold shadow-sm transition cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingBatch ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>Sil</span>
+              </button>
             </div>
           </div>
+        ) : (
+          <div className="bg-white/95 backdrop-blur-md border-b border-gray-200/80 px-4 py-2.5 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-family-500 to-rose-500 text-white flex items-center justify-center shadow-xs">
+                <MessageCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-gray-900 leading-tight">
+                  {currentFamily?.name || 'Aile Sohbeti'}
+                </h2>
+                <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Canlı Aile Grubu</span>
+                </p>
+              </div>
+            </div>
 
-          {/* Settings Trigger */}
-          <button
-            type="button"
-            onClick={() => setShowSettingsModal(true)}
-            className="p-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 transition active:scale-95 cursor-pointer shadow-2xs"
-            title="Sohbet Ayarları"
-          >
-            <Sliders className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+            {/* Settings Trigger */}
+            <button
+              type="button"
+              onClick={() => setShowSettingsModal(true)}
+              className="p-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 transition active:scale-95 cursor-pointer shadow-2xs"
+              title="Sohbet Ayarları"
+            >
+              <Sliders className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* MESSAGES SCROLL CONTAINER */}
       <div
