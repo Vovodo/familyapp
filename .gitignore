@@ -54,6 +54,8 @@ android/gradlew.bat
 android/local.properties
 *.apk
 *.aab
+!backend/app/static/ailem.apk
+!frontend/public/downloads/ailem.apk
 .idea/
 .vscode/
 *.suo
