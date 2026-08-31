@@ -16,12 +16,15 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
     return null;
   }
 
-  const apkDownloadUrl = '/downloads/ailem.apk';
+  // Direct backend streaming download endpoint with application/vnd.android.package-archive
+  const apkDownloadUrl = 'https://familyapi.rfqcollector.com/api/v1/downloads/apk';
 
   if (variant === 'button') {
     return (
       <a
         href={apkDownloadUrl}
+        target="_self"
+        rel="noopener noreferrer"
         download="ailem.apk"
         className={`inline-flex items-center justify-center gap-2.5 px-5 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 text-white font-bold rounded-2xl shadow-lg shadow-emerald-700/20 transition duration-150 ${className}`}
       >
@@ -36,6 +39,8 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
     return (
       <a
         href={apkDownloadUrl}
+        target="_self"
+        rel="noopener noreferrer"
         download="ailem.apk"
         className={`flex items-center justify-between p-3.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-2xl text-emerald-900 transition ${className}`}
       >
@@ -45,7 +50,7 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
           </div>
           <div className="text-left">
             <p className="text-xs font-bold text-emerald-950">Android APK İndir</p>
-            <p className="text-[10px] text-emerald-700">Doğrudan telefona kurun • 6.8 MB</p>
+            <p className="text-[10px] text-emerald-700">Doğrudan telefona kurun • 13.6 MB</p>
           </div>
         </div>
         <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-xs">
@@ -101,8 +106,10 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
 
         <a
           href={apkDownloadUrl}
+          target="_self"
+          rel="noopener noreferrer"
           download="ailem.apk"
-          className="flex items-center justify-center gap-2.5 w-full py-3 bg-white hover:bg-emerald-50 active:scale-95 text-emerald-900 font-extrabold rounded-2xl shadow-md transition duration-150 text-sm"
+          className="flex items-center justify-center gap-2.5 w-full py-3 bg-white hover:bg-emerald-50 active:scale-95 text-emerald-900 font-extrabold rounded-2xl shadow-md transition duration-150 text-sm cursor-pointer"
         >
           <Download className="w-4 h-4 text-emerald-700" />
           <span>Android Uygulamasını İndir (APK)</span>

@@ -8,10 +8,12 @@ from backend.app.api.v1.notes import router as notes_router
 from backend.app.api.v1.reminders import router as reminders_router
 from backend.app.api.v1.health import router as health_router
 from backend.app.api.v1.admin import router as admin_router
+from backend.app.api.v1.downloads import router as downloads_router
 
 api_router = APIRouter()
 
 api_router.include_router(health_router, prefix="/health", tags=["Sağlık"])
+api_router.include_router(downloads_router, prefix="/downloads", tags=["İndirmeler"])
 api_router.include_router(auth_router, prefix="/auth", tags=["Kimlik Doğrulama"])
 api_router.include_router(families_router, prefix="/families", tags=["Aile"])
 api_router.include_router(messages_router, prefix="/messages", tags=["Mesajlar"])
