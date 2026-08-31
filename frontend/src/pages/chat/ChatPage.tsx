@@ -49,6 +49,8 @@ export const ChatPage: React.FC = () => {
   });
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const initialScrollDoneRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const channelRef = useRef<any>(null);
   const isNearBottomRef = useRef(true);
@@ -73,15 +75,43 @@ export const ChatPage: React.FC = () => {
   // Scroll Helpers
   const scrollToBottom = useCallback((smooth = true) => {
     if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTo({
-        top: scrollContainerRef.current.scrollHeight,
-        behavior: smooth ? 'smooth' : 'auto',
-      });
+      if (smooth) {
+        scrollContainerRef.current.scrollTo({
+          top: scrollContainerRef.current.scrollHeight,
+          behavior: 'smooth',
+        });
+      } else {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      }
       setShowScrollBottom(false);
       setUnreadCount(0);
       isNearBottomRef.current = true;
     }
   }, []);
+
+  // Force Instant Scroll to Bottom when messages are loaded
+  useEffect(() => {
+    if (messages.length > 0 && !initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true;
+
+      // 1. Immediate instant jump
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      }
+
+      // 2. Next animation frame
+      requestAnimationFrame(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      });
+
+      // 3. Timers to catch image loads / font layout
+      setTimeout(() => scrollToBottom(false), 50);
+      setTimeout(() => scrollToBottom(false), 200);
+      setTimeout(() => scrollToBottom(false), 500);
+    }
+  }, [messages.length, scrollToBottom]);
 
   const handleScroll = () => {
     const container = scrollContainerRef.current;
@@ -113,7 +143,7 @@ export const ChatPage: React.FC = () => {
       if (cached && cached.length > 0) {
         setMessages(cached);
         setIsLoading(false);
-        setTimeout(() => scrollToBottom(false), 20);
+        setTimeout(() => scrollToBottom(false), 10);
       }
     }
 
@@ -131,7 +161,7 @@ export const ChatPage: React.FC = () => {
       setHasMore(res.data.length >= 50);
 
       if (!silent) {
-        setTimeout(() => scrollToBottom(false), 30);
+        setTimeout(() => scrollToBottom(false), 20);
       }
     } catch (err: any) {
       if (!silent) {
@@ -143,6 +173,7 @@ export const ChatPage: React.FC = () => {
   };
 
   useEffect(() => {
+    initialScrollDoneRef.current = false;
     loadMessagesInstantAndSync(false);
   }, [currentFamily?.id]);
 
@@ -809,6 +840,8 @@ export const ChatPage: React.FC = () => {
             </React.Fragment>
           );
         })}
+        {/* Scroll anchor at the very bottom */}
+        <div ref={messagesEndRef} className="h-px w-full" />
       </div>
 
       {/* Typing Indicator */}
