@@ -75,15 +75,20 @@ def seed_admin_user():
         db.close()
 
 
+from backend.app.services.cleanup_service import run_periodic_cleanup_job
+import asyncio
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create tables, run safe migrations and seed admin
+    # Startup: create tables, run safe migrations, seed admin, and start auto-cleanup job
     logger.info("Initializing database tables...")
     try:
         Base.metadata.create_all(bind=engine)
         run_safe_migrations()
         logger.info("Database tables and migrations initialized successfully.")
         seed_admin_user()
+        # Launch automatic 14-day old message purge job in background
+        asyncio.create_task(run_periodic_cleanup_job())
     except Exception as e:
         logger.error(f"Error initializing startup tasks: {e}")
     yield

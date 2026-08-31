@@ -346,3 +346,39 @@ def delete_message(
         db.delete(msg)
         db.commit()
         return {"status": "success", "message": "Mesaj tamamen silindi."}
+
+
+@router.post("/cleanup-old")
+def cleanup_old_messages(
+    days: int = Query(14, ge=1, le=365, description="Kaç günden eski mesajların temizleneceği"),
+    db: Session = Depends(get_db),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Purges text, audio notes, and GIF messages older than specified days (default: 14 days / 2 weeks).
+    Preserves all photos and shared family media intact.
+    """
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    old_messages = (
+        db.query(Message)
+        .filter(
+            Message.family_id == member.family_id,
+            Message.created_at < cutoff,
+            Message.media_type != "image"
+        )
+        .all()
+    )
+
+    deleted_count = len(old_messages)
+    for msg in old_messages:
+        db.delete(msg)
+
+    db.commit()
+    logger.info(f"Purged {deleted_count} old messages (> {days} days) for family {member.family_id}")
+    return {
+        "status": "success",
+        "deleted_count": deleted_count,
+        "message": f"{days} günden eski {deleted_count} adet sohbet ve ses kaydı temizlendi. Fotoğraflarınız korundu."
+    }

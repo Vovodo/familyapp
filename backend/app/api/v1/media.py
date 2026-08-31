@@ -250,3 +250,57 @@ def delete_photo(
     db.delete(media)
     db.commit()
     return {"message": "Fotoğraf silindi."}
+
+
+@router.get("/storage-stats")
+def get_storage_stats(
+    db: Session = Depends(get_db),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Returns current family and global storage quota metrics (Supabase 1 GB free tier).
+    """
+    total_bytes = 0
+    photo_count = db.query(Media).filter(Media.family_id == member.family_id).count()
+    all_media = db.query(Media.file_size).filter(Media.family_id == member.family_id).all()
+    for m in all_media:
+        if m.file_size:
+            total_bytes += m.file_size
+
+    used_mb = round(total_bytes / (1024 * 1024), 2)
+    quota_mb = 1000.0  # 1 GB
+    usage_percent = round((used_mb / quota_mb) * 100, 2)
+
+    return {
+        "used_bytes": total_bytes,
+        "used_mb": used_mb,
+        "quota_mb": quota_mb,
+        "usage_percent": usage_percent,
+        "photo_count": photo_count,
+        "status": "warning" if usage_percent > 80 else "normal",
+        "provider": "Supabase Cloud Storage (1 GB Ücretsiz)" if settings.SUPABASE_URL else "Yerel Sunucu Depolaması"
+    }
+
+
+@router.delete("/clear-all")
+def clear_all_photos(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Deletes all gallery photos for the current family to completely reset/free storage.
+    """
+    photos = db.query(Media).filter(Media.family_id == member.family_id).all()
+    count = len(photos)
+
+    for p in photos:
+        db.delete(p)
+
+    db.commit()
+    logger.info(f"Cleared all {count} photos from family {member.family_id} by user {current_user.id}")
+    return {
+        "status": "success",
+        "message": f"Tüm aile fotoğrafları ({count} adet) başarıyla temizlendi ve depolama alanı boşaltıldı.",
+        "deleted_count": count
+    }
