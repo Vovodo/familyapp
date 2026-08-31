@@ -1,57 +1,84 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  Send,
-  Camera,
-  Trash2,
-  Smile,
-  Loader2,
-  Check,
-  CheckCheck,
-} from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Smile, Loader2, X } from 'lucide-react';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { isSameDay } from 'date-fns';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { Message } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
-import { format } from 'date-fns';
-import { tr } from 'date-fns/locale';
-
-interface TypingUser {
-  userId: string;
-  userName: string;
-  nickname?: string;
-  avatarUrl?: string;
-  timestamp: number;
-}
+import { MessageBubble } from '../../components/chat/MessageBubble';
+import { ChatInput } from '../../components/chat/ChatInput';
+import { DateSeparator } from '../../components/chat/DateSeparator';
+import { ScrollToBottomButton } from '../../components/chat/ScrollToBottomButton';
+import { TypingIndicator, TypingUser } from '../../components/chat/TypingIndicator';
 
 export const ChatPage: React.FC = () => {
   const { user } = useAuth();
   const { currentFamily, activeMember } = useFamily();
+
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const typingTimeoutRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
+  const isNearBottomRef = useRef(true);
 
+  // 1. Scroll Helpers
   const scrollToBottom = useCallback((smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto',
+      });
+      setShowScrollBottom(false);
+      setUnreadCount(0);
+      isNearBottomRef.current = true;
+    }
   }, []);
 
-  // 1. Initial Load of Messages
-  const fetchMessages = async () => {
+  const handleScroll = () => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+    const isAtBottom = distanceToBottom < 80;
+    isNearBottomRef.current = isAtBottom;
+
+    if (isAtBottom) {
+      setShowScrollBottom(false);
+      setUnreadCount(0);
+    } else {
+      setShowScrollBottom(true);
+    }
+
+    // Trigger loading older messages when near top (< 60px)
+    if (scrollTop < 60 && hasMore && !isLoadingOlder && !isLoading) {
+      fetchOlderMessages();
+    }
+  };
+
+  // 2. Fetch Initial Messages (Latest 40)
+  const fetchInitialMessages = async () => {
     if (!currentFamily) return;
+    setIsLoading(true);
     try {
       const res = await api.get<Message[]>('/messages/', {
-        params: { limit: 50 },
+        params: { limit: 40 },
       });
       setMessages(res.data);
+      setHasMore(res.data.length >= 40);
+      setTimeout(() => scrollToBottom(false), 50);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -59,9 +86,54 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  // 2. Setup Realtime Supabase Channel & Listeners
+  // 3. Cursor Pagination: Fetch Older Messages
+  const fetchOlderMessages = async () => {
+    if (!currentFamily || messages.length === 0 || isLoadingOlder || !hasMore) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    setIsLoadingOlder(true);
+    const oldestMsg = messages[0];
+    const previousScrollHeight = container.scrollHeight;
+    const previousScrollTop = container.scrollTop;
+
+    try {
+      const res = await api.get<Message[]>('/messages/', {
+        params: { limit: 30, before: oldestMsg.id },
+      });
+
+      if (res.data.length === 0) {
+        setHasMore(false);
+      } else {
+        setMessages((prev) => {
+          // Prepend older messages avoiding duplicates
+          const existingIds = new Set(prev.map((m) => m.id));
+          const newOlder = res.data.filter((m) => !existingIds.has(m.id));
+          return [...newOlder, ...prev];
+        });
+
+        // Compensate scroll position immediately so user doesn't jump
+        requestAnimationFrame(() => {
+          if (container) {
+            const newScrollHeight = container.scrollHeight;
+            container.scrollTop = newScrollHeight - previousScrollHeight + previousScrollTop;
+          }
+        });
+
+        if (res.data.length < 30) {
+          setHasMore(false);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error fetching older messages:', err);
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  };
+
+  // 4. Setup Supabase Realtime Channel
   useEffect(() => {
-    fetchMessages();
+    fetchInitialMessages();
 
     if (!currentFamily || !supabase) return;
 
@@ -83,13 +155,12 @@ export const ChatPage: React.FC = () => {
       });
     });
 
-    // Listen for stop typing broadcast events
     channel.on('broadcast', { event: 'stop_typing' }, (payload) => {
       const { userId } = payload.payload;
       setTypingUsers((prev) => prev.filter((u) => u.userId !== userId));
     });
 
-    // Listen for new messages inserted in DB
+    // Realtime Postgres INSERT
     channel.on(
       'postgres_changes',
       {
@@ -100,17 +171,35 @@ export const ChatPage: React.FC = () => {
       },
       (payload) => {
         const newMsg = payload.new as Message;
+
         setMessages((prev) => {
-          // Check if message already exists (e.g. from optimistic update)
-          const exists = prev.some((m) => m.id === newMsg.id || (m.id.startsWith('temp-') && m.content === newMsg.content && m.sender_id === newMsg.sender_id));
+          // Deterministic deduplication via id or client_message_id
+          const exists = prev.some(
+            (m) =>
+              m.id === newMsg.id ||
+              (newMsg.client_message_id && m.client_message_id === newMsg.client_message_id) ||
+              (m.id.startsWith('temp-') &&
+                m.sender_id === newMsg.sender_id &&
+                m.content === newMsg.content)
+          );
+
           if (exists) {
-            return prev.map((m) => (m.id.startsWith('temp-') && m.content === newMsg.content ? newMsg : m));
+            return prev.map((m) =>
+              m.id === newMsg.id ||
+              (newMsg.client_message_id && m.client_message_id === newMsg.client_message_id) ||
+              (m.id.startsWith('temp-') &&
+                m.sender_id === newMsg.sender_id &&
+                m.content === newMsg.content)
+                ? { ...newMsg, status: 'sent' }
+                : m
+            );
           }
 
           // Lookup sender info from family members
           const senderMember = currentFamily.members?.find((m) => m.user_id === newMsg.sender_id);
           const enrichedMsg: Message = {
             ...newMsg,
+            status: 'sent',
             sender_name: senderMember?.user?.full_name || 'Aile Üyesi',
             sender_nickname: senderMember?.nickname,
             sender_avatar: senderMember?.user?.avatar_url,
@@ -120,11 +209,18 @@ export const ChatPage: React.FC = () => {
 
         // Remove sender from typing list
         setTypingUsers((prev) => prev.filter((u) => u.userId !== newMsg.sender_id));
-        scrollToBottom();
+
+        // Auto-scroll if user is near bottom or if sender is current user
+        if (isNearBottomRef.current || newMsg.sender_id === user?.id) {
+          setTimeout(() => scrollToBottom(true), 30);
+        } else {
+          setUnreadCount((c) => c + 1);
+          setShowScrollBottom(true);
+        }
       }
     );
 
-    // Listen for message deletions
+    // Realtime Postgres DELETE
     channel.on(
       'postgres_changes',
       {
@@ -142,29 +238,22 @@ export const ChatPage: React.FC = () => {
     channel.subscribe();
     channelRef.current = channel;
 
-    // Timer to clear stale typing indicators (> 3.5 seconds)
-    const cleanupTypingInterval = setInterval(() => {
+    // Periodically clean stale typing users (> 3.5s)
+    const cleanupInterval = setInterval(() => {
       const now = Date.now();
       setTypingUsers((prev) => prev.filter((u) => now - u.timestamp < 3500));
     }, 1500);
 
     return () => {
-      clearInterval(cleanupTypingInterval);
+      clearInterval(cleanupInterval);
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
       }
     };
   }, [currentFamily?.id, user?.id]);
 
-  useEffect(() => {
-    scrollToBottom(false);
-  }, [messages.length]);
-
-  // 3. Handle Typing Broadcast
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const text = e.target.value;
-    setInputText(text);
-
+  // 5. Send Typing Broadcasts
+  const handleStartTyping = useCallback(() => {
     if (channelRef.current && user) {
       channelRef.current.send({
         type: 'broadcast',
@@ -176,101 +265,162 @@ export const ChatPage: React.FC = () => {
           avatarUrl: user.avatar_url,
         },
       });
-
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-
-      typingTimeoutRef.current = setTimeout(() => {
-        channelRef.current?.send({
-          type: 'broadcast',
-          event: 'stop_typing',
-          payload: { userId: user.id },
-        });
-      }, 2500);
     }
-  };
+  }, [user, activeMember]);
 
-  // 4. Instant Optimistic Send Message
-  const handleSendText = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = inputText.trim();
-    if (!text || !user || !currentFamily) return;
-
-    // Clear input immediately for instant responsiveness
-    setInputText('');
-
-    if (channelRef.current) {
+  const handleStopTyping = useCallback(() => {
+    if (channelRef.current && user) {
       channelRef.current.send({
         type: 'broadcast',
         event: 'stop_typing',
         payload: { userId: user.id },
       });
     }
+  }, [user]);
 
-    // Create optimistic message
-    const tempId = `temp-${Date.now()}`;
+  // 6. Instant Optimistic Message Send (<16ms)
+  const handleSendText = useCallback(
+    async (text: string) => {
+      if (!user || !currentFamily) return;
+
+      const clientMsgId = `cmsg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const optimisticMsg: Message = {
+        id: clientMsgId,
+        client_message_id: clientMsgId,
+        family_id: currentFamily.id,
+        sender_id: user.id,
+        content: text,
+        is_edited: false,
+        created_at: new Date().toISOString(),
+        sender_name: user.full_name,
+        sender_nickname: activeMember?.nickname,
+        sender_avatar: user.avatar_url,
+        status: 'sending',
+        retryPayload: { content: text },
+      };
+
+      // 0 ms local state update
+      setMessages((prev) => [...prev, optimisticMsg]);
+      setTimeout(() => scrollToBottom(true), 20);
+
+      try {
+        const res = await api.post<Message>('/messages/', {
+          content: text,
+          client_message_id: clientMsgId,
+        });
+
+        // Confirm sent status and replace with server ID
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.client_message_id === clientMsgId || m.id === clientMsgId
+              ? { ...res.data, status: 'sent' }
+              : m
+          )
+        );
+      } catch (err: any) {
+        console.error('Send message failed:', err);
+        // Mark as failed with retry action
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.client_message_id === clientMsgId || m.id === clientMsgId
+              ? { ...m, status: 'failed' }
+              : m
+          )
+        );
+      }
+    },
+    [user, currentFamily, activeMember, scrollToBottom]
+  );
+
+  // 7. Retry Failed Message
+  const handleRetry = useCallback(
+    async (failedMsg: Message) => {
+      if (!failedMsg.retryPayload?.content) return;
+
+      // Reset to sending
+      setMessages((prev) =>
+        prev.map((m) => (m.id === failedMsg.id ? { ...m, status: 'sending' } : m))
+      );
+
+      try {
+        const res = await api.post<Message>('/messages/', {
+          content: failedMsg.retryPayload.content,
+          client_message_id: failedMsg.client_message_id,
+        });
+
+        setMessages((prev) =>
+          prev.map((m) => (m.id === failedMsg.id ? { ...res.data, status: 'sent' } : m))
+        );
+      } catch {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === failedMsg.id ? { ...m, status: 'failed' } : m))
+        );
+      }
+    },
+    []
+  );
+
+  // 8. Photo Upload with Optimistic UI
+  const handlePhotoUpload = async (file: File) => {
+    if (!user || !currentFamily) return;
+    setIsUploading(true);
+    setError(null);
+
+    const clientMsgId = `cmsg-photo-${Date.now()}`;
+    const localPreviewUrl = URL.createObjectURL(file);
+
     const optimisticMsg: Message = {
-      id: tempId,
+      id: clientMsgId,
+      client_message_id: clientMsgId,
       family_id: currentFamily.id,
       sender_id: user.id,
-      content: text,
+      media_url: localPreviewUrl,
+      media_thumbnail_url: localPreviewUrl,
+      media_type: file.type,
       is_edited: false,
       created_at: new Date().toISOString(),
       sender_name: user.full_name,
       sender_nickname: activeMember?.nickname,
       sender_avatar: user.avatar_url,
+      status: 'sending',
     };
 
-    // Instant local state update (0 ms lag)
     setMessages((prev) => [...prev, optimisticMsg]);
-    scrollToBottom();
+    setTimeout(() => scrollToBottom(true), 20);
 
-    try {
-      const res = await api.post<Message>('/messages/', {
-        content: text,
-      });
-
-      // Replace temp message with server confirmed message
-      setMessages((prev) => prev.map((m) => (m.id === tempId ? res.data : m)));
-    } catch (err: any) {
-      setError('Mesaj gönderilemedi: ' + err.message);
-      // Remove temp message on error
-      setMessages((prev) => prev.filter((m) => m.id !== tempId));
-    }
-  };
-
-  // 5. Photo Upload with Optimistic Loading
-  const handlePhotoUpload = async (file: File) => {
-    setIsUploading(true);
-    setError(null);
     try {
       const formData = new FormData();
       formData.append('file', file);
 
-      // Upload to storage
       const mediaRes = await api.post('/media/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
-      // Send as chat message
       const chatRes = await api.post<Message>('/messages/', {
-        content: '',
         media_url: mediaRes.data.public_url,
         media_thumbnail_url: mediaRes.data.thumbnail_url,
         media_type: mediaRes.data.mime_type,
+        client_message_id: clientMsgId,
       });
 
-      setMessages((prev) => [...prev, chatRes.data]);
-      scrollToBottom();
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === clientMsgId || m.client_message_id === clientMsgId
+            ? { ...chatRes.data, status: 'sent' }
+            : m
+        )
+      );
     } catch (err: any) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === clientMsgId ? { ...m, status: 'failed' } : m))
+      );
       setError('Fotoğraf yüklenemedi: ' + err.message);
     } finally {
       setIsUploading(false);
     }
   };
 
-  const takePhotoWithCapacitor = async () => {
+  const handleCameraClick = async () => {
     try {
       const image = await CapCamera.getPhoto({
         quality: 85,
@@ -289,19 +439,69 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  const handleDeleteMessage = async (msgId: string) => {
+  const handleDeleteMessage = useCallback(async (msgId: string) => {
     if (!confirm('Bu mesajı silmek istiyor musunuz?')) return;
     try {
       await api.delete(`/messages/${msgId}`);
       setMessages((prev) => prev.filter((m) => m.id !== msgId));
     } catch (err: any) {
-      setError('Mesaj silinemedi: ' + err.message);
+      alert('Mesaj silinemedi: ' + err.message);
     }
-  };
+  }, []);
+
+  // 9. Memoized Grouping and Date Calculation
+  const renderedMessageList = useMemo(() => {
+    const items: React.ReactNode[] = [];
+
+    for (let i = 0; i < messages.length; i++) {
+      const current = messages[i];
+      const prev = messages[i - 1];
+      const next = messages[i + 1];
+
+      // Insert DateSeparator when date changes
+      if (!prev || !isSameDay(new Date(current.created_at), new Date(prev.created_at))) {
+        items.push(
+          <DateSeparator key={`date-${current.created_at}-${current.id}`} date={current.created_at} />
+        );
+      }
+
+      const isMe = current.sender_id === user?.id;
+
+      // Grouping rules: Same sender, sent within 3 minutes
+      const isFirstInGroup =
+        !prev ||
+        prev.sender_id !== current.sender_id ||
+        !isSameDay(new Date(current.created_at), new Date(prev.created_at)) ||
+        Math.abs(new Date(current.created_at).getTime() - new Date(prev.created_at).getTime()) >
+          180000;
+
+      const isLastInGroup =
+        !next ||
+        next.sender_id !== current.sender_id ||
+        !isSameDay(new Date(next.created_at), new Date(current.created_at)) ||
+        Math.abs(new Date(next.created_at).getTime() - new Date(current.created_at).getTime()) >
+          180000;
+
+      items.push(
+        <MessageBubble
+          key={current.id}
+          message={current}
+          isMe={isMe}
+          isFirstInGroup={isFirstInGroup}
+          isLastInGroup={isLastInGroup}
+          onDelete={handleDeleteMessage}
+          onRetry={handleRetry}
+          onImageClick={(url) => setSelectedImage(url)}
+        />
+      );
+    }
+
+    return items;
+  }, [messages, user?.id, handleDeleteMessage, handleRetry]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8.5rem)] bg-[#efeae2]/30">
-      {/* Hidden file input */}
+    <div className="flex flex-col h-[calc(100dvh-8.5rem)] bg-[#efeae2]/35 relative">
+      {/* Hidden file input for web fallback */}
       <input
         ref={fileInputRef}
         type="file"
@@ -314,166 +514,87 @@ export const ChatPage: React.FC = () => {
         }}
       />
 
+      {/* Error banner */}
       {error && (
-        <div className="p-3 bg-red-50 text-red-700 text-xs flex items-center justify-between border-b border-red-100">
+        <div className="p-2.5 bg-red-50 text-red-700 text-xs flex items-center justify-between border-b border-red-100 z-10">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="font-bold">
+          <button onClick={() => setError(null)} className="font-bold p-1">
             Kapat
           </button>
         </div>
       )}
 
-      {/* Messages List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      {/* Messages Scroll Container */}
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-3 sm:px-4 py-2 sm:py-3 space-y-0.5 overscroll-contain"
+      >
+        {/* Loading Older Indicator */}
+        {isLoadingOlder && (
+          <div className="flex justify-center py-2">
+            <Loader2 className="w-5 h-5 text-family-600 animate-spin" />
+          </div>
+        )}
+
         {isLoading ? (
-          <div className="flex justify-center items-center py-10">
+          <div className="flex justify-center items-center py-16">
             <Loader2 className="w-8 h-8 text-family-600 animate-spin" />
           </div>
         ) : messages.length === 0 ? (
-          <div className="text-center py-12 text-gray-400">
-            <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center mx-auto mb-2 shadow-sm">
+          <div className="text-center py-16 text-gray-400 select-none">
+            <div className="w-16 h-16 rounded-3xl bg-white flex items-center justify-center mx-auto mb-2 shadow-xs border border-gray-100">
               <Smile className="w-8 h-8 text-family-400" />
             </div>
-            <p className="text-sm font-semibold text-gray-600">Henüz mesaj yok</p>
-            <p className="text-xs text-gray-400 mt-0.5">İlk mesajı siz gönderin ve sohbeti başlatın!</p>
+            <p className="text-sm font-bold text-gray-700">Henüz mesaj yok</p>
+            <p className="text-xs text-gray-400 mt-1">
+              İlk mesajı siz gönderin ve aile sohbetini başlatın!
+            </p>
           </div>
         ) : (
-          messages.map((msg) => {
-            const isMe = msg.sender_id === user?.id;
-            const isTemp = msg.id.startsWith('temp-');
-            const senderLabel = isMe
-              ? 'Siz'
-              : msg.sender_nickname || msg.sender_name?.split(' ')[0] || 'Aile Üyesi';
-
-            const timeStr = msg.created_at
-              ? format(new Date(msg.created_at), 'HH:mm', { locale: tr })
-              : '';
-
-            return (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group`}
-              >
-                {!isMe && (
-                  <span className="text-[11px] font-bold text-gray-500 mb-0.5 ml-2">
-                    {senderLabel}
-                  </span>
-                )}
-
-                <div
-                  className={`relative max-w-[82%] rounded-3xl p-3.5 shadow-sm text-sm transition-all ${
-                    isMe
-                      ? 'bg-family-600 text-white rounded-br-xs'
-                      : 'bg-white text-gray-900 rounded-bl-xs border border-gray-100'
-                  } ${isTemp ? 'opacity-70' : 'opacity-100'}`}
-                >
-                  {/* Photo content */}
-                  {msg.media_url && (
-                    <div className="mb-2 rounded-2xl overflow-hidden bg-black/10">
-                      <img
-                        src={msg.media_thumbnail_url || msg.media_url}
-                        alt="Paylaşılan fotoğraf"
-                        className="w-full max-h-60 object-cover rounded-2xl"
-                        loading="lazy"
-                      />
-                    </div>
-                  )}
-
-                  {/* Text content */}
-                  {msg.content && <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>}
-
-                  {/* Message Time and Status */}
-                  <div
-                    className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
-                      isMe ? 'text-family-100' : 'text-gray-400'
-                    }`}
-                  >
-                    <span>{timeStr}</span>
-                    {isMe && (
-                      <span className="ml-0.5">
-                        {isTemp ? (
-                          <Check className="w-3 h-3 opacity-60 inline" />
-                        ) : (
-                          <CheckCheck className="w-3 h-3 text-white inline" />
-                        )}
-                      </span>
-                    )}
-                    {isMe && !isTemp && (
-                      <button
-                        onClick={() => handleDeleteMessage(msg.id)}
-                        className="opacity-0 group-hover:opacity-100 hover:text-white p-0.5 transition ml-1"
-                        title="Mesajı Sil"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })
+          renderedMessageList
         )}
 
-        {/* Dynamic Animated Typing Indicator Bubble */}
-        {typingUsers.length > 0 && (
-          <div className="flex items-center gap-2 animate-fade-in pt-1">
-            <div className="w-7 h-7 rounded-full bg-family-100 text-family-700 flex items-center justify-center font-bold text-xs shadow-xs">
-              {typingUsers[0].nickname?.[0] || typingUsers[0].userName?.[0] || 'A'}
-            </div>
-            <div className="bg-white px-3.5 py-2 rounded-2xl rounded-bl-xs shadow-xs border border-gray-100 flex items-center gap-2">
-              <span className="text-xs font-semibold text-gray-700">
-                {typingUsers.map((u) => u.nickname || u.userName.split(' ')[0]).join(', ')} yazıyor
-              </span>
-              <div className="flex items-center gap-1 pt-0.5">
-                <span className="w-1.5 h-1.5 bg-family-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                <span className="w-1.5 h-1.5 bg-family-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                <span className="w-1.5 h-1.5 bg-family-500 rounded-full animate-bounce" />
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+        {/* Dynamic Typing Indicator */}
+        <TypingIndicator typingUsers={typingUsers} />
       </div>
 
-      {/* Uploading indicator */}
-      {isUploading && (
-        <div className="px-4 py-2 bg-white/90 border-t border-gray-100 text-xs text-family-600 flex items-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          <span>Fotoğraf yükleniyor ve sıkıştırılıyor...</span>
+      {/* Floating Scroll-to-Bottom Button */}
+      <ScrollToBottomButton
+        visible={showScrollBottom}
+        unreadCount={unreadCount}
+        onClick={() => scrollToBottom(true)}
+      />
+
+      {/* Isolated High-Speed Chat Input */}
+      <ChatInput
+        onSend={handleSendText}
+        onCameraClick={handleCameraClick}
+        onTyping={handleStartTyping}
+        onStopTyping={handleStopTyping}
+        isUploading={isUploading}
+      />
+
+      {/* Full-Screen Image Modal */}
+      {selectedImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in"
+          onClick={() => setSelectedImage(null)}
+        >
+          <button
+            onClick={() => setSelectedImage(null)}
+            className="absolute top-4 right-4 p-2.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition"
+          >
+            <X className="w-6 h-6" />
+          </button>
+          <img
+            src={selectedImage}
+            alt="Büyük fotoğraf"
+            className="max-w-full max-h-[88vh] object-contain rounded-2xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
-
-      {/* Input Bar */}
-      <div className="bg-white border-t border-gray-200 p-3 safe-area-bottom">
-        <form onSubmit={handleSendText} className="flex items-center gap-2 max-w-md mx-auto">
-          <button
-            type="button"
-            onClick={takePhotoWithCapacitor}
-            disabled={isUploading}
-            className="w-11 h-11 rounded-2xl bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-600 flex items-center justify-center transition flex-shrink-0"
-            title="Fotoğraf Gönder"
-          >
-            <Camera className="w-5 h-5" />
-          </button>
-
-          <input
-            type="text"
-            value={inputText}
-            onChange={handleInputChange}
-            placeholder="Bir mesaj yazın..."
-            className="flex-1 px-4 py-3 bg-gray-100 border-none rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-family-500 transition"
-          />
-
-          <button
-            type="submit"
-            disabled={!inputText.trim()}
-            className="w-11 h-11 rounded-2xl bg-family-600 hover:bg-family-700 active:scale-95 disabled:opacity-50 text-white flex items-center justify-center shadow-md shadow-family-600/30 transition flex-shrink-0"
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </form>
-      </div>
     </div>
   );
 };

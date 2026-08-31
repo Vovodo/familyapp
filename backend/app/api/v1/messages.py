@@ -15,37 +15,60 @@ router = APIRouter()
 
 @router.get("/", response_model=List[MessageResponse])
 def get_messages(
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(40, ge=1, le=100),
     before: Optional[str] = Query(None, description="Cursor for pagination (message_id)"),
     db: Session = Depends(get_db),
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Returns messages for the family with pagination (chronological order).
+    Returns messages for the family with cursor pagination.
+    Optimized: Eliminates N+1 queries with single batch lookup for family members and users.
     """
     query = (
         db.query(Message)
         .filter(Message.family_id == member.family_id)
-        .order_by(Message.created_at.desc())
+        .order_by(Message.created_at.desc(), Message.id.desc())
     )
 
     if before:
-        cursor_msg = db.query(Message).filter(Message.id == before).first()
+        cursor_msg = db.query(Message.created_at).filter(
+            Message.id == before,
+            Message.family_id == member.family_id
+        ).first()
         if cursor_msg:
-            query = query.filter(Message.created_at < cursor_msg.created_at)
+            query = query.filter(Message.created_at < cursor_msg[0])
 
     messages = query.limit(limit).all()
-    # Reverse so they appear chronologically in chat UI
+    # Reverse so they appear chronologically in chat UI (oldest to newest)
     messages.reverse()
+
+    if not messages:
+        return []
+
+    # Batch load all family members & user profiles for this family (1 query instead of N*2)
+    members_data = (
+        db.query(FamilyMember, User)
+        .outerjoin(User, FamilyMember.user_id == User.id)
+        .filter(FamilyMember.family_id == member.family_id)
+        .all()
+    )
+
+    # O(1) hash map lookup
+    member_map = {}
+    for fm, u in members_data:
+        member_map[fm.user_id] = {
+            "name": u.full_name if u else "Aile Üyesi",
+            "avatar": u.avatar_url if u else None,
+            "nickname": fm.nickname
+        }
 
     results = []
     for msg in messages:
-        sender_member = (
-            db.query(FamilyMember)
-            .filter(FamilyMember.family_id == member.family_id, FamilyMember.user_id == msg.sender_id)
-            .first()
-        )
-        sender_user = db.query(User).filter(User.id == msg.sender_id).first()
+        sender_info = member_map.get(msg.sender_id, {
+            "name": "Aile Üyesi",
+            "avatar": None,
+            "nickname": None
+        })
 
         results.append(
             MessageResponse(
@@ -58,9 +81,9 @@ def get_messages(
                 media_type=msg.media_type,
                 is_edited=msg.is_edited,
                 created_at=msg.created_at,
-                sender_name=sender_user.full_name if sender_user else "Bilinmeyen",
-                sender_avatar=sender_user.avatar_url if sender_user else None,
-                sender_nickname=sender_member.nickname if sender_member else None
+                sender_name=sender_info["name"],
+                sender_avatar=sender_info["avatar"],
+                sender_nickname=sender_info["nickname"]
             )
         )
     return results
@@ -74,7 +97,7 @@ def send_message(
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Sends a new text or media message to the family group.
+    Sends a new text or media message to the family group with zero-overhead query path.
     """
     if not msg_in.content and not msg_in.media_url:
         raise HTTPException(
@@ -106,7 +129,8 @@ def send_message(
         created_at=msg.created_at,
         sender_name=current_user.full_name,
         sender_avatar=current_user.avatar_url,
-        sender_nickname=member.nickname
+        sender_nickname=member.nickname,
+        client_message_id=msg_in.client_message_id
     )
 
 

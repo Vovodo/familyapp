@@ -107,6 +107,7 @@ class MessageBase(BaseModel):
     media_url: Optional[str] = None
     media_thumbnail_url: Optional[str] = None
     media_type: Optional[str] = None
+    client_message_id: Optional[str] = None
 
 
 class MessageCreate(MessageBase):

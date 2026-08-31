@@ -40,6 +40,14 @@ export interface Message {
   sender_name?: string;
   sender_avatar?: string;
   sender_nickname?: string;
+  client_message_id?: string;
+  status?: 'sending' | 'sent' | 'failed';
+  retryPayload?: {
+    content?: string;
+    media_url?: string;
+    media_thumbnail_url?: string;
+    media_type?: string;
+  };
 }
 
 export interface MediaItem {
