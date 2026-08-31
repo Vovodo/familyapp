@@ -14,6 +14,7 @@ except ImportError:
 
 HEART_CHANNEL_ID = "family_heart_channel"
 GENERAL_CHANNEL_ID = "family_general_channel"
+REMINDERS_CHANNEL_ID = "family_reminders_channel"
 
 class PushNotificationService:
     def __init__(self):
@@ -160,10 +161,11 @@ class PushNotificationService:
         family_id: str,
         message_id: str,
         content: Optional[str] = None,
-        media_type: Optional[str] = None
+        media_type: Optional[str] = None,
+        sender_avatar: Optional[str] = None
     ) -> int:
         """
-        Sends high-priority WhatsApp-like push notification for new chat messages.
+        Sends high-priority WhatsApp-like push notification for new chat messages with sender avatar.
         """
         if not device_tokens:
             return 0
@@ -189,6 +191,9 @@ class PushNotificationService:
         else:
             body = "📎 Medya içeriği"
 
+        # Validate avatar URL format
+        valid_avatar = sender_avatar if sender_avatar and sender_avatar.startswith("http") else None
+
         android_config = messaging.AndroidConfig(
             priority="high",
             notification=messaging.AndroidNotification(
@@ -198,6 +203,7 @@ class PushNotificationService:
                 sound="default",
                 priority="high",
                 visibility="public",
+                image=valid_avatar,
                 tag=f"chat_{family_id}"
             ),
             data={
@@ -205,6 +211,7 @@ class PushNotificationService:
                 "message_id": message_id,
                 "sender_name": sender_name,
                 "sender_id": sender_id,
+                "sender_avatar": valid_avatar or "",
                 "family_id": family_id,
                 "content": body
             }
@@ -214,13 +221,15 @@ class PushNotificationService:
             tokens=tokens,
             notification=messaging.Notification(
                 title=title,
-                body=body
+                body=body,
+                image=valid_avatar
             ),
             data={
                 "type": "chat",
                 "message_id": message_id,
                 "sender_name": sender_name,
                 "sender_id": sender_id,
+                "sender_avatar": valid_avatar or "",
                 "family_id": family_id,
                 "content": body
             },
@@ -244,6 +253,80 @@ class PushNotificationService:
             return response.success_count
         except Exception as e:
             logger.error(f"FCM send_chat_push failed: {e}")
+            return 0
+
+    async def send_reminder_push(
+        self,
+        db: Session,
+        device_tokens: List[DeviceToken],
+        creator_name: str,
+        family_id: str,
+        reminder_id: str,
+        title: str,
+        description: Optional[str] = None
+    ) -> int:
+        """
+        Sends VIP / High-Priority Alarm Push Notification for Reminders.
+        """
+        if not device_tokens:
+            return 0
+
+        tokens = [dt.token for dt in device_tokens if dt.token]
+        if not tokens:
+            return 0
+
+        if not self.is_initialized:
+            self._initialize_firebase()
+
+        if not self.is_initialized:
+            return len(tokens)
+
+        notif_title = f"⏰ Hatırlatıcı: {title}"
+        notif_body = description or f"{creator_name} tarafından planlanan hatırlatma zamanı geldi!"
+
+        android_config = messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                title=notif_title,
+                body=notif_body,
+                channel_id=REMINDERS_CHANNEL_ID,
+                sound="default",
+                priority="max",
+                visibility="public",
+                tag=f"reminder_{reminder_id}"
+            ),
+            data={
+                "type": "reminder",
+                "reminder_id": reminder_id,
+                "title": title,
+                "description": description or "",
+                "family_id": family_id,
+                "creator_name": creator_name
+            }
+        )
+
+        message = messaging.MulticastMessage(
+            tokens=tokens,
+            notification=messaging.Notification(
+                title=notif_title,
+                body=notif_body
+            ),
+            data={
+                "type": "reminder",
+                "reminder_id": reminder_id,
+                "title": title,
+                "description": description or "",
+                "family_id": family_id,
+                "creator_name": creator_name
+            },
+            android=android_config
+        )
+
+        try:
+            response = messaging.send_each_for_multicast(message)
+            return response.success_count
+        except Exception as e:
+            logger.error(f"FCM send_reminder_push failed: {e}")
             return 0
 
 push_service = PushNotificationService()

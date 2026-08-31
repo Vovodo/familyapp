@@ -1,21 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Mic, RotateCcw, Volume2 } from 'lucide-react';
+import { Play, Pause, Mic, RotateCcw } from 'lucide-react';
 
 interface AudioMessagePlayerProps {
   audioUrl: string;
   isMe: boolean;
 }
 
-// Global reference to ensure only ONE audio plays at a time across the whole chat
-let activeAudioElement: HTMLAudioElement | null = null;
-let activeSetIsPlaying: ((playing: boolean) => void) | null = null;
+// Global active audio manager to pause other audios when one starts
+let activeAudio: HTMLAudioElement | null = null;
+let activeStopCallback: (() => void) | null = null;
 
 export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl, isMe }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState<1 | 1.5 | 2>(1);
-  const [isLoaded, setIsLoaded] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -28,57 +27,33 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  useEffect(() => {
-    const audio = new Audio(audioUrl);
-    audio.preload = 'metadata';
-    audioRef.current = audio;
+  const handleEnded = () => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+    }
+    if (activeAudio === audioRef.current) {
+      activeAudio = null;
+      activeStopCallback = null;
+    }
+  };
 
-    const handleLoadedMetadata = () => {
-      if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
-        setDuration(audio.duration);
-        setIsLoaded(true);
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+      if (!duration && audioRef.current.duration && isFinite(audioRef.current.duration)) {
+        setDuration(audioRef.current.duration);
       }
-    };
+    }
+  };
 
-    const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
-      if (!duration && audio.duration && isFinite(audio.duration)) {
-        setDuration(audio.duration);
-      }
-    };
+  const handleLoadedMetadata = () => {
+    if (audioRef.current && audioRef.current.duration && isFinite(audioRef.current.duration)) {
+      setDuration(audioRef.current.duration);
+    }
+  };
 
-    const handleEnded = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
-      if (activeAudioElement === audio) {
-        activeAudioElement = null;
-        activeSetIsPlaying = null;
-      }
-    };
-
-    const handlePause = () => {
-      setIsPlaying(false);
-    };
-
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('ended', handleEnded);
-    audio.addEventListener('pause', handlePause);
-
-    return () => {
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('ended', handleEnded);
-      audio.removeEventListener('pause', handlePause);
-      audio.pause();
-      if (activeAudioElement === audio) {
-        activeAudioElement = null;
-        activeSetIsPlaying = null;
-      }
-    };
-  }, [audioUrl]);
-
-  // Toggle Play / Pause
   const togglePlayPause = (e: React.MouseEvent) => {
     e.stopPropagation();
     const audio = audioRef.current;
@@ -88,21 +63,37 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
       audio.pause();
       setIsPlaying(false);
     } else {
-      // Pause any previously playing audio in the app
-      if (activeAudioElement && activeAudioElement !== audio) {
-        activeAudioElement.pause();
-        activeSetIsPlaying?.(false);
+      // Pause any previously playing audio
+      if (activeAudio && activeAudio !== audio) {
+        activeAudio.pause();
+        activeStopCallback?.();
+      }
+
+      // If at end or invalid, reset to start
+      if (audio.ended || Math.abs(audio.currentTime - (duration || audio.duration || 0)) < 0.2) {
+        audio.currentTime = 0;
+        setCurrentTime(0);
       }
 
       audio.playbackRate = playbackRate;
-      audio.play().catch((err) => console.warn('Audio play error:', err));
-      setIsPlaying(true);
-      activeAudioElement = audio;
-      activeSetIsPlaying = setIsPlaying;
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+            activeAudio = audio;
+            activeStopCallback = () => setIsPlaying(false);
+          })
+          .catch((err) => {
+            console.warn('[AudioPlayer] Playback error:', err);
+            // Retry reset
+            audio.currentTime = 0;
+            audio.play().then(() => setIsPlaying(true)).catch(() => {});
+          });
+      }
     }
   };
 
-  // Seek bar click / drag
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
     const audio = audioRef.current;
@@ -114,12 +105,12 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
     const width = rect.width;
     const ratio = Math.max(0, Math.min(1, clickX / width));
 
-    const newTime = ratio * (duration || audio.duration || 1);
+    const totalDur = duration || audio.duration || 1;
+    const newTime = ratio * totalDur;
     audio.currentTime = newTime;
     setCurrentTime(newTime);
   };
 
-  // Speed multiplier cycle: 1x -> 1.5x -> 2x -> 1x
   const cyclePlaybackRate = (e: React.MouseEvent) => {
     e.stopPropagation();
     const nextRate: 1 | 1.5 | 2 = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
@@ -128,6 +119,18 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
       audioRef.current.playbackRate = nextRate;
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      if (activeAudio === audioRef.current) {
+        activeAudio = null;
+        activeStopCallback = null;
+      }
+    };
+  }, []);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -138,6 +141,18 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
       }`}
       onClick={(e) => e.stopPropagation()}
     >
+      {/* Hidden Native Audio Element */}
+      <audio
+        ref={audioRef}
+        src={audioUrl}
+        preload="metadata"
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+        onEnded={handleEnded}
+        onPause={() => setIsPlaying(false)}
+        onPlay={() => setIsPlaying(true)}
+      />
+
       {/* Play / Pause Action Button */}
       <button
         type="button"

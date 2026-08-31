@@ -1,4 +1,5 @@
 from typing import List, Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Query
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
@@ -58,6 +59,53 @@ async def upload_audio_endpoint(
         "url": audio_url,
         "path": audio_path,
         "media_type": "audio"
+    }
+
+
+@router.post("/upload-avatar")
+async def upload_avatar_endpoint(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Uploads and optimizes user avatar picture, sets avatar_url on current_user, and returns the URL.
+    """
+    if file.content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Desteklenmeyen dosya türü. Lütfen JPEG, PNG veya WEBP fotoğraf yükleyin."
+        )
+
+    file_bytes = await file.read()
+    if len(file_bytes) > settings.MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Profil fotoğrafı boyutu çok büyük."
+        )
+
+    try:
+        opt_bytes, thumb_bytes, width, height = optimize_and_create_thumbnail(file_bytes, max_dimension=400, quality=85)
+    except Exception as e:
+        logger.error(f"Avatar processing error: {e}")
+        opt_bytes = file_bytes
+        thumb_bytes = file_bytes
+
+    main_path, main_url, thumb_path, thumb_url = storage_service.upload_image(
+        family_id="avatars",
+        file_name=f"avatar_{current_user.id}_{int(datetime.now().timestamp())}.jpg",
+        image_bytes=opt_bytes,
+        thumbnail_bytes=thumb_bytes
+    )
+
+    avatar_url = thumb_url or main_url
+    current_user.avatar_url = avatar_url
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        "avatar_url": current_user.avatar_url,
+        "status": "success"
     }
 
 

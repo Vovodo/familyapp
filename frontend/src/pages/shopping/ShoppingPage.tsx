@@ -239,8 +239,29 @@ export const ShoppingPage: React.FC = () => {
     }
   };
 
-  // 4. Toggle Item with Per-Item Mutex Locking (Debounced & Glitch-Free)
+  const [toggleCooldownRemaining, setToggleCooldownRemaining] = useState<number>(0);
+  const lastToggleTimeRef = useRef<number>(0);
+
+  // 4. Toggle Item with 2-Second Cooldown & Per-Item Mutex Locking
   const handleToggle = async (item: ShoppingItem) => {
+    const now = Date.now();
+    const elapsed = now - lastToggleTimeRef.current;
+    if (elapsed < 2000) {
+      // Cooldown is active, ignore tap
+      return;
+    }
+
+    lastToggleTimeRef.current = now;
+    setToggleCooldownRemaining(2);
+
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((2000 - (Date.now() - now)) / 1000));
+      setToggleCooldownRemaining(remaining);
+      if (remaining <= 0) {
+        clearInterval(interval);
+      }
+    }, 250);
+
     // Prevent duplicate multi-taps on the same item while network request is in flight
     if (pendingActionIds.current.has(item.id)) return;
     pendingActionIds.current.add(item.id);
@@ -277,7 +298,6 @@ export const ShoppingPage: React.FC = () => {
         return next;
       });
     } finally {
-      // Release lock after 300ms to allow smooth follow-up taps
       setTimeout(() => {
         pendingActionIds.current.delete(item.id);
       }, 300);
@@ -342,10 +362,17 @@ export const ShoppingPage: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-lg font-black text-gray-900 flex items-center gap-1.5 truncate">
-            <span>Alışveriş Listesi</span>
-            <span className="text-emerald-600">🛒</span>
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-black text-gray-900 flex items-center gap-1.5 truncate">
+              <span>Alışveriş Listesi</span>
+              <span className="text-emerald-600">🛒</span>
+            </h2>
+            {toggleCooldownRemaining > 0 && (
+              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg animate-pulse">
+                ⏳ {toggleCooldownRemaining}s
+              </span>
+            )}
+          </div>
           <p className="text-xs text-gray-500 truncate">
             {activeItems.length > 0
               ? `${activeItems.length} alınacak ürün var`

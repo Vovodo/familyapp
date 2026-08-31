@@ -247,7 +247,8 @@ async def send_message(
                         family_id=member.family_id,
                         message_id=msg.id,
                         content=msg.content,
-                        media_type=msg.media_type
+                        media_type=msg.media_type,
+                        sender_avatar=current_user.avatar_url
                     )
                 )
     except Exception as e:

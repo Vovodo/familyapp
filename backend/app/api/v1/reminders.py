@@ -137,6 +137,46 @@ def update_reminder(
     )
 
 
+@router.post("/{reminder_id}/snooze", response_model=ReminderResponse)
+def snooze_reminder(
+    reminder_id: str,
+    minutes: int = 10,
+    db: Session = Depends(get_db),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Snoozes a reminder by specified minutes (defaults to 10 minutes).
+    """
+    from datetime import timedelta
+    reminder = (
+        db.query(Reminder)
+        .filter(Reminder.id == reminder_id, Reminder.family_id == member.family_id)
+        .first()
+    )
+    if not reminder:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hatırlatıcı bulunamadı.")
+
+    reminder.remind_at = reminder.remind_at + timedelta(minutes=minutes)
+    reminder.is_completed = False
+    db.commit()
+    db.refresh(reminder)
+
+    creator = db.query(User).filter(User.id == reminder.creator_id).first()
+    return ReminderResponse(
+        id=reminder.id,
+        family_id=reminder.family_id,
+        creator_id=reminder.creator_id,
+        title=reminder.title,
+        description=reminder.description,
+        remind_at=reminder.remind_at,
+        repeat_interval=reminder.repeat_interval,
+        notify_before_minutes=reminder.notify_before_minutes,
+        is_completed=reminder.is_completed,
+        created_at=reminder.created_at,
+        creator_name=creator.full_name if creator else "Aile Üyesi"
+    )
+
+
 @router.delete("/{reminder_id}")
 def delete_reminder(
     reminder_id: str,

@@ -52,11 +52,21 @@ export const Header: React.FC = () => {
 
           <button
             onClick={() => navigate('/family')}
-            className="w-11 h-11 rounded-2xl bg-gray-50 hover:bg-gray-100 active:scale-95 flex items-center justify-center text-gray-700 transition border border-gray-100"
-            title="Aile Üyeleri ve Ayarlar"
+            className="w-11 h-11 rounded-2xl bg-gray-50 hover:bg-gray-100 active:scale-95 flex items-center justify-center text-gray-700 transition border border-gray-200 overflow-hidden cursor-pointer shadow-2xs"
+            title="Aile Üyeleri ve Profil Ayarları"
             aria-label="Aile Ayarları"
           >
-            <Users className="w-5 h-5" />
+            {user?.avatar_url ? (
+              <img
+                src={user.avatar_url}
+                alt={displayName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-family-100 text-family-700 flex items-center justify-center font-bold text-sm">
+                {displayName[0] || 'A'}
+              </div>
+            )}
           </button>
         </div>
       </div>

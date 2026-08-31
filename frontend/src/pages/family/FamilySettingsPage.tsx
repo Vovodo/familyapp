@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Users,
@@ -17,9 +17,11 @@ import {
   Globe,
   Lock,
   UserMinus,
+  Camera,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
+import { api } from '../../services/api';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 
 export const FamilySettingsPage: React.FC = () => {
@@ -28,6 +30,30 @@ export const FamilySettingsPage: React.FC = () => {
   const navigate = useNavigate();
 
   const [copied, setCopied] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await api.post<{ avatar_url: string }>('/media/upload-avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      await updateProfile({ avatar_url: res.data.avatar_url });
+    } catch (err: any) {
+      alert('Fotoğraf yüklenemedi: ' + (err.message || 'Lütfen tekrar deneyin.'));
+    } finally {
+      setIsUploadingAvatar(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [fullName, setFullName] = useState(user?.full_name || '');
   const [phone, setPhone] = useState(user?.phone || '');
@@ -251,6 +277,7 @@ export const FamilySettingsPage: React.FC = () => {
           {currentFamily?.members?.map((member) => {
             const isCurrentUser = member.user_id === user?.id;
             const isMemberCreator = member.user_id === currentFamily.created_by;
+            const memberAvatar = member.user?.avatar_url || (isCurrentUser ? user?.avatar_url : undefined);
 
             return (
               <div
@@ -258,9 +285,17 @@ export const FamilySettingsPage: React.FC = () => {
                 className="flex items-center justify-between p-3 rounded-2xl bg-gray-50 border border-gray-100"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-white border border-gray-200 flex items-center justify-center font-bold text-gray-700 text-sm shadow-2xs">
-                    {member.nickname?.[0] || member.user?.full_name?.[0] || 'A'}
-                  </div>
+                  {memberAvatar ? (
+                    <img
+                      src={memberAvatar}
+                      alt={member.nickname || member.user?.full_name}
+                      className="w-10 h-10 rounded-2xl object-cover border border-gray-200 shadow-2xs"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-2xl bg-white border border-gray-200 flex items-center justify-center font-bold text-gray-700 text-sm shadow-2xs">
+                      {member.nickname?.[0] || member.user?.full_name?.[0] || 'A'}
+                    </div>
+                  )}
                   <div>
                     <div className="text-sm font-bold text-gray-900 flex items-center gap-1.5">
                       <span>{member.nickname || member.user?.full_name}</span>
@@ -317,11 +352,11 @@ export const FamilySettingsPage: React.FC = () => {
       </div>
 
       {/* User Profile Card */}
-      <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-md space-y-3">
+      <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-md space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
             <UserCheck className="w-4 h-4 text-family-600" />
-            <span>Kişisel Bilgilerim</span>
+            <span>Kişisel Profilim</span>
           </h3>
           {!isEditingProfile && (
             <button
@@ -332,6 +367,55 @@ export const FamilySettingsPage: React.FC = () => {
               <span>Düzenle</span>
             </button>
           )}
+        </div>
+
+        {/* Avatar Photo Section */}
+        <div className="flex items-center gap-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleAvatarFileChange}
+          />
+          <div className="relative group cursor-pointer" onClick={() => avatarInputRef.current?.click()}>
+            {user?.avatar_url ? (
+              <img
+                src={user.avatar_url}
+                alt={user.full_name}
+                className="w-16 h-16 rounded-2xl object-cover border-2 border-family-300 shadow-sm"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-2xl bg-family-100 text-family-700 flex items-center justify-center font-black text-2xl border-2 border-family-200">
+                {user?.full_name?.[0] || 'A'}
+              </div>
+            )}
+            <div className="absolute inset-0 bg-black/40 rounded-2xl flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition">
+              {isUploadingAvatar ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Camera className="w-5 h-5" />
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-bold text-gray-900">Profil Fotoğrafı</div>
+            <div className="text-[11px] text-gray-500 mt-0.5">Sohbette ve bildirimlerde görünür</div>
+            <button
+              type="button"
+              disabled={isUploadingAvatar}
+              onClick={() => avatarInputRef.current?.click()}
+              className="mt-1.5 px-3 py-1 bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+            >
+              {isUploadingAvatar ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-family-600" />
+              ) : (
+                <Camera className="w-3.5 h-3.5 text-family-600" />
+              )}
+              <span>{user?.avatar_url ? 'Fotoğrafı Değiştir' : 'Fotoğraf Yükle'}</span>
+            </button>
+          </div>
         </div>
 
         {isEditingProfile ? (

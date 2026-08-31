@@ -5,6 +5,7 @@ import { Header } from './Header';
 import { BottomNav } from './BottomNav';
 import { OfflineBanner } from './OfflineBanner';
 import { HeartCelebrationOverlay } from '../common/HeartCelebrationOverlay';
+import { InAppNotificationBanner } from '../common/InAppNotificationBanner';
 import { PermissionAssistantModal } from '../common/PermissionAssistantModal';
 import { notificationService } from '../../services/notificationService';
 
@@ -56,6 +57,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
   return (
     <div className="flex flex-col h-screen w-full bg-warm-50 text-gray-900 relative shadow-2xl overflow-hidden">
+      <InAppNotificationBanner />
       <PermissionAssistantModal />
       <HeartCelebrationOverlay />
       <OfflineBanner />
