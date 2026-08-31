@@ -70,14 +70,11 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
 )
 
-# CORS configuration
-origins = settings.cors_origins_list
-if "*" in origins or not origins:
-    origins = ["*"]
-
+# Robust CORS configuration for Web, PWA, and Capacitor Android/iOS Native
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.DEBUG else origins,
+    allow_origins=settings.cors_origins_list,
+    allow_origin_regex=r"https?://.*|capacitor://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
