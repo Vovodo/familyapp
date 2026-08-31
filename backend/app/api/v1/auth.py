@@ -7,7 +7,9 @@ from backend.app.schemas.schemas import (
     UserLogin,
     UserUpdate,
     UserResponse,
-    Token
+    Token,
+    QuickJoinRequest,
+    QuickJoinResponse
 )
 from backend.app.core.security import (
     get_password_hash,
@@ -18,6 +20,68 @@ from backend.app.api.deps import get_current_user
 import uuid
 
 router = APIRouter()
+
+
+@router.post("/quick-join", response_model=QuickJoinResponse, status_code=status.HTTP_201_CREATED)
+def quick_join(req: QuickJoinRequest, db: Session = Depends(get_db)):
+    """
+    Direct 1-click onboarding: Creates user by name & nickname, assigns to primary family,
+    and returns a long-lived JWT token.
+    """
+    clean_name = req.full_name.strip()
+    if not clean_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Lütfen adınızı girin."
+        )
+
+    # 1. Ensure a primary family exists
+    family = db.query(Family).first()
+    if not family:
+        family = Family(
+            id=str(uuid.uuid4()),
+            name="Bizim Aile ❤️",
+            invite_code=uuid.uuid4().hex[:8].upper()
+        )
+        db.add(family)
+        db.commit()
+        db.refresh(family)
+
+    # 2. Create User Profile
+    unique_suffix = req.device_id[:12] if req.device_id else uuid.uuid4().hex[:8]
+    auto_email = f"user_{unique_suffix}@familyapp.com"
+
+    user = User(
+        id=str(uuid.uuid4()),
+        full_name=clean_name,
+        email=auto_email,
+        hashed_password=get_password_hash(uuid.uuid4().hex),
+        avatar_url=req.avatar_url,
+        role="member"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    # 3. Add as Family Member
+    member = FamilyMember(
+        id=str(uuid.uuid4()),
+        family_id=family.id,
+        user_id=user.id,
+        nickname=req.nickname.strip() if req.nickname else None,
+        role="member"
+    )
+    db.add(member)
+    db.commit()
+
+    token = create_access_token(user.id, claims={"name": user.full_name, "family_id": family.id})
+    return QuickJoinResponse(
+        access_token=token,
+        token_type="bearer",
+        user=UserResponse.model_validate(user),
+        family_id=family.id,
+        family_name=family.name
+    )
 
 
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)

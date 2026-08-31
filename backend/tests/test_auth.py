@@ -59,3 +59,21 @@ def test_user_me_profile_update(client):
     )
     assert patch_res.status_code == 200
     assert patch_res.json()["phone"] == "05551234567"
+
+
+def test_quick_join(client):
+    # Test 1-click onboarding
+    res = client.post(
+        "/api/v1/auth/quick-join",
+        json={
+            "full_name": "Can Yılmaz",
+            "nickname": "Baba",
+        },
+    )
+    assert res.status_code == 201
+    data = res.json()
+    assert "access_token" in data
+    assert data["user"]["full_name"] == "Can Yılmaz"
+    assert "family_id" in data
+    assert data["family_name"]
+

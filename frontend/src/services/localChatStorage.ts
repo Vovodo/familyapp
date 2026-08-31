@@ -22,6 +22,45 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+/**
+ * Reconciles two message lists without losing optimistic or in-flight messages.
+ */
+export function reconcileMessages(current: Message[], incoming: Message[]): Message[] {
+  const map = new Map<string, Message>();
+
+  // 1. Index current messages by primary key and client_message_id
+  for (const m of current) {
+    const key = m.client_message_id || m.id;
+    map.set(key, m);
+    map.set(m.id, m);
+  }
+
+  // 2. Process incoming server/realtime messages
+  for (const inc of incoming) {
+    const clientKey = inc.client_message_id;
+    if (clientKey && map.has(clientKey)) {
+      const existing = map.get(clientKey)!;
+      map.delete(existing.id);
+      map.delete(clientKey);
+    } else if (map.has(inc.id)) {
+      map.delete(inc.id);
+    }
+    map.set(inc.id, { ...inc, status: 'sent' });
+  }
+
+  // 3. Extract unique list
+  const uniqueMessages = Array.from(new Set(map.values()));
+
+  // 4. Sort chronologically
+  uniqueMessages.sort((a, b) => {
+    const timeA = new Date(a.created_at).getTime();
+    const timeB = new Date(b.created_at).getTime();
+    return timeA - timeB;
+  });
+
+  return uniqueMessages;
+}
+
 export const localChatStorage = {
   /**
    * Instantly retrieves all locally cached messages for a family.
@@ -37,7 +76,6 @@ export const localChatStorage = {
           if (req.result && Array.isArray(req.result.messages)) {
             resolve(req.result.messages);
           } else {
-            // LocalStorage fallback
             const fallback = localStorage.getItem(`ailem_msgs_${familyId}`);
             resolve(fallback ? JSON.parse(fallback) : []);
           }
@@ -62,10 +100,7 @@ export const localChatStorage = {
    */
   async saveMessages(familyId: string, messages: Message[]): Promise<void> {
     try {
-      // Keep up to latest 500 messages in local storage
       const trimmed = messages.slice(-500);
-      
-      // Save in localStorage as quick fallback
       try {
         localStorage.setItem(`ailem_msgs_${familyId}`, JSON.stringify(trimmed));
       } catch {}
@@ -80,34 +115,11 @@ export const localChatStorage = {
   },
 
   /**
-   * Merges server messages with local messages without duplicates.
+   * Safely merges server messages with local storage without dropping in-flight messages.
    */
   async mergeMessages(familyId: string, serverMessages: Message[]): Promise<Message[]> {
     const local = await this.getMessages(familyId);
-    const messageMap = new Map<string, Message>();
-
-    // Put local messages first
-    for (const msg of local) {
-      messageMap.set(msg.id, msg);
-      if (msg.client_message_id) {
-        messageMap.set(msg.client_message_id, msg);
-      }
-    }
-
-    // Merge/overwrite with server messages
-    for (const sMsg of serverMessages) {
-      if (sMsg.client_message_id && messageMap.has(sMsg.client_message_id)) {
-        const old = messageMap.get(sMsg.client_message_id)!;
-        messageMap.delete(old.id);
-        messageMap.delete(sMsg.client_message_id);
-      }
-      messageMap.set(sMsg.id, { ...sMsg, status: 'sent' });
-    }
-
-    const merged = Array.from(new Set(messageMap.values()));
-    // Sort chronologically
-    merged.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
+    const merged = reconcileMessages(local, serverMessages);
     await this.saveMessages(familyId, merged);
     return merged;
   },

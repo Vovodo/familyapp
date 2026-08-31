@@ -7,6 +7,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (emailOrPhone: string, pass: string) => Promise<void>;
+  quickJoin: (fullName: string, nickname: string) => Promise<void>;
   register: (fullName: string, emailOrPhone: string, pass: string, nickname?: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
@@ -40,6 +41,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     initializeAuth();
   }, []);
+
+  const quickJoin = async (fullName: string, nickname: string) => {
+    setIsLoading(true);
+    try {
+      // Create or retrieve persistent device UUID
+      let deviceId = await storage.get('ailem_device_id');
+      if (!deviceId) {
+        deviceId = `dev-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        await storage.set('ailem_device_id', deviceId);
+      }
+
+      const response = await api.post<{
+        access_token: string;
+        user: User;
+        family_id: string;
+        family_name: string;
+      }>('/auth/quick-join', {
+        full_name: fullName.trim(),
+        nickname: nickname.trim(),
+        device_id: deviceId,
+      });
+
+      const { access_token, user: loggedUser, family_id } = response.data;
+      await storage.set('auth_token', access_token);
+      await storage.set('active_family_id', family_id);
+      await storage.set('device_registered', 'true');
+      setToken(access_token);
+      setUser(loggedUser);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const login = async (emailOrPhone: string, pass: string) => {
     setIsLoading(true);
@@ -87,6 +120,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       await storage.remove('auth_token');
       await storage.remove('active_family_id');
+      await storage.remove('device_registered');
       setToken(null);
       setUser(null);
     }
@@ -104,6 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         isLoading,
         login,
+        quickJoin,
         register,
         logout,
         updateProfile,

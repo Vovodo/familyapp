@@ -13,6 +13,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { Note } from '../../types';
 import { api } from '../../services/api';
+import { supabase } from '../../services/supabase';
+import { localNotesStorage } from '../../services/localNotesStorage';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
@@ -41,21 +43,76 @@ export const NotesPage: React.FC = () => {
   const [color, setColor] = useState('amber');
   const [isSaving, setIsSaving] = useState(false);
 
-  const fetchNotes = async () => {
+  // 1. 0ms Instant Load + Silent Background Sync
+  useEffect(() => {
     if (!currentFamily) return;
-    try {
-      const res = await api.get<Note[]>('/notes/');
-      setNotes(res.data);
-    } catch (err) {
-      console.error('Notes fetch error:', err);
-    } finally {
+
+    // A. 0ms Instant Cache
+    const cached = localNotesStorage.getNotes(currentFamily.id);
+    if (cached && cached.length > 0) {
+      setNotes(cached);
       setIsLoading(false);
     }
-  };
 
+    // B. Background Sync
+    api.get<Note[]>('/notes/')
+      .then((res) => {
+        const merged = localNotesStorage.mergeNotes(currentFamily.id, res.data);
+        setNotes(merged);
+      })
+      .catch((err) => {
+        console.error('Notes sync error:', err);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, [currentFamily?.id]);
+
+  // 2. Realtime Listener for Notes
   useEffect(() => {
-    fetchNotes();
-  }, [currentFamily]);
+    if (!currentFamily || !supabase) return;
+
+    const channel = supabase
+      .channel(`family-notes-${currentFamily.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notes',
+          filter: `family_id=eq.${currentFamily.id}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newNote = payload.new as Note;
+            setNotes((prev) => {
+              const next = [newNote, ...prev.filter((n) => n.id !== newNote.id)];
+              localNotesStorage.saveNotes(currentFamily.id, next);
+              return next;
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = payload.new as Note;
+            setNotes((prev) => {
+              const next = prev.map((n) => (n.id === updated.id ? { ...n, ...updated } : n));
+              localNotesStorage.saveNotes(currentFamily.id, next);
+              return next;
+            });
+          } else if (payload.eventType === 'DELETE') {
+            const deletedId = payload.old.id;
+            setNotes((prev) => {
+              const next = prev.filter((n) => n.id !== deletedId);
+              localNotesStorage.saveNotes(currentFamily.id, next);
+              return next;
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentFamily?.id]);
 
   const openCreateModal = () => {
     setEditingNote(null);
@@ -77,7 +134,7 @@ export const NotesPage: React.FC = () => {
 
   const handleSaveNote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !content.trim() || isSaving) return;
+    if (!title.trim() || !content.trim() || isSaving || !currentFamily) return;
 
     setIsSaving(true);
     try {
@@ -88,7 +145,11 @@ export const NotesPage: React.FC = () => {
           is_private: isPrivate,
           color,
         });
-        setNotes((prev) => prev.map((n) => (n.id === editingNote.id ? res.data : n)));
+        setNotes((prev) => {
+          const next = prev.map((n) => (n.id === editingNote.id ? res.data : n));
+          localNotesStorage.saveNotes(currentFamily.id, next);
+          return next;
+        });
       } else {
         const res = await api.post<Note>('/notes/', {
           title: title.trim(),
@@ -96,7 +157,11 @@ export const NotesPage: React.FC = () => {
           is_private: isPrivate,
           color,
         });
-        setNotes((prev) => [res.data, ...prev]);
+        setNotes((prev) => {
+          const next = [res.data, ...prev];
+          localNotesStorage.saveNotes(currentFamily.id, next);
+          return next;
+        });
       }
       setShowModal(false);
     } catch (err: any) {
@@ -107,10 +172,14 @@ export const NotesPage: React.FC = () => {
   };
 
   const handleDeleteNote = async (noteId: string) => {
-    if (!confirm('Bu notu silmek istediğinize emin misiniz?')) return;
+    if (!confirm('Bu notu silmek istediğinize emin misiniz?') || !currentFamily) return;
+    setNotes((prev) => {
+      const next = prev.filter((n) => n.id !== noteId);
+      localNotesStorage.saveNotes(currentFamily.id, next);
+      return next;
+    });
     try {
       await api.delete(`/notes/${noteId}`);
-      setNotes((prev) => prev.filter((n) => n.id !== noteId));
     } catch (err: any) {
       alert('Not silinemedi: ' + err.message);
     }
@@ -137,7 +206,7 @@ export const NotesPage: React.FC = () => {
         </div>
         <button
           onClick={openCreateModal}
-          className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm flex-shrink-0"
+          className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm flex-shrink-0 cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           <span>Yeni Not</span>
@@ -157,7 +226,7 @@ export const NotesPage: React.FC = () => {
           />
         </div>
 
-        {/* 3-Column Responsive Filters (No Horizontal Overflow) */}
+        {/* 3-Column Responsive Filters */}
         <div className="grid grid-cols-3 gap-1.5 w-full">
           <button
             onClick={() => setFilterType('all')}
@@ -323,7 +392,7 @@ export const NotesPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={isSaving || !title.trim() || !content.trim()}
-                className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-95 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-md shadow-sky-600/20 flex items-center justify-center gap-1.5 transition"
+                className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-95 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-md shadow-sky-600/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
               >
                 {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 <span>{editingNote ? 'Güncelle' : 'Kaydet'}</span>

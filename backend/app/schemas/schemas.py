@@ -62,6 +62,21 @@ class Token(BaseModel):
     user: UserResponse
 
 
+class QuickJoinRequest(BaseModel):
+    full_name: str
+    nickname: Optional[str] = None
+    avatar_url: Optional[str] = None
+    device_id: Optional[str] = None
+
+
+class QuickJoinResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+    family_id: str
+    family_name: str
+
+
 class TokenPayload(BaseModel):
     sub: Optional[str] = None
     exp: Optional[int] = None

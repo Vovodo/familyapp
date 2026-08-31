@@ -5,11 +5,9 @@ import {
   Trash2,
   Check,
   Calendar,
-  Clock,
   Repeat,
   X,
   Loader2,
-  AlertCircle,
 } from 'lucide-react';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
@@ -17,6 +15,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { Reminder } from '../../types';
 import { api } from '../../services/api';
+import { localRemindersStorage } from '../../services/localRemindersStorage';
 import { format, parseISO, isPast } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
@@ -36,29 +35,37 @@ export const RemindersPage: React.FC = () => {
   const [notifyBefore, setNotifyBefore] = useState(15);
   const [isSaving, setIsSaving] = useState(false);
 
-  const fetchReminders = async () => {
+  // 1. 0ms Instant Local Cache + Background Sync
+  useEffect(() => {
     if (!currentFamily) return;
-    try {
-      const res = await api.get<Reminder[]>('/reminders/', {
-        params: { include_completed: true },
-      });
-      setReminders(res.data);
-    } catch (err) {
-      console.error('Reminders fetch error:', err);
-    } finally {
+
+    // A. 0ms Local Cache
+    const cached = localRemindersStorage.getReminders(currentFamily.id);
+    if (cached && cached.length > 0) {
+      setReminders(cached);
       setIsLoading(false);
     }
-  };
 
+    // B. Background Sync
+    api.get<Reminder[]>('/reminders/', { params: { include_completed: true } })
+      .then((res) => {
+        const merged = localRemindersStorage.mergeReminders(currentFamily.id, res.data);
+        setReminders(merged);
+      })
+      .catch((err) => {
+        console.error('Reminders sync error:', err);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  }, [currentFamily?.id]);
+
+  // 2. Android Notification Channel Setup
   useEffect(() => {
-    fetchReminders();
-
-    // Setup Android Notification Channel & Request Permissions
     const setupNotificationSystem = async () => {
       if (!Capacitor.isNativePlatform()) return;
 
       try {
-        // Create high-importance Android Notification Channel
         await LocalNotifications.createChannel({
           id: 'reminders_channel',
           name: 'Ailem Hatırlatıcılar',
@@ -71,7 +78,6 @@ export const RemindersPage: React.FC = () => {
           lightColor: '#E11D48',
         });
 
-        // Request display permission if not granted
         const perm = await LocalNotifications.checkPermissions();
         if (perm.display !== 'granted') {
           await LocalNotifications.requestPermissions();
@@ -82,7 +88,7 @@ export const RemindersPage: React.FC = () => {
     };
 
     setupNotificationSystem();
-  }, [currentFamily]);
+  }, []);
 
   const scheduleLocalNotification = async (reminder: Reminder) => {
     try {
@@ -90,7 +96,6 @@ export const RemindersPage: React.FC = () => {
       const scheduleTime = new Date(remindDate.getTime() - reminder.notify_before_minutes * 60 * 1000);
 
       if (scheduleTime > new Date()) {
-        // Deterministic positive 32-bit integer ID for Android AlarmManager
         const hash = reminder.id
           .split('')
           .reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0);
@@ -111,7 +116,6 @@ export const RemindersPage: React.FC = () => {
             },
           ],
         });
-        console.log(`[Notification] Scheduled notification for ${scheduleTime.toLocaleTimeString()}`);
       }
     } catch (err) {
       console.warn('Local notification scheduling error:', err);
@@ -120,7 +124,7 @@ export const RemindersPage: React.FC = () => {
 
   const handleCreateReminder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !date || isSaving) return;
+    if (!title.trim() || !date || isSaving || !currentFamily) return;
 
     setIsSaving(true);
     try {
@@ -133,7 +137,12 @@ export const RemindersPage: React.FC = () => {
         notify_before_minutes: Number(notifyBefore),
       });
 
-      setReminders((prev) => [...prev, res.data]);
+      setReminders((prev) => {
+        const next = [...prev, res.data];
+        localRemindersStorage.saveReminders(currentFamily.id, next);
+        return next;
+      });
+
       await scheduleLocalNotification(res.data);
       setShowModal(false);
       setTitle('');
@@ -147,23 +156,35 @@ export const RemindersPage: React.FC = () => {
   };
 
   const handleToggle = async (reminder: Reminder) => {
+    if (!currentFamily) return;
     const nextState = !reminder.is_completed;
-    setReminders((prev) =>
-      prev.map((r) => (r.id === reminder.id ? { ...r, is_completed: nextState } : r))
-    );
+    setReminders((prev) => {
+      const next = prev.map((r) => (r.id === reminder.id ? { ...r, is_completed: nextState } : r));
+      localRemindersStorage.saveReminders(currentFamily.id, next);
+      return next;
+    });
 
     try {
       await api.patch(`/reminders/${reminder.id}`, { is_completed: nextState });
-    } catch (err) {
-      fetchReminders();
+    } catch {
+      // Revert on error
+      setReminders((prev) => {
+        const next = prev.map((r) => (r.id === reminder.id ? reminder : r));
+        localRemindersStorage.saveReminders(currentFamily.id, next);
+        return next;
+      });
     }
   };
 
   const handleDelete = async (reminderId: string) => {
-    if (!confirm('Bu hatırlatıcıyı silmek istiyor musunuz?')) return;
+    if (!confirm('Bu hatırlatıcıyı silmek istiyor musunuz?') || !currentFamily) return;
+    setReminders((prev) => {
+      const next = prev.filter((r) => r.id !== reminderId);
+      localRemindersStorage.saveReminders(currentFamily.id, next);
+      return next;
+    });
     try {
       await api.delete(`/reminders/${reminderId}`);
-      setReminders((prev) => prev.filter((r) => r.id !== reminderId));
     } catch (err: any) {
       alert('Silinemedi: ' + err.message);
     }
@@ -182,7 +203,7 @@ export const RemindersPage: React.FC = () => {
         </div>
         <button
           onClick={() => setShowModal(true)}
-          className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm flex-shrink-0"
+          className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm flex-shrink-0 cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           <span>Ekle</span>
@@ -395,7 +416,7 @@ export const RemindersPage: React.FC = () => {
               <button
                 type="submit"
                 disabled={isSaving || !title.trim() || !date}
-                className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 active:scale-95 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-md shadow-amber-600/20 flex items-center justify-center gap-1.5 transition"
+                className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 active:scale-95 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-md shadow-amber-600/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
               >
                 {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 <span>Alarmı Kur</span>

@@ -7,7 +7,7 @@ import { useFamily } from '../../contexts/FamilyContext';
 import { Message } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
-import { localChatStorage } from '../../services/localChatStorage';
+import { localChatStorage, reconcileMessages } from '../../services/localChatStorage';
 import { mediaStorage } from '../../services/mediaStorage';
 import { MessageBubble } from '../../components/chat/MessageBubble';
 import { ChatInput } from '../../components/chat/ChatInput';
@@ -64,17 +64,16 @@ export const ChatPage: React.FC = () => {
       setShowScrollBottom(true);
     }
 
-    // Trigger loading older messages when near top (< 60px)
     if (scrollTop < 60 && hasMore && !isLoadingOlder && !isLoading) {
       fetchOlderMessages();
     }
   };
 
-  // 2. Fetch Initial Messages: Instant Local Cache (0ms) + Background Sync
+  // 2. Fetch Initial Messages: Instant Local Cache (0ms) + Safe Non-Destructive Background Sync
   const loadMessagesInstantAndSync = async () => {
     if (!currentFamily) return;
 
-    // A. INSTANT 0ms LOAD FROM LOCAL DEVICE STORAGE
+    // A. INSTANT 0ms LOAD FROM LOCAL STORAGE
     const cached = await localChatStorage.getMessages(currentFamily.id);
     if (cached && cached.length > 0) {
       setMessages(cached);
@@ -82,16 +81,20 @@ export const ChatPage: React.FC = () => {
       setTimeout(() => scrollToBottom(false), 20);
     }
 
-    // B. BACKGROUND SYNC WITH SERVER
+    // B. BACKGROUND SYNC
     try {
       const res = await api.get<Message[]>('/messages/', {
         params: { limit: 50 },
       });
-      
-      const merged = await localChatStorage.mergeMessages(currentFamily.id, res.data);
-      setMessages(merged);
+
+      setMessages((current) => {
+        const merged = reconcileMessages(current, res.data);
+        localChatStorage.saveMessages(currentFamily.id, merged);
+        return merged;
+      });
+
       setHasMore(res.data.length >= 50);
-      
+
       if (!cached || cached.length === 0) {
         setTimeout(() => scrollToBottom(false), 30);
       }
@@ -123,10 +126,12 @@ export const ChatPage: React.FC = () => {
       if (res.data.length === 0) {
         setHasMore(false);
       } else {
-        const merged = await localChatStorage.mergeMessages(currentFamily.id, res.data);
-        setMessages(merged);
+        setMessages((current) => {
+          const merged = reconcileMessages(current, res.data);
+          localChatStorage.saveMessages(currentFamily.id, merged);
+          return merged;
+        });
 
-        // Compensate scroll position immediately so user's view does not jump
         requestAnimationFrame(() => {
           if (container) {
             const newScrollHeight = container.scrollHeight;
@@ -158,7 +163,14 @@ export const ChatPage: React.FC = () => {
       },
     });
 
-    // Listen for typing broadcast events
+    // A. Realtime Fast Message Broadcast (Sub-50ms)
+    channel.on('broadcast', { event: 'new_msg' }, (payload) => {
+      const incMsg = payload.payload as Message;
+      if (!incMsg || incMsg.sender_id === user?.id) return;
+      handleIncomingMessage(incMsg);
+    });
+
+    // B. Realtime Typing Broadcast
     channel.on('broadcast', { event: 'typing' }, (payload) => {
       const data = payload.payload;
       if (!data || data.user_id === user?.id) return;
@@ -181,7 +193,7 @@ export const ChatPage: React.FC = () => {
       }
     });
 
-    // Listen for database inserts, updates, deletes with strict family_id filter
+    // C. Postgres Changes Fallback Listener
     channel.on(
       'postgres_changes',
       {
@@ -254,55 +266,17 @@ export const ChatPage: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // 5. Deterministic Realtime Message Handler
+  // 5. Incoming Message Handler with Safe Reconciliation
   const handleIncomingMessage = useCallback(
     (newMsg: Message) => {
       if (!currentFamily) return;
 
-      setMessages((prev) => {
-        // A. Match by permanent server ID
-        const existsByServerId = prev.some((m) => m.id === newMsg.id);
-        if (existsByServerId) {
-          return prev.map((m) => (m.id === newMsg.id ? { ...newMsg, status: 'sent' as const } : m));
-        }
-
-        // B. Match by client_message_id (Replace optimistic placeholder)
-        if (newMsg.client_message_id) {
-          const matchedIndex = prev.findIndex(
-            (m) => m.client_message_id === newMsg.client_message_id || m.id === newMsg.client_message_id
-          );
-          if (matchedIndex !== -1) {
-            const updated = [...prev];
-            updated[matchedIndex] = { ...newMsg, status: 'sent' as const };
-            localChatStorage.saveMessages(currentFamily.id, updated);
-            return updated;
-          }
-        }
-
-        // C. Clean fallback: Check duplicate optimistic text/media
-        if (newMsg.sender_id === user?.id) {
-          const optimisticIndex = prev.findIndex(
-            (m) =>
-              (m.status === 'sending' || m.status === 'failed') &&
-              m.sender_id === user?.id &&
-              ((newMsg.content && m.content === newMsg.content) ||
-                (newMsg.media_url && m.media_url === newMsg.media_url))
-          );
-          if (optimisticIndex !== -1) {
-            const updated = [...prev];
-            updated[optimisticIndex] = { ...newMsg, status: 'sent' as const };
-            localChatStorage.saveMessages(currentFamily.id, updated);
-            return updated;
-          }
-        }
-
-        // D. Brand new message from another user
-        const finalMsgs: Message[] = [...prev, { ...newMsg, status: 'sent' as const }];
-        localChatStorage.saveMessages(currentFamily.id, finalMsgs);
-        return finalMsgs;
+      setMessages((current) => {
+        const updated = reconcileMessages(current, [newMsg]);
+        localChatStorage.saveMessages(currentFamily.id, updated);
+        return updated;
       });
 
-      // Handle unread counts and auto-scroll
       if (isNearBottomRef.current || newMsg.sender_id === user?.id) {
         setTimeout(() => scrollToBottom(true), 30);
       } else {
@@ -339,7 +313,7 @@ export const ChatPage: React.FC = () => {
     });
   }, [user]);
 
-  // 7. Optimistic Text Message Sending
+  // 7. Optimistic Text Message Sending (Permanent Instant Visibility)
   const handleSendText = async (text: string) => {
     if (!user || !currentFamily || !text.trim()) return;
 
@@ -349,7 +323,7 @@ export const ChatPage: React.FC = () => {
       client_message_id: clientMsgId,
       family_id: currentFamily.id,
       sender_id: user.id,
-      content: text,
+      content: text.trim(),
       is_edited: false,
       created_at: new Date().toISOString(),
       sender_name: user.full_name,
@@ -358,6 +332,7 @@ export const ChatPage: React.FC = () => {
       status: 'sending' as const,
     };
 
+    // 1. Instantly display in UI & local cache
     setMessages((prev) => {
       const next: Message[] = [...prev, optimisticMsg];
       localChatStorage.saveMessages(currentFamily.id, next);
@@ -365,32 +340,35 @@ export const ChatPage: React.FC = () => {
     });
     setTimeout(() => scrollToBottom(true), 20);
 
+    // 2. Broadcast via Realtime WebSocket for sub-50ms peer delivery
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'new_msg',
+        payload: optimisticMsg,
+      });
+    }
+
+    // 3. Persist to Backend API
     try {
       const res = await api.post<Message>('/messages/', {
-        content: text,
+        content: text.trim(),
         client_message_id: clientMsgId,
       });
 
       const serverMsg = res.data;
-      setMessages((prev) => {
-        const alreadyHasServerId = prev.some((m) => m.id === serverMsg.id);
-        if (alreadyHasServerId) {
-          const filtered = prev.filter((m) => m.id !== clientMsgId && m.client_message_id !== clientMsgId);
-          localChatStorage.saveMessages(currentFamily.id, filtered);
-          return filtered;
-        }
-
-        const next: Message[] = prev.map((m) =>
-          m.id === clientMsgId || m.client_message_id === clientMsgId
-            ? { ...serverMsg, status: 'sent' as const }
-            : m
-        );
+      setMessages((current) => {
+        const next = reconcileMessages(current, [serverMsg]);
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
-    } catch (err) {
+    } catch {
       setMessages((prev) => {
-        const next: Message[] = prev.map((m) => (m.id === clientMsgId ? { ...m, status: 'failed' as const } : m));
+        const next: Message[] = prev.map((m) =>
+          m.id === clientMsgId || m.client_message_id === clientMsgId
+            ? { ...m, status: 'failed' as const }
+            : m
+        );
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
@@ -416,8 +394,8 @@ export const ChatPage: React.FC = () => {
         const res = await api.post<Message>('/messages/', payload);
         const serverMsg = res.data;
 
-        setMessages((prev) => {
-          const next: Message[] = prev.map((m) => (m.id === failedMsg.id ? { ...serverMsg, status: 'sent' as const } : m));
+        setMessages((current) => {
+          const next = reconcileMessages(current, [serverMsg]);
           localChatStorage.saveMessages(currentFamily.id, next);
           return next;
         });
@@ -439,7 +417,6 @@ export const ChatPage: React.FC = () => {
     const clientMsgId = `cmsg-photo-${Date.now()}`;
     const localPreviewUrl = base64Preview ? `data:${file.type};base64,${base64Preview}` : URL.createObjectURL(file);
 
-    // Save a high-res copy to user's phone in 'Ailem' folder
     if (base64Preview) {
       mediaStorage.savePhotoLocally(base64Preview, `ailem_${Date.now()}.jpg`);
     }
@@ -483,24 +460,18 @@ export const ChatPage: React.FC = () => {
       });
 
       const serverMsg = chatRes.data;
-      setMessages((prev) => {
-        const alreadyHasServerId = prev.some((m) => m.id === serverMsg.id);
-        if (alreadyHasServerId) {
-          const filtered = prev.filter((m) => m.id !== clientMsgId && m.client_message_id !== clientMsgId);
-          localChatStorage.saveMessages(currentFamily.id, filtered);
-          return filtered;
-        }
-        const next: Message[] = prev.map((m) =>
-          m.id === clientMsgId || m.client_message_id === clientMsgId
-            ? { ...serverMsg, status: 'sent' as const }
-            : m
-        );
+      setMessages((current) => {
+        const next = reconcileMessages(current, [serverMsg]);
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
     } catch (err: any) {
       setMessages((prev) => {
-        const next: Message[] = prev.map((m) => (m.id === clientMsgId ? { ...m, status: 'failed' as const } : m));
+        const next: Message[] = prev.map((m) =>
+          m.id === clientMsgId || m.client_message_id === clientMsgId
+            ? { ...m, status: 'failed' as const }
+            : m
+        );
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
@@ -510,7 +481,6 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  // Helper: Convert Base64 string to Blob
   const base64ToBlob = (base64: string, mimeType = 'image/jpeg'): Blob => {
     const byteCharacters = atob(base64);
     const byteNumbers = new Array(byteCharacters.length);
@@ -570,7 +540,6 @@ export const ChatPage: React.FC = () => {
       const prev = messages[i - 1];
       const next = messages[i + 1];
 
-      // Insert DateSeparator when date changes
       if (!prev || !isSameDay(new Date(current.created_at), new Date(prev.created_at))) {
         items.push(
           <DateSeparator key={`date-${current.created_at}-${current.id}`} date={current.created_at} />
@@ -579,7 +548,6 @@ export const ChatPage: React.FC = () => {
 
       const isMe = current.sender_id === user?.id;
 
-      // Grouping rules: Same sender, sent within 3 minutes
       const isFirstInGroup =
         !prev ||
         prev.sender_id !== current.sender_id ||
