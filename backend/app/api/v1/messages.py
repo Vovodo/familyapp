@@ -146,6 +146,42 @@ def send_message(
     db.commit()
     db.refresh(msg)
 
+    # Dispatch Push Notification to all other family members
+    try:
+        from backend.app.models.models import DeviceToken
+        from backend.app.services.push_service import push_service
+
+        other_members = db.query(FamilyMember).filter(
+            FamilyMember.family_id == member.family_id,
+            FamilyMember.user_id != current_user.id
+        ).all()
+        recipient_user_ids = [m.user_id for m in other_members]
+
+        if recipient_user_ids:
+            active_tokens = db.query(DeviceToken).filter(
+                DeviceToken.user_id.in_(recipient_user_ids),
+                DeviceToken.is_active == True
+            ).all()
+
+            if active_tokens:
+                sender_display = member.nickname or current_user.full_name or "Aile Üyesi"
+                import asyncio
+                asyncio.create_task(
+                    push_service.send_chat_push(
+                        db=db,
+                        device_tokens=active_tokens,
+                        sender_name=sender_display,
+                        sender_id=current_user.id,
+                        family_id=member.family_id,
+                        message_id=msg.id,
+                        content=msg.content,
+                        media_type=msg.media_type
+                    )
+                )
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"Failed to dispatch chat push notification: {e}")
+
     return MessageResponse(
         id=msg.id,
         client_message_id=msg.client_message_id,

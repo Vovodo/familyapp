@@ -83,15 +83,12 @@ class PushNotificationService:
         logger.info(f"PUSH_SEND_STARTED: Target tokens count: {len(tokens)}, Event ID: {event_id}")
 
         if not self.is_initialized:
-            # Re-check in case credentials were added at runtime
             self._initialize_firebase()
 
         if not self.is_initialized:
-            logger.info("FCM not configured yet (no firebase_service_account.json). Realtime/Local listeners will handle if app is open.")
+            logger.warning("FCM not configured! (FIREBASE_CREDENTIALS_JSON or firebase_service_account.json missing on server).")
             return len(tokens)
 
-        # Vibration timings: [0, 500, 200, 500, 200, 500, 200, 500] in milliseconds
-        # In FCM AndroidNotification: list of milliseconds as integers
         vibrate_pattern = [0, 500, 200, 500, 200, 500, 200, 500]
 
         android_config = messaging.AndroidConfig(
@@ -137,9 +134,8 @@ class PushNotificationService:
 
         try:
             response = messaging.send_each_for_multicast(message)
-            logger.info(f"FCM Multicast result: {response.success_count} success, {response.failure_count} failure")
+            logger.info(f"FCM Heart Multicast result: {response.success_count} success, {response.failure_count} failure")
 
-            # Clean up invalid tokens
             if response.failure_count > 0:
                 failed_indices = [idx for idx, resp in enumerate(response.responses) if not resp.success]
                 failed_tokens = [tokens[idx] for idx in failed_indices]
@@ -153,6 +149,94 @@ class PushNotificationService:
             return response.success_count
         except Exception as e:
             logger.error(f"FCM send_each_for_multicast failed: {e}")
+            return 0
+
+    async def send_chat_push(
+        self,
+        db: Session,
+        device_tokens: List[DeviceToken],
+        sender_name: str,
+        sender_id: str,
+        family_id: str,
+        message_id: str,
+        content: Optional[str] = None,
+        media_type: Optional[str] = None
+    ) -> int:
+        """
+        Sends high-priority WhatsApp-like push notification for new chat messages.
+        """
+        if not device_tokens:
+            return 0
+
+        tokens = [dt.token for dt in device_tokens if dt.token]
+        if not tokens:
+            return 0
+
+        if not self.is_initialized:
+            self._initialize_firebase()
+
+        if not self.is_initialized:
+            logger.warning("FCM not configured! (FIREBASE_CREDENTIALS_JSON or firebase_service_account.json missing on server).")
+            return len(tokens)
+
+        title = sender_name
+        body = content if content else ("📷 Fotoğraf" if media_type == "image" else "📎 Medya içeriği")
+
+        android_config = messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                title=title,
+                body=body,
+                channel_id=GENERAL_CHANNEL_ID,
+                sound="default",
+                priority="high",
+                visibility="public",
+                tag=f"chat_{family_id}"
+            ),
+            data={
+                "type": "chat",
+                "message_id": message_id,
+                "sender_name": sender_name,
+                "sender_id": sender_id,
+                "family_id": family_id,
+                "content": body
+            }
+        )
+
+        message = messaging.MulticastMessage(
+            tokens=tokens,
+            notification=messaging.Notification(
+                title=title,
+                body=body
+            ),
+            data={
+                "type": "chat",
+                "message_id": message_id,
+                "sender_name": sender_name,
+                "sender_id": sender_id,
+                "family_id": family_id,
+                "content": body
+            },
+            android=android_config
+        )
+
+        try:
+            response = messaging.send_each_for_multicast(message)
+            logger.info(f"FCM Chat Multicast result: {response.success_count} success, {response.failure_count} failure")
+
+            if response.failure_count > 0:
+                failed_indices = [idx for idx, resp in enumerate(response.responses) if not resp.success]
+                failed_tokens = [tokens[idx] for idx in failed_indices]
+                if failed_tokens:
+                    logger.warning(f"Deactivating {len(failed_tokens)} stale FCM tokens.")
+                    db.query(DeviceToken).filter(DeviceToken.token.in_(failed_tokens)).update(
+                        {"is_active": False}, synchronize_session=False
+                    )
+                    db.commit()
+
+            return response.success_count
+        except Exception as e:
+            logger.error(f"FCM send_chat_push failed: {e}")
             return 0
 
 push_service = PushNotificationService()
