@@ -19,7 +19,7 @@ import { useFamily } from '../../contexts/FamilyContext';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
-import { playHeartVibration } from '../../services/pushNotification';
+import { playHeartVibration } from '../../services/notificationService';
 
 export const HomePage: React.FC = () => {
   const { user } = useAuth();

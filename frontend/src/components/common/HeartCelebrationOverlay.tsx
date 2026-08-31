@@ -3,7 +3,7 @@ import { Heart, Sparkles, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { supabase } from '../../services/supabase';
-import { pushNotificationService, playHeartVibration } from '../../services/pushNotification';
+import { notificationService, playHeartVibration } from '../../services/notificationService';
 
 interface FloatingHeart {
   id: number;
@@ -66,9 +66,9 @@ export const HeartCelebrationOverlay: React.FC = () => {
     };
   }, [currentFamily?.id, user?.id]);
 
-  // 2. Listen to Push Notification Service
+  // 2. Listen to Notification Service
   useEffect(() => {
-    const unsub = pushNotificationService.subscribeHeartReceived((data) => {
+    const unsub = notificationService.subscribeHeartReceived((data) => {
       triggerHeartCelebration(data.sender_name, data.event_id);
     });
     return unsub;

@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
 import { api, storage } from '../services/api';
-import { pushNotificationService } from '../services/pushNotification';
 
 interface AuthContextType {
   user: User | null;
@@ -130,7 +129,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      await pushNotificationService.unregisterDeviceToken().catch(() => {});
       if (token) {
         await api.post('/auth/logout').catch(() => {});
       }
