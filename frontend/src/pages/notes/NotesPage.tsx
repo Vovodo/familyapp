@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  StickyNote,
-  Plus,
-  Trash2,
+  Search,
   Lock,
   Globe,
-  Search,
+  Trash2,
   X,
   Loader2,
+  Palette,
+  Check,
+  StickyNote,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -18,12 +19,18 @@ import { localNotesStorage } from '../../services/localNotesStorage';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
-const COLOR_MAP: Record<string, { bg: string; border: string; text: string }> = {
-  amber: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-900' },
-  sky: { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-900' },
-  emerald: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-900' },
-  rose: { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-900' },
-  purple: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-900' },
+// Google Keep-inspired pastel palette
+const KEEP_COLORS: Record<
+  string,
+  { name: string; bg: string; border: string; text: string; hex: string }
+> = {
+  amber: { name: 'Sarı', bg: 'bg-[#feefc3]', border: 'border-[#fde293]', text: 'text-amber-950', hex: '#feefc3' },
+  emerald: { name: 'Yeşil', bg: 'bg-[#ccff90]', border: 'border-[#b4f570]', text: 'text-emerald-950', hex: '#ccff90' },
+  sky: { name: 'Mavi', bg: 'bg-[#cbf0f8]', border: 'border-[#aee7f4]', text: 'text-sky-950', hex: '#cbf0f8' },
+  rose: { name: 'Pembe', bg: 'bg-[#fdcfe8]', border: 'border-[#fbb8db]', text: 'text-rose-950', hex: '#fdcfe8' },
+  purple: { name: 'Mor', bg: 'bg-[#d7aefb]', border: 'border-[#c58af9]', text: 'text-purple-950', hex: '#d7aefb' },
+  orange: { name: 'Turuncu', bg: 'bg-[#ffe0b2]', border: 'border-[#ffcc80]', text: 'text-orange-950', hex: '#ffe0b2' },
+  white: { name: 'Beyaz', bg: 'bg-white', border: 'border-gray-200', text: 'text-gray-900', hex: '#ffffff' },
 };
 
 export const NotesPage: React.FC = () => {
@@ -34,41 +41,49 @@ export const NotesPage: React.FC = () => {
   const [filterType, setFilterType] = useState<'all' | 'public' | 'private'>('all');
   const [isLoading, setIsLoading] = useState(true);
 
-  // Modal / Editor State
-  const [showModal, setShowModal] = useState(false);
-  const [editingNote, setEditingNote] = useState<Note | null>(null);
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [color, setColor] = useState('amber');
-  const [isSaving, setIsSaving] = useState(false);
+  // Keep Quick Note Input State (Expanding on top)
+  const [isQuickExpanded, setIsQuickExpanded] = useState(false);
+  const [quickTitle, setQuickTitle] = useState('');
+  const [quickContent, setQuickContent] = useState('');
+  const [quickColor, setQuickColor] = useState('white');
+  const [quickIsPrivate, setQuickIsPrivate] = useState(false);
+  const [isSavingQuick, setIsSavingQuick] = useState(false);
+  const quickBoxRef = useRef<HTMLDivElement>(null);
 
-  // 1. 0ms Instant Load + Silent Background Sync
+  // Keep Full Note Edit Modal State
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [editColor, setEditColor] = useState('white');
+  const [editIsPrivate, setEditIsPrivate] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // 1. Initial 0ms Load + Quiet Background Sync with Supabase Cloud
   useEffect(() => {
     if (!currentFamily) return;
 
-    // A. 0ms Instant Cache
+    // A. 0ms Instant Local Cache
     const cached = localNotesStorage.getNotes(currentFamily.id);
     if (cached && cached.length > 0) {
       setNotes(cached);
       setIsLoading(false);
     }
 
-    // B. Background Sync
+    // B. Silent Background Sync with Supabase / PostgreSQL
     api.get<Note[]>('/notes/')
       .then((res) => {
         const merged = localNotesStorage.mergeNotes(currentFamily.id, res.data);
         setNotes(merged);
       })
       .catch((err) => {
-        console.error('Notes sync error:', err);
+        console.warn('[Notes] Quiet sync warning:', err);
       })
       .finally(() => {
         setIsLoading(false);
       });
   }, [currentFamily?.id]);
 
-  // 2. Realtime Listener for Notes
+  // 2. Realtime WebSocket Listener for Multi-Device Silent Sync
   useEffect(() => {
     if (!currentFamily || !supabase) return;
 
@@ -114,77 +129,142 @@ export const NotesPage: React.FC = () => {
     };
   }, [currentFamily?.id]);
 
-  const openCreateModal = () => {
-    setEditingNote(null);
-    setTitle('');
-    setContent('');
-    setIsPrivate(false);
-    setColor('amber');
-    setShowModal(true);
-  };
+  // 3. Quick Note Save (Local-First + Quiet Supabase Post)
+  const handleSaveQuickNote = async () => {
+    if (!quickTitle.trim() && !quickContent.trim()) {
+      setIsQuickExpanded(false);
+      return;
+    }
+    if (!currentFamily || !user) return;
 
-  const openEditModal = (note: Note) => {
-    setEditingNote(note);
-    setTitle(note.title);
-    setContent(note.content);
-    setIsPrivate(note.is_private);
-    setColor(note.color || 'amber');
-    setShowModal(true);
-  };
+    const finalTitle = quickTitle.trim() || 'Başlıksız Not';
+    const finalContent = quickContent.trim();
+    const finalColor = quickColor;
+    const finalPrivate = quickIsPrivate;
 
-  const handleSaveNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || !content.trim() || isSaving || !currentFamily) return;
+    // Reset quick input
+    setQuickTitle('');
+    setQuickContent('');
+    setQuickColor('white');
+    setQuickIsPrivate(false);
+    setIsQuickExpanded(false);
 
-    setIsSaving(true);
+    const tempId = `temp-note-${Date.now()}`;
+    const optimisticNote: Note = {
+      id: tempId,
+      family_id: currentFamily.id,
+      author_id: user.id,
+      title: finalTitle,
+      content: finalContent,
+      color: finalColor,
+      is_private: finalPrivate,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      author_name: user.full_name,
+    };
+
+    // A. 0ms Local Save
+    setNotes((prev) => {
+      const next = [optimisticNote, ...prev];
+      localNotesStorage.saveNotes(currentFamily.id, next);
+      return next;
+    });
+
+    // B. Quiet Supabase Cloud Persistence
     try {
-      if (editingNote) {
-        const res = await api.patch<Note>(`/notes/${editingNote.id}`, {
-          title: title.trim(),
-          content: content.trim(),
-          is_private: isPrivate,
-          color,
-        });
-        setNotes((prev) => {
-          const next = prev.map((n) => (n.id === editingNote.id ? res.data : n));
-          localNotesStorage.saveNotes(currentFamily.id, next);
-          return next;
-        });
-      } else {
-        const res = await api.post<Note>('/notes/', {
-          title: title.trim(),
-          content: content.trim(),
-          is_private: isPrivate,
-          color,
-        });
-        setNotes((prev) => {
-          const next = [res.data, ...prev];
-          localNotesStorage.saveNotes(currentFamily.id, next);
-          return next;
-        });
-      }
-      setShowModal(false);
+      setIsSavingQuick(true);
+      const res = await api.post<Note>('/notes/', {
+        title: finalTitle,
+        content: finalContent,
+        color: finalColor,
+        is_private: finalPrivate,
+      });
+
+      setNotes((prev) => {
+        const next = prev.map((n) => (n.id === tempId ? { ...res.data, author_name: user.full_name } : n));
+        localNotesStorage.saveNotes(currentFamily.id, next);
+        return next;
+      });
     } catch (err: any) {
-      alert('Not kaydedilemedi: ' + err.message);
+      console.error('Quick note cloud save failed:', err);
     } finally {
-      setIsSaving(false);
+      setIsSavingQuick(false);
     }
   };
 
-  const handleDeleteNote = async (noteId: string) => {
-    if (!confirm('Bu notu silmek istediğinize emin misiniz?') || !currentFamily) return;
+  // 4. Edit Note Modal Open
+  const openEditModal = (note: Note) => {
+    setEditingNote(note);
+    setEditTitle(note.title);
+    setEditContent(note.content);
+    setEditColor(note.color || 'white');
+    setEditIsPrivate(note.is_private);
+  };
+
+  // 5. Update Note (Local-First + Quiet Supabase Patch)
+  const handleUpdateNote = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!editingNote || !currentFamily || !user) return;
+
+    const finalTitle = editTitle.trim() || 'Başlıksız Not';
+    const finalContent = editContent.trim();
+    const updatedNote: Note = {
+      ...editingNote,
+      title: finalTitle,
+      content: finalContent,
+      color: editColor,
+      is_private: editIsPrivate,
+      updated_at: new Date().toISOString(),
+    };
+
+    setEditingNote(null);
+
+    // A. 0ms Local Save
+    setNotes((prev) => {
+      const next = prev.map((n) => (n.id === editingNote.id ? updatedNote : n));
+      localNotesStorage.saveNotes(currentFamily.id, next);
+      return next;
+    });
+
+    // B. Quiet Supabase Cloud Update
+    try {
+      setIsSavingEdit(true);
+      await api.patch<Note>(`/notes/${editingNote.id}`, {
+        title: finalTitle,
+        content: finalContent,
+        color: editColor,
+        is_private: editIsPrivate,
+      });
+    } catch (err: any) {
+      console.error('Note update cloud patch failed:', err);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  // 6. Delete Note (Local-First + Quiet Supabase Delete)
+  const handleDeleteNote = async (noteId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!currentFamily) return;
+
+    if (editingNote?.id === noteId) {
+      setEditingNote(null);
+    }
+
     setNotes((prev) => {
       const next = prev.filter((n) => n.id !== noteId);
       localNotesStorage.saveNotes(currentFamily.id, next);
       return next;
     });
+
     try {
       await api.delete(`/notes/${noteId}`);
     } catch (err: any) {
-      alert('Not silinemedi: ' + err.message);
+      console.error('Note delete failed:', err);
     }
   };
 
+  // Filter notes
   const filteredNotes = notes.filter((note) => {
     const matchesSearch =
       note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -197,119 +277,210 @@ export const NotesPage: React.FC = () => {
   });
 
   return (
-    <div className="w-full max-w-full px-3 py-3 space-y-3.5 mx-auto overflow-x-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="text-lg font-black text-gray-900 truncate">Aile Notları 📝</h2>
-          <p className="text-xs text-gray-500 truncate">Ortak bilgiler ve özel notlarınız</p>
-        </div>
+    <div className="w-full max-w-full px-3 py-3 space-y-3.5 mx-auto overflow-x-hidden min-h-[calc(100dvh-5rem)]">
+      {/* 1. Google Keep Style Pill Search Header */}
+      <div className="bg-white rounded-full px-4 py-2.5 shadow-sm border border-gray-200/80 flex items-center gap-2.5 transition focus-within:shadow-md focus-within:border-gray-300">
+        <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Notlarınızda arayın..."
+          className="w-full text-xs sm:text-sm bg-transparent focus:outline-none text-gray-800 placeholder-gray-400"
+        />
+        {searchQuery && (
+          <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600 p-1">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      {/* Filter Chips */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
         <button
-          onClick={openCreateModal}
-          className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-sm flex-shrink-0 cursor-pointer"
+          onClick={() => setFilterType('all')}
+          className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex-shrink-0 cursor-pointer ${
+            filterType === 'all'
+              ? 'bg-gray-900 text-white shadow-2xs'
+              : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+          }`}
         >
-          <Plus className="w-4 h-4" />
-          <span>Yeni Not</span>
+          Tümü ({notes.length})
+        </button>
+        <button
+          onClick={() => setFilterType('public')}
+          className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 flex-shrink-0 cursor-pointer ${
+            filterType === 'public'
+              ? 'bg-emerald-700 text-white shadow-2xs'
+              : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+          }`}
+        >
+          <Globe className="w-3 h-3" />
+          <span>Ortak ({notes.filter((n) => !n.is_private).length})</span>
+        </button>
+        <button
+          onClick={() => setFilterType('private')}
+          className={`px-3 py-1.5 rounded-full text-xs font-bold transition flex items-center gap-1.5 flex-shrink-0 cursor-pointer ${
+            filterType === 'private'
+              ? 'bg-purple-700 text-white shadow-2xs'
+              : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+          }`}
+        >
+          <Lock className="w-3 h-3" />
+          <span>Gizli ({notes.filter((n) => n.is_private).length})</span>
         </button>
       </div>
 
-      {/* Search and Filters */}
-      <div className="space-y-2 w-full">
-        <div className="relative w-full">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Notlarda ara..."
-            className="w-full pl-9 pr-3 py-2 bg-white border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-2xs"
-          />
-        </div>
+      {/* 2. Google Keep "Not alın..." Quick Expanding Creator Card */}
+      <div
+        ref={quickBoxRef}
+        className={`rounded-2xl border shadow-sm transition-all duration-200 overflow-hidden ${
+          KEEP_COLORS[quickColor]?.bg || 'bg-white'
+        } ${KEEP_COLORS[quickColor]?.border || 'border-gray-200'}`}
+      >
+        {!isQuickExpanded ? (
+          <div
+            onClick={() => setIsQuickExpanded(true)}
+            className="px-4 py-3 cursor-text flex items-center justify-between text-gray-500 hover:text-gray-700"
+          >
+            <span className="text-xs sm:text-sm font-medium">Not alın...</span>
+            <div className="flex items-center gap-2 text-gray-400">
+              <StickyNote className="w-4 h-4" />
+            </div>
+          </div>
+        ) : (
+          <div className="p-3.5 space-y-2.5 animate-in fade-in duration-150">
+            <input
+              type="text"
+              value={quickTitle}
+              onChange={(e) => setQuickTitle(e.target.value)}
+              placeholder="Başlık"
+              className="w-full text-sm font-bold bg-transparent focus:outline-none placeholder-gray-400 text-gray-900"
+              autoFocus
+            />
 
-        {/* 3-Column Responsive Filters */}
-        <div className="grid grid-cols-3 gap-1.5 w-full">
-          <button
-            onClick={() => setFilterType('all')}
-            className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition text-center truncate ${
-              filterType === 'all' ? 'bg-sky-600 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            Tümü ({notes.length})
-          </button>
-          <button
-            onClick={() => setFilterType('public')}
-            className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition text-center truncate ${
-              filterType === 'public' ? 'bg-sky-600 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            Ortak ({notes.filter((n) => !n.is_private).length})
-          </button>
-          <button
-            onClick={() => setFilterType('private')}
-            className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition text-center truncate ${
-              filterType === 'private' ? 'bg-sky-600 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            Gizli 🔒 ({notes.filter((n) => n.is_private).length})
-          </button>
-        </div>
+            <textarea
+              rows={3}
+              value={quickContent}
+              onChange={(e) => setQuickContent(e.target.value)}
+              placeholder="Not alın..."
+              className="w-full text-xs sm:text-sm bg-transparent focus:outline-none placeholder-gray-400 text-gray-800 resize-none leading-relaxed"
+            />
+
+            {/* Bottom Actions Bar in Quick Creator */}
+            <div className="flex items-center justify-between pt-2 border-t border-black/5 flex-wrap gap-2">
+              {/* Color Palette Selector */}
+              <div className="flex items-center gap-1.5">
+                {Object.keys(KEEP_COLORS).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setQuickColor(c)}
+                    className={`w-5 h-5 rounded-full border transition cursor-pointer flex items-center justify-center ${
+                      KEEP_COLORS[c].bg
+                    } ${quickColor === c ? 'border-gray-900 scale-110 shadow-2xs' : 'border-gray-300'}`}
+                    title={KEEP_COLORS[c].name}
+                  >
+                    {quickColor === c && <Check className="w-3 h-3 text-gray-800" />}
+                  </button>
+                ))}
+
+                {/* Privacy Lock Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setQuickIsPrivate(!quickIsPrivate)}
+                  className={`p-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ml-1 cursor-pointer ${
+                    quickIsPrivate
+                      ? 'bg-purple-100 text-purple-800'
+                      : 'text-gray-400 hover:text-gray-600'
+                  }`}
+                  title={quickIsPrivate ? 'Gizli Not (Sadece siz)' : 'Ortak Not'}
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Close & Save Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickTitle('');
+                    setQuickContent('');
+                    setIsQuickExpanded(false);
+                  }}
+                  className="px-3 py-1.5 text-xs font-bold text-gray-500 hover:text-gray-700 rounded-lg cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveQuickNote}
+                  disabled={!quickTitle.trim() && !quickContent.trim()}
+                  className="px-3.5 py-1.5 bg-gray-900 hover:bg-black active:scale-95 disabled:opacity-40 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                >
+                  Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Notes Grid */}
+      {/* 3. Google Keep 2-Column Staggered Masonry Layout */}
       {isLoading ? (
-        <div className="flex justify-center items-center py-12">
-          <Loader2 className="w-8 h-8 text-sky-600 animate-spin" />
+        <div className="flex justify-center items-center py-16">
+          <Loader2 className="w-8 h-8 text-gray-400 animate-spin" />
         </div>
       ) : filteredNotes.length === 0 ? (
-        <div className="text-center py-10 bg-white rounded-2xl p-5 border border-gray-100 shadow-2xs">
-          <StickyNote className="w-10 h-10 text-sky-300 mx-auto mb-2" />
-          <h3 className="text-sm font-bold text-gray-800">Not bulunamadı</h3>
-          <p className="text-xs text-gray-500 mt-1">Önemli şifreler, tarifler veya notlar ekleyin.</p>
+        <div className="text-center py-16 text-gray-400 select-none">
+          <div className="w-16 h-16 rounded-3xl bg-white flex items-center justify-center mx-auto mb-2 shadow-xs border border-gray-100">
+            <StickyNote className="w-8 h-8 text-amber-400" />
+          </div>
+          <p className="text-sm font-bold text-gray-700">Henüz not yok</p>
+          <p className="text-xs text-gray-400 mt-1">
+            Yukarıdaki "Not alın..." alanına dokunarak ilk notunuzu ekleyin.
+          </p>
         </div>
       ) : (
-        <div className="space-y-2.5 w-full">
+        <div className="columns-2 gap-2.5 space-y-2.5 w-full">
           {filteredNotes.map((note) => {
-            const style = COLOR_MAP[note.color] || COLOR_MAP.amber;
+            const colorConfig = KEEP_COLORS[note.color] || KEEP_COLORS.white;
             return (
               <div
                 key={note.id}
                 onClick={() => openEditModal(note)}
-                className={`${style.bg} ${style.border} border rounded-2xl p-3.5 shadow-2xs hover:shadow-xs active:scale-98 transition cursor-pointer space-y-1.5 w-full`}
+                className={`break-inside-avoid rounded-2xl p-3 border shadow-2xs hover:shadow-md transition-all duration-150 cursor-pointer space-y-1.5 active:scale-[0.99] select-none ${
+                  colorConfig.bg
+                } ${colorConfig.border}`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                    {note.is_private ? (
-                      <span className="p-1 bg-white/80 rounded-lg text-rose-600 flex-shrink-0">
-                        <Lock className="w-3.5 h-3.5" />
-                      </span>
-                    ) : (
-                      <span className="p-1 bg-white/80 rounded-lg text-sky-600 flex-shrink-0">
-                        <Globe className="w-3.5 h-3.5" />
-                      </span>
-                    )}
-                    <h3 className={`text-sm font-bold ${style.text} truncate`}>
-                      {note.title}
-                    </h3>
-                  </div>
+                {/* Note Title & Header */}
+                <div className="flex items-start justify-between gap-1.5">
+                  <h3 className={`text-xs sm:text-sm font-bold ${colorConfig.text} leading-snug line-clamp-2`}>
+                    {note.title}
+                  </h3>
 
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteNote(note.id);
-                    }}
-                    className="p-1 text-gray-400 hover:text-red-600 transition flex-shrink-0"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {note.is_private && (
+                    <span className="p-0.5 rounded text-purple-700 flex-shrink-0" title="Gizli Not">
+                      <Lock className="w-3 h-3" />
+                    </span>
+                  )}
                 </div>
 
-                <p className="text-xs text-gray-700 whitespace-pre-wrap line-clamp-3 leading-relaxed font-normal break-words">
-                  {note.content}
-                </p>
+                {/* Note Body Text */}
+                {note.content && (
+                  <p className="text-[11px] sm:text-xs text-gray-800 whitespace-pre-wrap line-clamp-6 leading-relaxed font-normal break-words">
+                    {note.content}
+                  </p>
+                )}
 
-                <div className="flex items-center justify-between pt-1 text-[10px] text-gray-400 border-t border-black/5">
-                  <span className="truncate">{note.author_name}</span>
-                  <span>{format(new Date(note.updated_at), 'd MMM yyyy', { locale: tr })}</span>
+                {/* Card Footer: Author & Date */}
+                <div className="flex items-center justify-between pt-1.5 text-[9px] sm:text-[10px] text-gray-500/80 border-t border-black/5">
+                  <span className="truncate max-w-[65px] font-medium">
+                    {note.author_name?.split(' ')[0] || 'Aile'}
+                  </span>
+                  <span>{format(new Date(note.updated_at), 'd MMM', { locale: tr })}</span>
                 </div>
               </div>
             );
@@ -317,87 +488,100 @@ export const NotesPage: React.FC = () => {
         </div>
       )}
 
-      {/* Create / Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3.5">
-          <div className="bg-white rounded-3xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-gray-900">
-                {editingNote ? 'Notu Düzenle' : 'Yeni Aile Notu'}
-              </h3>
+      {/* 4. Google Keep Full Note Edit & Detail Modal */}
+      {editingNote && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4"
+          onClick={() => handleUpdateNote()}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className={`rounded-3xl w-full max-w-md p-4 sm:p-5 space-y-3 shadow-2xl border transition-all animate-in fade-in zoom-in-95 duration-150 ${
+              KEEP_COLORS[editColor]?.bg || 'bg-white'
+            } ${KEEP_COLORS[editColor]?.border || 'border-gray-200'}`}
+          >
+            {/* Title Input */}
+            <div className="flex items-center justify-between gap-2">
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                placeholder="Başlık"
+                className="w-full text-base font-black bg-transparent focus:outline-none placeholder-gray-400 text-gray-900"
+              />
+
               <button
-                onClick={() => setShowModal(false)}
-                className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400"
+                type="button"
+                onClick={() => handleUpdateNote()}
+                className="p-1 rounded-full hover:bg-black/5 text-gray-500 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveNote} className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Başlık</label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Örn: Wi-Fi Şifresi, Doğalgaz Vanası"
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  required
-                />
+            {/* Content Textarea */}
+            <textarea
+              rows={8}
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              placeholder="Not alın..."
+              className="w-full text-xs sm:text-sm bg-transparent focus:outline-none placeholder-gray-400 text-gray-800 resize-none leading-relaxed"
+              autoFocus
+            />
+
+            {/* Note Editor Bottom Toolbar */}
+            <div className="flex items-center justify-between pt-3 border-t border-black/10 flex-wrap gap-2">
+              {/* Color Selector */}
+              <div className="flex items-center gap-1.5">
+                {Object.keys(KEEP_COLORS).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setEditColor(c)}
+                    className={`w-6 h-6 rounded-full border transition cursor-pointer flex items-center justify-center ${
+                      KEEP_COLORS[c].bg
+                    } ${editColor === c ? 'border-gray-900 scale-110 shadow-2xs' : 'border-gray-300'}`}
+                    title={KEEP_COLORS[c].name}
+                  >
+                    {editColor === c && <Check className="w-3.5 h-3.5 text-gray-800" />}
+                  </button>
+                ))}
+
+                {/* Privacy Lock Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setEditIsPrivate(!editIsPrivate)}
+                  className={`p-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 ml-1 cursor-pointer ${
+                    editIsPrivate
+                      ? 'bg-purple-100 text-purple-800'
+                      : 'text-gray-400 hover:text-gray-600'
+                  }`}
+                  title={editIsPrivate ? 'Gizli Not (Sadece siz)' : 'Ortak Not'}
+                >
+                  <Lock className="w-4 h-4" />
+                </button>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">İçerik</label>
-                <textarea
-                  rows={4}
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="Notunuzu buraya yazın..."
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  required
-                />
-              </div>
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => handleDeleteNote(editingNote.id, e)}
+                  className="p-2 text-gray-400 hover:text-red-600 rounded-xl transition cursor-pointer"
+                  title="Notu Sil"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
 
-              {/* Color Picker */}
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Renk</label>
-                <div className="flex gap-2">
-                  {Object.keys(COLOR_MAP).map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setColor(c)}
-                      className={`w-7 h-7 rounded-full border-2 transition ${
-                        COLOR_MAP[c].bg
-                      } ${color === c ? 'border-sky-600 scale-110' : 'border-transparent'}`}
-                    />
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateNote()}
+                  className="px-4 py-2 bg-gray-900 hover:bg-black active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                >
+                  Kapat
+                </button>
               </div>
-
-              {/* Privacy Toggle */}
-              <div className="flex items-center justify-between p-2.5 bg-gray-50 rounded-xl">
-                <div>
-                  <div className="text-xs font-bold text-gray-800">Gizli Not</div>
-                  <div className="text-[10px] text-gray-500">Sadece siz görebilirsiniz</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={isPrivate}
-                  onChange={(e) => setIsPrivate(e.target.checked)}
-                  className="w-4 h-4 text-sky-600 rounded-md focus:ring-sky-500"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSaving || !title.trim() || !content.trim()}
-                className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-95 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-md shadow-sky-600/20 flex items-center justify-center gap-1.5 transition cursor-pointer"
-              >
-                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                <span>{editingNote ? 'Güncelle' : 'Kaydet'}</span>
-              </button>
-            </form>
+            </div>
           </div>
         </div>
       )}
