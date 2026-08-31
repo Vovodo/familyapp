@@ -22,7 +22,7 @@ import { supabase } from '../../services/supabase';
 import { playHeartVibration } from '../../services/notificationService';
 
 export const HomePage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { currentFamily, activeMember, createFamily, joinFamily, isLoading } = useFamily();
   const navigate = useNavigate();
 
@@ -179,6 +179,16 @@ export const HomePage: React.FC = () => {
             </div>
             <ArrowRight className="w-6 h-6 text-gray-400 flex-shrink-0" />
           </button>
+
+          <div className="text-center pt-2">
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="text-xs text-gray-400 hover:text-gray-600 font-semibold underline transition cursor-pointer"
+            >
+              Farklı bir hesapla giriş yap (Çıkış)
+            </button>
+          </div>
         </div>
 
         {/* Modal: Create Family */}

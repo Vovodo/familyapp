@@ -1,14 +1,17 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, MessageCircle, ShoppingBag, StickyNote, Bell, Image as ImageIcon } from 'lucide-react';
+import { Home, MessageCircle, ShoppingBag, StickyNote, Bell } from 'lucide-react';
+import { useFamily } from '../../contexts/FamilyContext';
 
 export const BottomNav: React.FC = () => {
+  const { currentFamily } = useFamily();
+
   const navItems = [
     { to: '/', label: 'Ana Sayfa', icon: Home },
-    { to: '/chat', label: 'Sohbet', icon: MessageCircle },
-    { to: '/shopping', label: 'Alışveriş', icon: ShoppingBag },
-    { to: '/notes', label: 'Notlar', icon: StickyNote },
-    { to: '/reminders', label: 'Hatırlatıcı', icon: Bell },
+    { to: currentFamily ? '/chat' : '/', label: 'Sohbet', icon: MessageCircle },
+    { to: currentFamily ? '/shopping' : '/', label: 'Alışveriş', icon: ShoppingBag },
+    { to: currentFamily ? '/notes' : '/', label: 'Notlar', icon: StickyNote },
+    { to: currentFamily ? '/reminders' : '/', label: 'Hatırlatıcı', icon: Bell },
   ];
 
   return (

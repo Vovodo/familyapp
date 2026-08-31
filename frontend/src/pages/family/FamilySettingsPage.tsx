@@ -153,8 +153,7 @@ export const FamilySettingsPage: React.FC = () => {
     try {
       await deleteFamily(currentFamily.id);
       setShowDeleteModal(false);
-      await logout();
-      navigate('/login');
+      navigate('/');
     } catch (err: any) {
       alert('Aile grubu silinemedi: ' + err.message);
     } finally {

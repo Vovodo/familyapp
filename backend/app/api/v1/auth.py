@@ -148,7 +148,7 @@ def verify_and_register(
         user.hashed_password = get_password_hash(payload.password)
         db.flush()
 
-    # 2. Handle Family setup (Join existing via invite code OR create new)
+    # 2. Handle Family setup (Join existing via invite code OR create new if requested)
     family_id = None
     if payload.family_action == "join" and payload.invite_code:
         clean_code = payload.invite_code.strip().upper()
@@ -158,8 +158,9 @@ def verify_and_register(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Geçersiz katılım kodu. Aile grubu bulunamadı."
             )
+        family_id = family.id
         is_admin = False
-    else:
+    elif payload.family_action == "create":
         fam_name = (payload.family_name or "Bizim Aile ❤️").strip()
         digits = ''.join(random.choices(string.digits, k=6))
         code = f"AILE-{digits}"
@@ -176,28 +177,32 @@ def verify_and_register(
         )
         db.add(family)
         db.flush()
+        family_id = family.id
         is_admin = True
-
-    family_id = family.id
-
-    # 3. Add Family Member
-    member = (
-        db.query(FamilyMember)
-        .filter(FamilyMember.family_id == family.id, FamilyMember.user_id == user.id)
-        .first()
-    )
-    if not member:
-        member = FamilyMember(
-            id=str(uuid.uuid4()),
-            family_id=family.id,
-            user_id=user.id,
-            nickname=payload.nickname.strip() if payload.nickname else payload.full_name.split()[0],
-            role="admin" if is_admin else "member"
-        )
-        db.add(member)
     else:
-        if payload.nickname:
-            member.nickname = payload.nickname.strip()
+        # No family action selected; user will create or join upon first login
+        family = None
+        is_admin = False
+
+    # 3. Add Family Member if family is established
+    if family_id:
+        member = (
+            db.query(FamilyMember)
+            .filter(FamilyMember.family_id == family_id, FamilyMember.user_id == user.id)
+            .first()
+        )
+        if not member:
+            member = FamilyMember(
+                id=str(uuid.uuid4()),
+                family_id=family_id,
+                user_id=user.id,
+                nickname=payload.nickname.strip() if payload.nickname else payload.full_name.split()[0],
+                role="admin" if is_admin else "member"
+            )
+            db.add(member)
+        else:
+            if payload.nickname:
+                member.nickname = payload.nickname.strip()
 
     db.commit()
     db.refresh(user)
