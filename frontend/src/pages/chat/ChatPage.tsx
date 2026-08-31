@@ -14,6 +14,7 @@ import { ChatInput } from '../../components/chat/ChatInput';
 import { DateSeparator } from '../../components/chat/DateSeparator';
 import { ScrollToBottomButton } from '../../components/chat/ScrollToBottomButton';
 import { TypingIndicator, TypingUser } from '../../components/chat/TypingIndicator';
+import { PinchZoomViewer } from '../../components/common/PinchZoomViewer';
 
 export const ChatPage: React.FC = () => {
   const { user } = useAuth();
@@ -655,25 +656,8 @@ export const ChatPage: React.FC = () => {
         isUploading={isUploading}
       />
 
-      {/* Full-Screen Image Modal */}
       {selectedImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in"
-          onClick={() => setSelectedImage(null)}
-        >
-          <button
-            onClick={() => setSelectedImage(null)}
-            className="absolute top-4 right-4 p-2.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition"
-          >
-            <X className="w-6 h-6" />
-          </button>
-          <img
-            src={selectedImage}
-            alt="Büyük fotoğraf"
-            className="max-w-full max-h-[88vh] object-contain rounded-2xl shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
+        <PinchZoomViewer src={selectedImage} onClose={() => setSelectedImage(null)} />
       )}
     </div>
   );

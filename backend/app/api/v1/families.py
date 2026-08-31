@@ -274,7 +274,7 @@ async def send_family_heart(
 
     logger.info(f"DEVICE_TOKENS_RESOLVED: {len(active_tokens)} active tokens found.")
 
-    # 6. Dispatch Push Notifications
+    # 6. Dispatch Push Notifications (FCM-free - SSE is primary)
     push_sent_count = await push_service.send_heart_push(
         db=db,
         device_tokens=active_tokens,
@@ -284,6 +284,22 @@ async def send_family_heart(
         event_id=event_id,
         custom_message=custom_msg
     )
+
+    # 7. Publish to SSE streams for native Foreground Service listeners
+    try:
+        from backend.app.api.v1.events import publish_to_family
+        sse_event = {
+            "type": "heart",
+            "sender_id": sender_id,
+            "sender_name": sender_display_name,
+            "heart_id": event_id,
+            "family_id": family_id,
+            "message": custom_msg or f"{sender_display_name} size bir kalp gönderdi ❤️",
+        }
+        asyncio.create_task(publish_to_family(family_id, sse_event))
+        logger.info(f"SSE_HEART_DISPATCHED: event {event_id} sent to SSE for family {family_id}")
+    except Exception as e:
+        logger.warning(f"SSE_HEART_DISPATCH_ERROR: {e}")
 
     return HeartEventResponse(
         status="success",

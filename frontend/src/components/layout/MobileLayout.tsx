@@ -53,7 +53,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   }, [location.pathname, navigate]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-warm-50 text-gray-900 max-w-md mx-auto relative shadow-2xl overflow-x-hidden border-x border-gray-100">
+    <div className="flex flex-col min-h-screen w-full bg-warm-50 text-gray-900 relative shadow-2xl overflow-x-hidden">
       <PermissionAssistantModal />
       <HeartCelebrationOverlay />
       <OfflineBanner />

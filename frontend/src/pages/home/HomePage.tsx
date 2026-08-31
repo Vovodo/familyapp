@@ -325,18 +325,18 @@ export const HomePage: React.FC = () => {
   ];
 
   return (
-    <div className="p-4 space-y-4 max-w-md mx-auto">
+    <div className="p-4 space-y-4 w-full max-w-full overflow-x-hidden box-border">
       {/* Warm Greeting Card */}
-      <div className="bg-gradient-to-br from-family-600 to-family-800 rounded-3xl p-6 text-white shadow-xl shadow-family-900/15 relative overflow-hidden">
+      <div className="bg-gradient-to-br from-family-600 to-family-800 rounded-3xl p-5 sm:p-6 text-white shadow-xl shadow-family-900/15 relative overflow-hidden">
         <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 opacity-10 pointer-events-none">
-          <Heart className="w-48 h-48 fill-white" />
+          <Heart className="w-40 h-40 sm:w-48 sm:h-48 fill-white" />
         </div>
         <div className="relative z-10">
           <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-family-200">
             <Sparkles className="w-4 h-4" />
             <span>Aile Alanı</span>
           </div>
-          <h2 className="text-2xl font-black mt-1">
+          <h2 className="text-xl sm:text-2xl font-black mt-1">
             {getGreeting()}, {displayName} ❤️
           </h2>
           <p className="text-xs text-family-100 mt-1 leading-relaxed">
@@ -346,7 +346,7 @@ export const HomePage: React.FC = () => {
       </div>
 
       {/* ❤️ Grand "AİLEYE KALP GÖNDER" Interactive Widget */}
-      <div className="relative">
+      <div className="relative w-full">
         {/* Local burst animation on click */}
         {heartBurst && (
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-20">
@@ -357,17 +357,17 @@ export const HomePage: React.FC = () => {
         <button
           onClick={handleSendHeart}
           disabled={heartCooldown > 0 || isSendingHeart}
-          className={`w-full p-4 rounded-3xl bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 text-white shadow-xl shadow-rose-500/25 flex items-center justify-between transition-all duration-200 cursor-pointer select-none active:scale-98 ${
-            heartCooldown > 0 ? 'opacity-90 grayscale-20' : 'hover:shadow-2xl hover:scale-[1.01]'
+          className={`w-full p-4 rounded-3xl bg-gradient-to-r from-rose-500 via-pink-500 to-rose-600 text-white shadow-xl shadow-rose-500/25 flex items-center justify-between transition-all duration-200 cursor-pointer select-none active:scale-95 ${
+            heartCooldown > 0 ? 'opacity-90' : 'hover:shadow-2xl'
           }`}
         >
-          <div className="flex items-center gap-3.5 min-w-0">
-            <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center shadow-inner flex-shrink-0">
-              <Heart className={`w-7 h-7 fill-white text-white ${heartCooldown === 0 ? 'animate-pulse' : ''}`} />
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center shadow-inner flex-shrink-0">
+              <Heart className={`w-6 h-6 fill-white text-white ${heartCooldown === 0 ? 'animate-pulse' : ''}`} />
             </div>
             <div className="text-left min-w-0">
-              <div className="text-sm sm:text-base font-black tracking-tight leading-tight">
-                {heartCooldown > 0 ? `Kalp Gönderildi (${heartCooldown}s)` : 'AİLEYE KALP GÖNDER ❤️'}
+              <div className="text-sm font-black tracking-tight leading-tight truncate">
+                {heartCooldown > 0 ? `Gönderildi (${heartCooldown}s)` : 'AİLEYE KALP GÖNDER ❤️'}
               </div>
               <div className="text-[11px] text-rose-100 leading-tight mt-0.5 truncate">
                 Tüm aileye anlık titreşim ve sevgi bildirimi yolla
@@ -375,7 +375,7 @@ export const HomePage: React.FC = () => {
             </div>
           </div>
 
-          <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0">
+          <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0 ml-2">
             {isSendingHeart ? (
               <Loader2 className="w-5 h-5 animate-spin text-white" />
             ) : heartCooldown > 0 ? (
@@ -387,38 +387,38 @@ export const HomePage: React.FC = () => {
         </button>
 
         {heartSuccessMsg && (
-          <div className="text-center text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 py-1.5 px-3 rounded-xl mt-1.5 animate-in fade-in">
+          <div className="text-center text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 py-1.5 px-3 rounded-xl mt-1.5">
             {heartSuccessMsg}
           </div>
         )}
       </div>
 
-      {/* 6 Core Feature Grid */}
-      <div className="grid grid-cols-2 gap-3.5">
+      {/* 6 Core Feature Grid - fully responsive, no overflow */}
+      <div className="grid grid-cols-2 gap-3 w-full">
         {menuCards.map((card) => {
           const Icon = card.icon;
           return (
             <button
               key={card.to}
               onClick={() => navigate(card.to)}
-              className={`${card.bgColor} p-4 rounded-3xl border border-white/60 shadow-sm hover:shadow-md active:scale-95 transition-all text-left flex flex-col justify-between h-36 relative overflow-hidden group cursor-pointer`}
+              className={`${card.bgColor} p-3.5 rounded-2xl border border-white/60 shadow-sm hover:shadow-md active:scale-95 transition-all text-left flex flex-col gap-3 relative overflow-hidden cursor-pointer min-h-[120px]`}
             >
               <div className="flex items-center justify-between w-full">
                 <div
-                  className={`w-11 h-11 ${card.iconBg} rounded-2xl flex items-center justify-center text-white shadow-md`}
+                  className={`w-10 h-10 ${card.iconBg} rounded-xl flex items-center justify-center text-white shadow-md`}
                 >
-                  <Icon className="w-6 h-6" />
+                  <Icon className="w-5 h-5" />
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/80 text-gray-700 shadow-xs">
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/80 text-gray-700 max-w-[70px] truncate">
                   {card.badge}
                 </span>
               </div>
 
-              <div>
-                <h3 className={`text-base font-bold ${card.textColor} leading-tight`}>
+              <div className="flex-1">
+                <h3 className={`text-sm font-bold ${card.textColor} leading-tight`}>
                   {card.title}
                 </h3>
-                <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-1">
+                <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2 leading-snug">
                   {card.subtitle}
                 </p>
               </div>
