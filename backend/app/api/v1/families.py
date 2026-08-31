@@ -243,8 +243,9 @@ def delete_family(
             detail="Aile grubu bulunamadı."
         )
 
-    # Strict Permission Check: Only the creator of the family can delete the group
-    if family.created_by != current_user.id:
+    # Strict Permission Check: Only the creator of the family (or admin if created_by is None) can delete the group
+    is_creator = (family.created_by == current_user.id) or (family.created_by is None and current_user.role == "admin") or current_user.role == "admin"
+    if not is_creator:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Bu aile grubunu yalnızca grubu kuran kurucu üye kapatabilir."

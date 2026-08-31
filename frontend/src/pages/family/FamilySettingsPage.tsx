@@ -49,8 +49,14 @@ export const FamilySettingsPage: React.FC = () => {
   // Privacy Toggle State
   const [isUpdatingPrivacy, setIsUpdatingPrivacy] = useState(false);
 
-  const isCreator = currentFamily?.created_by === user?.id;
-  const isAdmin = currentFamily?.members?.some((m) => m.user_id === user?.id && m.role === 'admin') || isCreator;
+  const isCreator =
+    currentFamily?.created_by === user?.id ||
+    (!currentFamily?.created_by && user?.role === 'admin') ||
+    user?.role === 'admin';
+  const isAdmin =
+    currentFamily?.members?.some((m) => m.user_id === user?.id && m.role === 'admin') ||
+    isCreator ||
+    user?.role === 'admin';
 
   const copyInviteCode = () => {
     if (!currentFamily?.invite_code) return;
