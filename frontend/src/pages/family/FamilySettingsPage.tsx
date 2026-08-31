@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Users,
   Copy,
@@ -9,8 +10,10 @@ import {
   Heart,
   Edit3,
   Loader2,
-  Plus,
-  Share2,
+  Trash2,
+  AlertTriangle,
+  X,
+  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -18,12 +21,19 @@ import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 
 export const FamilySettingsPage: React.FC = () => {
   const { user, logout, updateProfile } = useAuth();
-  const { currentFamily, activeMember, refreshFamily } = useFamily();
+  const { currentFamily, deleteFamily } = useFamily();
+  const navigate = useNavigate();
+
   const [copied, setCopied] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [fullName, setFullName] = useState(user?.full_name || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Delete Group Modal State
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const copyInviteCode = () => {
     if (!currentFamily?.invite_code) return;
@@ -47,6 +57,25 @@ export const FamilySettingsPage: React.FC = () => {
       setIsSaving(false);
     }
   };
+
+  const handleDeleteFamily = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (confirmText.trim().toLowerCase() !== 'evet' || !currentFamily) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteFamily(currentFamily.id);
+      setShowDeleteModal(false);
+      await logout();
+      navigate('/login');
+    } catch (err: any) {
+      alert('Aile grubu silinemedi: ' + err.message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const isConfirmed = confirmText.trim().toLowerCase() === 'evet';
 
   return (
     <div className="p-4 space-y-4 max-w-md mx-auto">
@@ -82,7 +111,7 @@ export const FamilySettingsPage: React.FC = () => {
               className={`p-3 rounded-2xl transition shadow-xs flex items-center gap-1.5 text-xs font-bold ${
                 copied
                   ? 'bg-emerald-600 text-white'
-                  : 'bg-family-600 hover:bg-family-700 text-white active:scale-95'
+                  : 'bg-family-600 hover:bg-family-700 text-white active:scale-95 cursor-pointer'
               }`}
             >
               {copied ? (
@@ -168,7 +197,7 @@ export const FamilySettingsPage: React.FC = () => {
           {!isEditingProfile && (
             <button
               onClick={() => setIsEditingProfile(true)}
-              className="text-xs font-bold text-family-600 hover:text-family-700 flex items-center gap-1"
+              className="text-xs font-bold text-family-600 hover:text-family-700 flex items-center gap-1 cursor-pointer"
             >
               <Edit3 className="w-3.5 h-3.5" />
               <span>Düzenle</span>
@@ -205,14 +234,14 @@ export const FamilySettingsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsEditingProfile(false)}
-                className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl text-xs"
+                className="flex-1 py-2 bg-gray-100 text-gray-700 font-bold rounded-xl text-xs cursor-pointer"
               >
                 Vazgeç
               </button>
               <button
                 type="submit"
                 disabled={isSaving}
-                className="flex-1 py-2 bg-family-600 text-white font-bold rounded-xl text-xs"
+                className="flex-1 py-2 bg-family-600 text-white font-bold rounded-xl text-xs cursor-pointer"
               >
                 {isSaving ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Kaydet'}
               </button>
@@ -237,19 +266,108 @@ export const FamilySettingsPage: React.FC = () => {
         )}
       </div>
 
+      {/* Danger Zone: Close / Permanently Delete Family Group */}
+      <div className="bg-red-50/70 rounded-3xl p-5 border border-red-200 space-y-3">
+        <div className="flex items-center gap-2 text-red-900 font-bold text-sm">
+          <ShieldAlert className="w-5 h-5 text-red-600" />
+          <span>Tehlikeli Bölge</span>
+        </div>
+        <p className="text-xs text-red-700 leading-relaxed">
+          Aile grubunu kapattığınızda bu grupta yapılan tüm konuşma geçmişi, notlar, hatırlatıcılar ve alışveriş listesi buluttan ve cihazlardan kalıcı olarak silinir.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setConfirmText('');
+            setShowDeleteModal(true);
+          }}
+          className="w-full py-3 bg-red-600 hover:bg-red-700 active:scale-98 text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
+        >
+          <Trash2 className="w-4 h-4" />
+          <span>Grubu Kapat / Tüm Verileri Kalıcı Sil</span>
+        </button>
+      </div>
+
       {/* Download APK option on Web */}
       <DownloadApkButton variant="compact" />
 
       {/* Logout Button */}
-      <div className="pt-2">
+      <div className="pt-1">
         <button
           onClick={logout}
-          className="w-full py-4 bg-gray-100 hover:bg-red-50 text-gray-700 hover:text-red-600 font-bold rounded-2xl text-sm flex items-center justify-center gap-2 border border-gray-200 transition active:scale-98"
+          className="w-full py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 border border-gray-200 transition active:scale-98 cursor-pointer"
         >
           <LogOut className="w-4 h-4" />
           <span>Hesaptan Çıkış Yap</span>
         </button>
       </div>
+
+      {/* Confirmation Modal for Permanent Family Deletion */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-150 border border-red-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-red-600 font-black text-base">
+                <AlertTriangle className="w-6 h-6" />
+                <span>Grubu Kapatma Onayı</span>
+              </div>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="p-1.5 rounded-full hover:bg-gray-100 text-gray-400"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-red-50 rounded-2xl border border-red-200 space-y-1.5 text-xs text-red-800">
+              <div className="font-bold">⚠️ DİKKAT: Bu işlem geri alınamaz!</div>
+              <p className="leading-relaxed">
+                <strong>{currentFamily?.name}</strong> grubuna ait tüm mesajlar, fotoğraflar, notlar ve hatırlatıcılar buluttan ve telefonunuzdan tamamen silinecektir.
+              </p>
+            </div>
+
+            <form onSubmit={handleDeleteFamily} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                  Onaylamak için aşağıdaki kutucuğa <span className="text-red-600 font-black">Evet</span> yazın:
+                </label>
+                <input
+                  type="text"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder="Evet"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm font-bold focus:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 text-center"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteModal(false)}
+                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-2xl text-xs transition cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={!isConfirmed || isDeleting}
+                  className="flex-1 py-3 bg-red-600 hover:bg-red-700 active:scale-98 disabled:opacity-40 text-white font-bold rounded-2xl text-xs shadow-md shadow-red-600/30 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  {isDeleting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>Kalıcı Olarak Sil</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

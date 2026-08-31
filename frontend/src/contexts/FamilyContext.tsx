@@ -12,6 +12,7 @@ interface FamilyContextType {
   joinFamily: (inviteCode: string, nickname?: string) => Promise<Family>;
   refreshFamily: () => Promise<void>;
   selectFamily: (familyId: string) => Promise<void>;
+  deleteFamily: (familyId: string) => Promise<void>;
 }
 
 const FamilyContext = createContext<FamilyContextType | undefined>(undefined);
@@ -101,6 +102,35 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const deleteFamily = async (familyId: string) => {
+    setIsLoading(true);
+    try {
+      await api.delete(`/families/${familyId}`);
+
+      // Purge all local device caches for this family
+      try {
+        localStorage.removeItem(`ailem_msgs_${familyId}`);
+        localStorage.removeItem(`ailem_notes_${familyId}`);
+        localStorage.removeItem(`ailem_shopping_items_${familyId}`);
+        localStorage.removeItem(`ailem_reminders_${familyId}`);
+      } catch {}
+
+      await storage.remove('active_family_id');
+
+      const remaining = myFamilies.filter((f) => f.id !== familyId);
+      setMyFamilies(remaining);
+
+      if (remaining.length > 0) {
+        setCurrentFamily(remaining[0]);
+        await storage.set('active_family_id', remaining[0].id);
+      } else {
+        setCurrentFamily(null);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const activeMember = currentFamily && user
     ? currentFamily.members?.find((m) => m.user_id === user.id) || null
     : null;
@@ -116,6 +146,7 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         joinFamily,
         refreshFamily,
         selectFamily,
+        deleteFamily,
       }}
     >
       {children}

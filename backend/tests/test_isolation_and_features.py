@@ -107,3 +107,63 @@ def test_family_creation_and_strict_isolation(client):
     assert toggle_res.status_code == 200
     assert toggle_res.json()["is_completed"] is True
     assert toggle_res.json()["completed_by_name"] == "Anne C"
+
+
+def test_family_permanent_deletion_and_isolation(client):
+    # 1. Register User X and create Family X
+    res_x = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Reis X", "email": "userX@test.com", "password": "passwordX123"},
+    )
+    token_x = res_x.json()["access_token"]
+    headers_x = {"Authorization": f"Bearer {token_x}"}
+
+    fam_x_res = client.post("/api/v1/families/", json={"name": "X Ailesi"}, headers=headers_x)
+    fam_x_id = fam_x_res.json()["id"]
+
+    # 2. Register User Y and create Family Y
+    res_y = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Reis Y", "email": "userY@test.com", "password": "passwordY123"},
+    )
+    token_y = res_y.json()["access_token"]
+    headers_y = {"Authorization": f"Bearer {token_y}"}
+
+    fam_y_res = client.post("/api/v1/families/", json={"name": "Y Ailesi"}, headers=headers_y)
+    fam_y_id = fam_y_res.json()["id"]
+
+    # 3. Create items in Family X
+    client.post("/api/v1/messages/", json={"content": "X Grubu Özel Mesajı"}, headers=headers_x)
+    client.post("/api/v1/notes/", json={"title": "X Notu", "content": "X şifresi 123"}, headers=headers_x)
+    client.post("/api/v1/shopping/", json={"title": "X Ekmeği", "quantity": "1 adet"}, headers=headers_x)
+
+    # 4. Create items in Family Y
+    client.post("/api/v1/messages/", json={"content": "Y Grubu Özel Mesajı"}, headers=headers_y)
+    client.post("/api/v1/notes/", json={"title": "Y Notu", "content": "Y şifresi 456"}, headers=headers_y)
+    client.post("/api/v1/shopping/", json={"title": "Y Sütü", "quantity": "2 adet"}, headers=headers_y)
+
+    # 5. Delete Family X
+    del_res = client.delete(f"/api/v1/families/{fam_x_id}", headers=headers_x)
+    assert del_res.status_code == 200
+
+    # 6. Verify Family X is gone
+    my_fams_x = client.get("/api/v1/families/my-families", headers=headers_x).json()
+    assert len(my_fams_x) == 0
+
+    # 7. Verify Family Y and all its messages, notes, and shopping items are 100% UNTOUCHED!
+    my_fams_y = client.get("/api/v1/families/my-families", headers=headers_y).json()
+    assert len(my_fams_y) == 1
+    assert my_fams_y[0]["id"] == fam_y_id
+
+    msgs_y = client.get("/api/v1/messages/", headers=headers_y).json()
+    assert len(msgs_y) == 1
+    assert msgs_y[0]["content"] == "Y Grubu Özel Mesajı"
+
+    notes_y = client.get("/api/v1/notes/", headers=headers_y).json()
+    assert len(notes_y) == 1
+    assert notes_y[0]["title"] == "Y Notu"
+
+    shop_y = client.get("/api/v1/shopping/", headers=headers_y).json()
+    assert len(shop_y) == 1
+    assert shop_y[0]["title"] == "Y Sütü"
+
