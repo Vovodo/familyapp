@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Heart, Lock, Mail, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 
 export const LoginPage: React.FC = () => {
   const [emailOrPhone, setEmailOrPhone] = useState('');
@@ -31,9 +32,9 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-warm-50 flex flex-col justify-center px-6 py-12 max-w-md mx-auto">
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-family-100 text-family-600 shadow-lg shadow-family-100 mb-4 animate-bounce">
+    <div className="min-h-screen bg-warm-50 flex flex-col justify-center px-6 py-10 max-w-md mx-auto space-y-6">
+      <div className="text-center">
+        <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-family-100 text-family-600 shadow-lg shadow-family-100 mb-3 animate-bounce">
           <Heart className="w-10 h-10 fill-family-500 text-family-500" />
         </div>
         <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight">Ailemize Hoş Geldiniz</h1>
@@ -102,7 +103,7 @@ export const LoginPage: React.FC = () => {
           </button>
         </form>
 
-        <div className="mt-6 pt-6 border-t border-gray-100 text-center">
+        <div className="mt-5 pt-5 border-t border-gray-100 text-center">
           <p className="text-sm text-gray-600">
             Hesabınız yok mu?{' '}
             <Link to="/register" className="text-family-600 font-bold hover:underline">
@@ -111,6 +112,9 @@ export const LoginPage: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* Direct APK Download Prompt on Web (Hidden inside APK) */}
+      <DownloadApkButton variant="compact" />
     </div>
   );
 };

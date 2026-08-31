@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
+import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 
 export const FamilySettingsPage: React.FC = () => {
   const { user, logout, updateProfile } = useAuth();
@@ -235,6 +236,9 @@ export const FamilySettingsPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Download APK option on Web */}
+      <DownloadApkButton variant="compact" />
 
       {/* Logout Button */}
       <div className="pt-2">

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
+import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 
 export const HomePage: React.FC = () => {
   const { user } = useAuth();
@@ -303,6 +304,9 @@ export const HomePage: React.FC = () => {
           );
         })}
       </div>
+
+      {/* Prominent APK Download Banner on Web (Hidden inside APK) */}
+      <DownloadApkButton variant="banner" className="mt-2" />
     </div>
   );
 };
