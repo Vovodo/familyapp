@@ -1,5 +1,6 @@
 package com.aile.mobile;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -7,11 +8,11 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
@@ -28,9 +29,14 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Native Android Foreground Service that maintains an SSE connection to the backend.
- * Works even when the WebView (Capacitor) is killed, providing real-time notifications
- * without requiring Firebase/FCM.
+ * Native Android Foreground Service — SSE tabanlı arka plan bildirimi.
+ * Firebase olmadan, uygulama tamamen kapalıyken bile çalışır.
+ *
+ * Kritik özellikler:
+ *  - START_STICKY: OS tarafından öldürülse otomatik yeniden başlar
+ *  - stopWithTask=false (Manifest): Kullanıcı uygulamayı kapatınca DURMAZ
+ *  - onTaskRemoved: Uygulama sürüklendiğinde servisi AlarmManager ile yeniden zamanlar
+ *  - onStartCommand null intent: Servis OS tarafından yeniden başlatıldığında foreground devam eder
  */
 public class FamilyNotificationService extends Service {
 
@@ -43,12 +49,16 @@ public class FamilyNotificationService extends Service {
     public static final String ACTION_START = "START_SSE";
     public static final String ACTION_STOP = "STOP_SSE";
 
+    // Capacitor Preferences → SharedPreferences key prefix
     private static final String PREFS_NAME = "CapacitorStorage";
     private static final long[] HEART_VIBRATION = {0, 500, 200, 500, 200, 500, 200, 500};
 
     private ExecutorService executor;
-    private AtomicBoolean isRunning = new AtomicBoolean(false);
+    private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private Handler mainHandler;
+
+    // Son alınan bildirimi tekrar göstermemek için
+    private String lastHeartId = "";
 
     @Override
     public void onCreate() {
@@ -56,25 +66,26 @@ public class FamilyNotificationService extends Service {
         executor = Executors.newSingleThreadExecutor();
         mainHandler = new Handler(Looper.getMainLooper());
         createNotificationChannels();
+        Log.d(TAG, "Service onCreate");
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent == null) return START_STICKY;
+        Log.d(TAG, "onStartCommand: intent=" + (intent != null ? intent.getAction() : "null(restart)"));
 
-        String action = intent.getAction();
+        // ÖNCE foreground başlat — hem normal başlatmada hem OS'un null intent ile restart'ında
+        Notification notification = buildForegroundNotification();
+        startForeground(1001, notification);
 
-        if (ACTION_STOP.equals(action)) {
+        // Durdurma isteği
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             stopSseLoop();
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        // Start as foreground service with subtle persistent notification
-        Notification notification = buildForegroundNotification();
-        startForeground(1001, notification);
-
+        // SSE döngüsünü başlat (zaten çalışmıyorsa)
         if (!isRunning.get()) {
             startSseLoop();
         }
@@ -82,43 +93,75 @@ public class FamilyNotificationService extends Service {
         return START_STICKY;
     }
 
+    /**
+     * Kullanıcı uygulamayı kapatınca (sürükleyince) çağrılır.
+     * AlarmManager ile 2 saniye sonra servisi yeniden başlatır.
+     */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        Log.d(TAG, "onTaskRemoved — scheduling restart in 2s");
+
+        Intent restartIntent = new Intent(getApplicationContext(), FamilyNotificationService.class);
+        restartIntent.setAction(ACTION_START);
+        restartIntent.setPackage(getPackageName());
+
+        int flags = PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE;
+        PendingIntent pendingIntent = PendingIntent.getService(
+            getApplicationContext(), 1, restartIntent, flags
+        );
+
+        AlarmManager alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        if (alarmManager != null) {
+            long triggerAt = SystemClock.elapsedRealtime() + 2000; // 2 saniye sonra
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                alarmManager.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent);
+            } else {
+                alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent);
+            }
+        }
+
+        super.onTaskRemoved(rootIntent);
+    }
+
+    // ─────────────────────────────────────────────
+    // SSE Ana Döngüsü
+    // ─────────────────────────────────────────────
+
     private void startSseLoop() {
         isRunning.set(true);
         executor.execute(() -> {
+            Log.d(TAG, "SSE loop started");
             while (isRunning.get()) {
                 try {
                     String token = getAuthToken();
                     String familyId = getActiveFamilyId();
 
                     if (token == null || token.isEmpty() || familyId == null || familyId.isEmpty()) {
-                        Log.d(TAG, "No auth token or family ID. Waiting 15s...");
-                        Thread.sleep(15000);
+                        Log.d(TAG, "No credentials yet, retrying in 10s...");
+                        Thread.sleep(10000);
                         continue;
                     }
 
+                    Log.d(TAG, "Connecting SSE for family=" + familyId);
                     connectAndListen(token, familyId);
+                    Log.d(TAG, "SSE disconnected, reconnecting in 5s...");
+                    Thread.sleep(5000);
 
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    Log.e(TAG, "SSE connection error: " + e.getMessage());
-                    try {
-                        Thread.sleep(10000); // Retry after 10s
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
+                    Log.w(TAG, "SSE error: " + e.getMessage() + " — retry in 8s");
+                    try { Thread.sleep(8000); } catch (InterruptedException ie) { break; }
                 }
             }
+            Log.d(TAG, "SSE loop ended");
         });
     }
 
     private void connectAndListen(String token, String familyId) throws Exception {
-        // Backend SSE endpoint
-        String apiBase = getApiBaseUrl();
-        String sseUrl = apiBase + "/api/v1/events/family/" + familyId + "/stream";
-        Log.d(TAG, "Connecting to SSE: " + sseUrl);
+        String sseUrl = getApiBaseUrl() + "/api/v1/events/family/" + familyId + "/stream";
+        Log.d(TAG, "SSE → " + sseUrl);
 
         URL url = new URL(sseUrl);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -126,38 +169,37 @@ public class FamilyNotificationService extends Service {
         conn.setRequestProperty("Authorization", "Bearer " + token);
         conn.setRequestProperty("Accept", "text/event-stream");
         conn.setRequestProperty("Cache-Control", "no-cache");
+        conn.setRequestProperty("Connection", "keep-alive");
         conn.setConnectTimeout(30000);
-        conn.setReadTimeout(90000); // 90s read timeout (longer than 30s keepalive)
+        conn.setReadTimeout(120000); // 2 dakika (backend her 30s ping atar)
+        conn.setDoInput(true);
         conn.connect();
 
-        int responseCode = conn.getResponseCode();
-        if (responseCode != 200) {
-            Log.w(TAG, "SSE connection failed: HTTP " + responseCode);
+        int code = conn.getResponseCode();
+        if (code != 200) {
+            Log.w(TAG, "SSE HTTP " + code + " — closing");
             conn.disconnect();
             return;
         }
 
-        Log.d(TAG, "SSE connected! Listening for events...");
+        Log.d(TAG, "SSE connected ✓");
 
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
             String line;
-            StringBuilder dataBuilder = new StringBuilder();
+            StringBuilder dataBuf = new StringBuilder();
 
             while (isRunning.get() && (line = reader.readLine()) != null) {
                 if (line.startsWith("data:")) {
-                    String jsonStr = line.substring(5).trim();
-                    dataBuilder.append(jsonStr);
-                } else if (line.isEmpty() && dataBuilder.length() > 0) {
-                    // Full SSE event received
-                    String eventJson = dataBuilder.toString();
-                    dataBuilder.setLength(0);
-                    processEvent(eventJson, familyId);
+                    dataBuf.append(line.substring(5).trim());
+                } else if (line.isEmpty() && dataBuf.length() > 0) {
+                    processEvent(dataBuf.toString(), familyId);
+                    dataBuf.setLength(0);
                 }
             }
         }
 
         conn.disconnect();
-        Log.d(TAG, "SSE connection ended. Will reconnect.");
+        Log.d(TAG, "SSE stream ended");
     }
 
     private void processEvent(String jsonStr, String myFamilyId) {
@@ -166,29 +208,43 @@ public class FamilyNotificationService extends Service {
             String type = event.optString("type", "");
             String eventFamilyId = event.optString("family_id", "");
 
-            // Family isolation check
+            // Aile izolasyonu
             if (!eventFamilyId.isEmpty() && !eventFamilyId.equals(myFamilyId)) {
+                Log.d(TAG, "Ignoring event for different family: " + eventFamilyId);
                 return;
             }
 
             if ("heart".equals(type)) {
-                String senderName = event.optString("sender_name", "Aile Bireyi");
                 String heartId = event.optString("heart_id", "");
+                // Tekrar bildirimi önle
+                if (heartId.equals(lastHeartId)) return;
+                lastHeartId = heartId;
+
+                String senderName = event.optString("sender_name", "Aile Bireyi");
                 String message = event.optString("message", senderName + " size bir kalp gönderdi ❤️");
 
-                Log.d(TAG, "HEART_EVENT: " + senderName + " sent a heart!");
+                Log.d(TAG, "HEART from " + senderName + " — showing notification!");
+                final String finalSenderName = senderName;
+                final String finalMessage = message;
+                final String finalHeartId = heartId;
                 mainHandler.post(() -> {
-                    showHeartNotification(senderName, message, heartId);
+                    showHeartNotification(finalSenderName, finalMessage, finalHeartId);
                     vibrateHeart();
                 });
 
             } else if ("ping".equals(type)) {
-                Log.v(TAG, "SSE ping received");
+                Log.v(TAG, "Ping ✓");
+            } else if ("connected".equals(type)) {
+                Log.d(TAG, "SSE confirmed connected: " + event.optString("family_id"));
             }
         } catch (Exception e) {
-            Log.w(TAG, "Error parsing SSE event: " + e.getMessage());
+            Log.w(TAG, "processEvent error: " + e.getMessage());
         }
     }
+
+    // ─────────────────────────────────────────────
+    // Bildirim Gösterimi
+    // ─────────────────────────────────────────────
 
     private void showHeartNotification(String senderName, String message, String heartId) {
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
@@ -199,36 +255,40 @@ public class FamilyNotificationService extends Service {
         intent.putExtra("type", "heart");
         intent.putExtra("heartId", heartId);
 
-        int requestCode = (int) (System.currentTimeMillis() % 100000);
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-            this, requestCode, intent,
+        int reqCode = (int) (System.currentTimeMillis() % 100000);
+        PendingIntent pi = PendingIntent.getActivity(
+            this, reqCode, intent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        Notification.Builder builder;
+        Notification notif;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            builder = new Notification.Builder(this, CHANNEL_ID_HEART);
+            notif = new Notification.Builder(this, CHANNEL_ID_HEART)
+                .setSmallIcon(android.R.drawable.ic_dialog_email)
+                .setContentTitle("❤️ Aileden bir kalp")
+                .setContentText(message)
+                .setSubText(senderName)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+                .setVibrate(HEART_VIBRATION)
+                .setCategory(Notification.CATEGORY_MESSAGE)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .build();
         } else {
-            builder = new Notification.Builder(this);
-            builder.setPriority(Notification.PRIORITY_HIGH);
-        }
-
-        builder
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("❤️ Aileden bir kalp")
-            .setContentText(message)
-            .setSubText(senderName)
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .setVibrate(HEART_VIBRATION);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            builder.setCategory(Notification.CATEGORY_MESSAGE);
-            builder.setVisibility(Notification.VISIBILITY_PUBLIC);
+            notif = new Notification.Builder(this)
+                .setSmallIcon(android.R.drawable.ic_dialog_email)
+                .setContentTitle("❤️ Aileden bir kalp")
+                .setContentText(message)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+                .setVibrate(HEART_VIBRATION)
+                .setPriority(Notification.PRIORITY_HIGH)
+                .build();
         }
 
         int notifId = (int) (System.currentTimeMillis() % 10000) + 2000;
-        nm.notify(notifId, builder.build());
+        nm.notify(notifId, notif);
+        Log.d(TAG, "Heart notification shown #" + notifId);
     }
 
     private void vibrateHeart() {
@@ -240,6 +300,7 @@ public class FamilyNotificationService extends Service {
                     v.vibrate(VibrationEffect.createWaveform(HEART_VIBRATION, -1));
                 }
             } else {
+                @SuppressWarnings("deprecation")
                 Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
                 if (v != null) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -254,33 +315,35 @@ public class FamilyNotificationService extends Service {
         }
     }
 
+    // ─────────────────────────────────────────────
+    // Kanal ve Bildirim Oluşturma
+    // ─────────────────────────────────────────────
+
     private Notification buildForegroundNotification() {
         Intent intent = new Intent(this, MainActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_IMMUTABLE
+        PendingIntent pi = PendingIntent.getActivity(
+            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
         );
 
-        Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            builder = new Notification.Builder(this, CHANNEL_ID_FOREGROUND);
+            return new Notification.Builder(this, CHANNEL_ID_FOREGROUND)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Ailem Aktif 💚")
+                .setContentText("Kalp bildirimleri izleniyor — arka planda çalışıyor")
+                .setOngoing(true)
+                .setContentIntent(pi)
+                .setVisibility(Notification.VISIBILITY_SECRET)
+                .build();
         } else {
-            builder = new Notification.Builder(this);
-            builder.setPriority(Notification.PRIORITY_MIN);
+            return new Notification.Builder(this)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Ailem Aktif 💚")
+                .setContentText("Kalp bildirimleri izleniyor")
+                .setOngoing(true)
+                .setContentIntent(pi)
+                .setPriority(Notification.PRIORITY_MIN)
+                .build();
         }
-
-        builder
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Ailem Aktif 💚")
-            .setContentText("Aile bildirimleri etkin - kalp ve mesajlar takip ediliyor")
-            .setOngoing(true)
-            .setContentIntent(pendingIntent);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            builder.setVisibility(Notification.VISIBILITY_SECRET);
-        }
-
-        return builder.build();
     }
 
     private void createNotificationChannels() {
@@ -288,81 +351,86 @@ public class FamilyNotificationService extends Service {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
 
-            // Foreground service channel (minimal)
-            NotificationChannel fgChannel = new NotificationChannel(
-                CHANNEL_ID_FOREGROUND,
-                "Arka Plan Servisi",
-                NotificationManager.IMPORTANCE_MIN
+            // Arka plan servisi kanalı — sessiz, minimal
+            NotificationChannel fgCh = new NotificationChannel(
+                CHANNEL_ID_FOREGROUND, "Arka Plan Servisi", NotificationManager.IMPORTANCE_MIN
             );
-            fgChannel.setDescription("Ailem aktif bildirim servisi");
-            fgChannel.setShowBadge(false);
-            nm.createNotificationChannel(fgChannel);
+            fgCh.setDescription("Ailem aktif servis — kalp bildirimlerini izler");
+            fgCh.setShowBadge(false);
+            fgCh.enableVibration(false);
+            fgCh.enableLights(false);
+            nm.createNotificationChannel(fgCh);
 
-            // Heart notification channel (high priority)
-            NotificationChannel heartChannel = new NotificationChannel(
-                CHANNEL_ID_HEART,
-                "Aile Kalp Bildirimleri ❤️",
-                NotificationManager.IMPORTANCE_HIGH
+            // Kalp kanalı — maksimum öncelik
+            NotificationChannel heartCh = new NotificationChannel(
+                CHANNEL_ID_HEART, "Aile Kalp Bildirimleri ❤️", NotificationManager.IMPORTANCE_HIGH
             );
-            heartChannel.setDescription("Aile kalp göndermelerinden anlık bildirim ve titreşim");
-            heartChannel.enableVibration(true);
-            heartChannel.setVibrationPattern(HEART_VIBRATION);
-            heartChannel.enableLights(true);
-            heartChannel.setLightColor(0xFFE11D48);
-            heartChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-            nm.createNotificationChannel(heartChannel);
+            heartCh.setDescription("Aileden gelen kalpler — anlık titreşim ve bildirim");
+            heartCh.enableVibration(true);
+            heartCh.setVibrationPattern(HEART_VIBRATION);
+            heartCh.enableLights(true);
+            heartCh.setLightColor(0xFFE11D48);
+            heartCh.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            nm.createNotificationChannel(heartCh);
 
-            // General channel
-            NotificationChannel generalChannel = new NotificationChannel(
-                CHANNEL_ID_GENERAL,
-                "Aile Genel Bildirimleri",
-                NotificationManager.IMPORTANCE_DEFAULT
+            // Genel kanal
+            NotificationChannel genCh = new NotificationChannel(
+                CHANNEL_ID_GENERAL, "Aile Bildirimleri", NotificationManager.IMPORTANCE_DEFAULT
             );
-            generalChannel.setDescription("Mesajlar ve hatırlatıcılar");
-            nm.createNotificationChannel(generalChannel);
+            genCh.setDescription("Mesajlar ve hatırlatıcılar");
+            nm.createNotificationChannel(genCh);
         }
     }
 
+    // ─────────────────────────────────────────────
+    // Yardımcı Metotlar
+    // ─────────────────────────────────────────────
+
+    /**
+     * Capacitor Preferences → Android SharedPreferences.
+     * @capacitor/preferences key "auth_token" → "_cap_auth_token"
+     */
     private String getAuthToken() {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        // Capacitor Preferences stores keys as _cap_<key>
-        String token = prefs.getString("_cap_auth_token", null);
-        if (token == null) {
-            token = prefs.getString("auth_token", null);
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            String token = prefs.getString("_cap_auth_token", null);
+            if (token == null) token = prefs.getString("auth_token", null);
+            // JSON string ise tırnak temizle
+            if (token != null) token = token.replace("\"", "").trim();
+            return token;
+        } catch (Exception e) {
+            Log.w(TAG, "getAuthToken error: " + e);
+            return null;
         }
-        // Remove surrounding quotes if stored as JSON string
-        if (token != null) {
-            token = token.replace("\"", "").trim();
-        }
-        return token;
     }
 
     private String getActiveFamilyId() {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        String familyId = prefs.getString("_cap_active_family_id", null);
-        if (familyId == null) {
-            familyId = prefs.getString("active_family_id", null);
+        try {
+            android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            String id = prefs.getString("_cap_active_family_id", null);
+            if (id == null) id = prefs.getString("active_family_id", null);
+            if (id != null) id = id.replace("\"", "").trim();
+            return id;
+        } catch (Exception e) {
+            Log.w(TAG, "getActiveFamilyId error: " + e);
+            return null;
         }
-        if (familyId != null) {
-            familyId = familyId.replace("\"", "").trim();
-        }
-        return familyId;
     }
 
     private String getApiBaseUrl() {
-        // Read from Capacitor config; falls back to production URL
         return "https://familyapi.rfqcollector.com";
     }
 
     private void stopSseLoop() {
         isRunning.set(false);
-        if (executor != null) {
+        if (executor != null && !executor.isShutdown()) {
             executor.shutdownNow();
         }
     }
 
     @Override
     public void onDestroy() {
+        Log.d(TAG, "Service onDestroy");
         stopSseLoop();
         super.onDestroy();
     }

@@ -27,10 +27,12 @@
         </activity>
 
         <!-- Native Foreground Service for SSE-based push without Firebase -->
+        <!-- stopWithTask="false" → kullanıcı uygulamayı kapattığında servis DURMAZ -->
         <service
             android:name=".FamilyNotificationService"
             android:enabled="true"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="dataSync" />
 
         <!-- Auto-restart service after device reboot -->

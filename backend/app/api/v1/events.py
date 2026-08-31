@@ -25,24 +25,28 @@ async def publish_to_family(family_id: str, event: dict):
     """Publish an event to all SSE subscribers of a family (excluding sender)."""
     queues = _family_connections.get(family_id, set()).copy()
     if not queues:
+        logger.debug(f"SSE_PUBLISH: No active connections for family {family_id}")
         return 0
 
-    sender_id = event.get("sender_id")
+    sender_id = str(event.get("sender_id", ""))
     count = 0
     payload = f"data: {json.dumps(event)}\n\n"
 
     for q in queues:
-        # Attach sender_id to each queue for filtering
-        if hasattr(q, '_user_id') and q._user_id == sender_id:
+        # Skip the sender's own connection (self-notification prevention)
+        q_user_id = str(getattr(q, '_user_id', ''))
+        if sender_id and q_user_id == sender_id:
+            logger.debug(f"SSE_PUBLISH: Skipping sender's own connection {sender_id}")
             continue
         try:
             q.put_nowait(payload)
             count += 1
         except asyncio.QueueFull:
-            pass
+            logger.warning(f"SSE_PUBLISH: Queue full for one connection in family {family_id}")
 
-    logger.info(f"SSE_PUBLISH: Published to {count}/{len(queues)} connections for family {family_id}")
+    logger.info(f"SSE_PUBLISH: Delivered to {count}/{len(queues)} connections for family {family_id}")
     return count
+
 
 
 @router.get("/family/{family_id}/stream")
