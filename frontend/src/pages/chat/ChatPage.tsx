@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Smile, Loader2, X } from 'lucide-react';
+import { Sliders, Trash2, X, Check, Loader2, Sparkles, MessageCircle, AlertCircle } from 'lucide-react';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { isSameDay } from 'date-fns';
 import { useAuth } from '../../contexts/AuthContext';
@@ -8,13 +8,13 @@ import { Message } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { localChatStorage, reconcileMessages } from '../../services/localChatStorage';
-import { mediaStorage } from '../../services/mediaStorage';
 import { MessageBubble } from '../../components/chat/MessageBubble';
 import { ChatInput } from '../../components/chat/ChatInput';
 import { DateSeparator } from '../../components/chat/DateSeparator';
 import { ScrollToBottomButton } from '../../components/chat/ScrollToBottomButton';
 import { TypingIndicator, TypingUser } from '../../components/chat/TypingIndicator';
 import { PinchZoomViewer } from '../../components/common/PinchZoomViewer';
+import { ChatSettingsModal, FontSizeOption, WallpaperOption, WALLPAPERS } from '../../components/chat/ChatSettingsModal';
 
 export const ChatPage: React.FC = () => {
   const { user } = useAuth();
@@ -31,12 +31,46 @@ export const ChatPage: React.FC = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
+  // Multi-Selection State
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [isDeletingBatch, setIsDeletingBatch] = useState(false);
+
+  // Settings State (Persisted in localStorage)
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [fontSize, setFontSize] = useState<FontSizeOption>(() => {
+    return (localStorage.getItem('ailem_chat_font_size') as FontSizeOption) || 'md';
+  });
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('ailem_chat_notifs') !== 'false';
+  });
+  const [wallpaper, setWallpaper] = useState<WallpaperOption>(() => {
+    return (localStorage.getItem('ailem_chat_wallpaper') as WallpaperOption) || 'classic';
+  });
+
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const channelRef = useRef<any>(null);
   const isNearBottomRef = useRef(true);
 
-  // 1. Scroll Helpers
+  // Settings handlers
+  const handleChangeFontSize = (size: FontSizeOption) => {
+    setFontSize(size);
+    localStorage.setItem('ailem_chat_font_size', size);
+  };
+
+  const handleToggleNotifications = () => {
+    const next = !notificationsEnabled;
+    setNotificationsEnabled(next);
+    localStorage.setItem('ailem_chat_notifs', String(next));
+  };
+
+  const handleChangeWallpaper = (wp: WallpaperOption) => {
+    setWallpaper(wp);
+    localStorage.setItem('ailem_chat_wallpaper', wp);
+  };
+
+  // Scroll Helpers
   const scrollToBottom = useCallback((smooth = true) => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTo({
@@ -70,11 +104,10 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  // 2. Fetch Initial Messages: Instant Local Cache (0ms) + Safe Non-Destructive Background Sync
+  // Load Messages Instant & Sync
   const loadMessagesInstantAndSync = async () => {
     if (!currentFamily) return;
 
-    // A. INSTANT 0ms LOAD FROM LOCAL STORAGE
     const cached = await localChatStorage.getMessages(currentFamily.id);
     if (cached && cached.length > 0) {
       setMessages(cached);
@@ -82,7 +115,6 @@ export const ChatPage: React.FC = () => {
       setTimeout(() => scrollToBottom(false), 20);
     }
 
-    // B. BACKGROUND SYNC
     try {
       const res = await api.get<Message[]>('/messages/', {
         params: { limit: 50 },
@@ -101,274 +133,177 @@ export const ChatPage: React.FC = () => {
       }
     } catch (err: any) {
       if (!cached || cached.length === 0) {
-        setError(err.message);
+        setError('Mesajlar yüklenirken bir problem oluştu.');
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 3. Cursor Pagination: Fetch Older Messages
+  useEffect(() => {
+    loadMessagesInstantAndSync();
+  }, [currentFamily?.id]);
+
+  // Fetch Older Messages (Infinite Scroll)
   const fetchOlderMessages = async () => {
-    if (!currentFamily || messages.length === 0 || isLoadingOlder || !hasMore) return;
-    const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!currentFamily || isLoadingOlder || messages.length === 0) return;
 
     setIsLoadingOlder(true);
-    const oldestMsg = messages[0];
-    const previousScrollHeight = container.scrollHeight;
-    const previousScrollTop = container.scrollTop;
+    const oldestId = messages[0].id;
+    const container = scrollContainerRef.current;
+    const prevScrollHeight = container?.scrollHeight || 0;
 
     try {
       const res = await api.get<Message[]>('/messages/', {
-        params: { limit: 30, before: oldestMsg.id },
+        params: { limit: 40, before: oldestId },
       });
 
-      if (res.data.length === 0) {
+      if (res.data.length < 40) {
         setHasMore(false);
-      } else {
-        setMessages((current) => {
-          const merged = reconcileMessages(current, res.data);
+      }
+
+      if (res.data.length > 0) {
+        setMessages((prev) => {
+          const merged = reconcileMessages(prev, res.data);
           localChatStorage.saveMessages(currentFamily.id, merged);
           return merged;
         });
 
-        requestAnimationFrame(() => {
+        setTimeout(() => {
           if (container) {
             const newScrollHeight = container.scrollHeight;
-            container.scrollTop = newScrollHeight - previousScrollHeight + previousScrollTop;
+            container.scrollTop = newScrollHeight - prevScrollHeight;
           }
-        });
-
-        if (res.data.length < 30) {
-          setHasMore(false);
-        }
+        }, 30);
       }
-    } catch (err: any) {
-      console.error('Error fetching older messages:', err);
+    } catch (err) {
+      console.warn('Failed to load older messages:', err);
     } finally {
       setIsLoadingOlder(false);
     }
   };
 
-  // 4. Setup Supabase Realtime Channel
+  // Realtime Supabase Subscription
   useEffect(() => {
-    loadMessagesInstantAndSync();
-
-    if (!currentFamily || !supabase) return;
+    if (!currentFamily || !user) return;
 
     const channelName = `family-chat-${currentFamily.id}`;
     const channel = supabase.channel(channelName, {
-      config: {
-        broadcast: { ack: false, self: false },
-      },
+      config: { broadcast: { self: false } },
     });
 
-    // A. Realtime Fast Message Broadcast (Sub-50ms)
-    channel.on('broadcast', { event: 'new_msg' }, (payload) => {
-      const incMsg = payload.payload as Message;
-      if (!incMsg || incMsg.sender_id === user?.id) return;
-      handleIncomingMessage(incMsg);
-    });
-
-    // B. Realtime Typing Broadcast
-    channel.on('broadcast', { event: 'typing' }, (payload) => {
-      const data = payload.payload;
-      if (!data || data.user_id === user?.id) return;
-
-      if (data.is_typing) {
-        setTypingUsers((prev) => {
-          const filtered = prev.filter((u) => u.userId !== data.user_id);
-          return [
-            ...filtered,
-            {
-              userId: data.user_id,
-              userName: data.user_name || 'Aile Üyesi',
-              nickname: data.nickname,
-              timestamp: Date.now(),
-            },
-          ];
-        });
-      } else {
-        setTypingUsers((prev) => prev.filter((u) => u.userId !== data.user_id));
-      }
-    });
-
-    // C. Postgres Changes Fallback Listener
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `family_id=eq.${currentFamily.id}`,
-      },
-      (payload) => {
-        handleIncomingMessage(payload.new as Message);
-      }
-    );
-
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'messages',
-        filter: `family_id=eq.${currentFamily.id}`,
-      },
-      (payload) => {
-        const updated = payload.new as Message;
+    channel
+      .on('broadcast', { event: 'new_message' }, ({ payload }) => {
+        const incomingMsg: Message = payload;
         setMessages((prev) => {
-          const next: Message[] = prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m));
-          localChatStorage.saveMessages(currentFamily.id, next);
-          return next;
+          const merged = reconcileMessages(prev, [incomingMsg]);
+          localChatStorage.saveMessages(currentFamily.id, merged);
+          return merged;
         });
-      }
-    );
 
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'DELETE',
-        schema: 'public',
-        table: 'messages',
-        filter: `family_id=eq.${currentFamily.id}`,
-      },
-      (payload) => {
-        const deletedId = payload.old.id;
-        setMessages((prev) => {
-          const next = prev.filter((m) => m.id !== deletedId);
-          localChatStorage.saveMessages(currentFamily.id, next);
-          return next;
-        });
-      }
-    );
+        if (isNearBottomRef.current) {
+          setTimeout(() => scrollToBottom(true), 30);
+        } else {
+          setUnreadCount((c) => c + 1);
+        }
+      })
+      .on('broadcast', { event: 'message_deleted' }, ({ payload }) => {
+        const deletedIds: string[] = payload.message_ids || [payload.message_id];
+        setMessages((prev) =>
+          prev.map((msg) =>
+            deletedIds.includes(msg.id)
+              ? { ...msg, content: '🚫 Bu mesaj silindi', media_url: undefined, media_thumbnail_url: undefined }
+              : msg
+          )
+        );
+      })
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (payload.userId !== user.id) {
+          setTypingUsers((prev) => {
+            const filtered = prev.filter((u) => u.userId !== payload.userId);
+            return [
+              ...filtered,
+              {
+                userId: payload.userId,
+                userName: payload.name || payload.userName || 'Biri',
+                nickname: payload.nickname,
+                timestamp: Date.now(),
+              },
+            ];
+          });
+        }
+      })
+      .on('broadcast', { event: 'stop_typing' }, ({ payload }) => {
+        setTypingUsers((prev) => prev.filter((u) => u.userId !== payload.userId));
+      })
+      .subscribe();
 
-    channel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        channelRef.current = channel;
-      }
-    });
+    channelRef.current = channel;
 
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
+      channel.unsubscribe();
+      channelRef.current = null;
     };
-  }, [currentFamily?.id]);
+  }, [currentFamily?.id, user?.id, scrollToBottom]);
 
-  // Clean stale typing indicators every 2 seconds
+  // Clean up stale typing indicators
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
-      setTypingUsers((prev) => prev.filter((u) => now - u.timestamp < 3500));
-    }, 2000);
+      setTypingUsers((prev) => prev.filter((u) => now - (u.timestamp || 0) < 3500));
+    }, 1000);
     return () => clearInterval(interval);
   }, []);
 
-  // 5. Incoming Message Handler with Safe Reconciliation
-  const handleIncomingMessage = useCallback(
-    (newMsg: Message) => {
-      if (!currentFamily) return;
+  // Send Text Message
+  const handleSendMessage = async (text: string) => {
+    if (!currentFamily || !user || !activeMember) return;
 
-      setMessages((current) => {
-        const updated = reconcileMessages(current, [newMsg]);
-        localChatStorage.saveMessages(currentFamily.id, updated);
-        return updated;
-      });
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const clientMessageId = `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-      if (isNearBottomRef.current || newMsg.sender_id === user?.id) {
-        setTimeout(() => scrollToBottom(true), 30);
-      } else {
-        setUnreadCount((c) => c + 1);
-      }
-    },
-    [user?.id, currentFamily, scrollToBottom]
-  );
-
-  // 6. Typing Broadcast Handlers
-  const handleStartTyping = useCallback(() => {
-    if (!channelRef.current || !user) return;
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'typing',
-      payload: {
-        user_id: user.id,
-        user_name: user.full_name,
-        nickname: activeMember?.nickname,
-        is_typing: true,
-      },
-    });
-  }, [user, activeMember]);
-
-  const handleStopTyping = useCallback(() => {
-    if (!channelRef.current || !user) return;
-    channelRef.current.send({
-      type: 'broadcast',
-      event: 'typing',
-      payload: {
-        user_id: user.id,
-        is_typing: false,
-      },
-    });
-  }, [user]);
-
-  // 7. Optimistic Text Message Sending (Permanent Instant Visibility)
-  const handleSendText = async (text: string) => {
-    if (!user || !currentFamily || !text.trim()) return;
-
-    const clientMsgId = `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const optimisticMsg: Message = {
-      id: clientMsgId,
-      client_message_id: clientMsgId,
+    const optimisticMessage: Message = {
+      id: tempId,
+      client_message_id: clientMessageId,
       family_id: currentFamily.id,
       sender_id: user.id,
-      content: text.trim(),
+      content: text,
       is_edited: false,
+      status: 'sending',
       created_at: new Date().toISOString(),
       sender_name: user.full_name,
-      sender_nickname: activeMember?.nickname,
       sender_avatar: user.avatar_url,
-      status: 'sending' as const,
+      sender_nickname: activeMember.nickname,
     };
 
-    // 1. Instantly display in UI & local cache
     setMessages((prev) => {
-      const next: Message[] = [...prev, optimisticMsg];
+      const next = [...prev, optimisticMessage];
       localChatStorage.saveMessages(currentFamily.id, next);
       return next;
     });
     setTimeout(() => scrollToBottom(true), 20);
 
-    // 2. Broadcast via Realtime WebSocket for sub-50ms peer delivery
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'new_msg',
-        payload: optimisticMsg,
-      });
-    }
-
-    // 3. Persist to Backend API
     try {
       const res = await api.post<Message>('/messages/', {
-        content: text.trim(),
-        client_message_id: clientMsgId,
+        content: text,
+        client_message_id: clientMessageId,
       });
 
-      const serverMsg = res.data;
-      setMessages((current) => {
-        const next = reconcileMessages(current, [serverMsg]);
+      setMessages((prev) => {
+        const next = prev.map((m) => (m.client_message_id === clientMessageId ? res.data : m));
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
-    } catch {
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: res.data,
+      });
+    } catch (err) {
       setMessages((prev) => {
-        const next: Message[] = prev.map((m) =>
-          m.id === clientMsgId || m.client_message_id === clientMsgId
-            ? { ...m, status: 'failed' as const }
-            : m
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId ? { ...m, status: 'failed' as const } : m
         );
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
@@ -376,70 +311,91 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  const handleRetry = useCallback(
-    async (failedMsg: Message) => {
-      if (!currentFamily || !user) return;
+  // Send GIF Message
+  const handleSendGif = async (gifUrl: string) => {
+    if (!currentFamily || !user || !activeMember) return;
 
-      setMessages((prev) =>
-        prev.map((m) => (m.id === failedMsg.id ? { ...m, status: 'sending' as const } : m))
-      );
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const clientMessageId = `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-      try {
-        const payload: any = {
-          client_message_id: failedMsg.client_message_id || failedMsg.id,
-        };
-        if (failedMsg.content) payload.content = failedMsg.content;
-        if (failedMsg.media_url) payload.media_url = failedMsg.media_url;
-        if (failedMsg.media_type) payload.media_type = failedMsg.media_type;
-
-        const res = await api.post<Message>('/messages/', payload);
-        const serverMsg = res.data;
-
-        setMessages((current) => {
-          const next = reconcileMessages(current, [serverMsg]);
-          localChatStorage.saveMessages(currentFamily.id, next);
-          return next;
-        });
-      } catch {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === failedMsg.id ? { ...m, status: 'failed' as const } : m))
-        );
-      }
-    },
-    [currentFamily, user]
-  );
-
-  // 8. Photo Upload with Local Phone Storage Backup
-  const handlePhotoUpload = async (file: File, base64Preview?: string) => {
-    if (!user || !currentFamily) return;
-    setIsUploading(true);
-    setError(null);
-
-    const clientMsgId = `cmsg-photo-${Date.now()}`;
-    const localPreviewUrl = base64Preview ? `data:${file.type};base64,${base64Preview}` : URL.createObjectURL(file);
-
-    if (base64Preview) {
-      mediaStorage.savePhotoLocally(base64Preview, `ailem_${Date.now()}.jpg`);
-    }
-
-    const optimisticMsg: Message = {
-      id: clientMsgId,
-      client_message_id: clientMsgId,
+    const optimisticMessage: Message = {
+      id: tempId,
+      client_message_id: clientMessageId,
       family_id: currentFamily.id,
       sender_id: user.id,
-      media_url: localPreviewUrl,
-      media_thumbnail_url: localPreviewUrl,
-      media_type: file.type,
+      media_url: gifUrl,
+      media_type: 'image/gif',
+      content: '',
       is_edited: false,
+      status: 'sending',
       created_at: new Date().toISOString(),
       sender_name: user.full_name,
-      sender_nickname: activeMember?.nickname,
       sender_avatar: user.avatar_url,
-      status: 'sending' as const,
+      sender_nickname: activeMember.nickname,
     };
 
     setMessages((prev) => {
-      const next: Message[] = [...prev, optimisticMsg];
+      const next = [...prev, optimisticMessage];
+      localChatStorage.saveMessages(currentFamily.id, next);
+      return next;
+    });
+    setTimeout(() => scrollToBottom(true), 20);
+
+    try {
+      const res = await api.post<Message>('/messages/', {
+        media_url: gifUrl,
+        media_type: 'image/gif',
+        client_message_id: clientMessageId,
+      });
+
+      setMessages((prev) => {
+        const next = prev.map((m) => (m.client_message_id === clientMessageId ? res.data : m));
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: res.data,
+      });
+    } catch (err) {
+      setMessages((prev) => {
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId ? { ...m, status: 'failed' as const } : m
+        );
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
+    }
+  };
+
+  // Send Image Message
+  const handleSendMedia = async (blob: Blob, ext = 'jpg') => {
+    if (!currentFamily || !user || !activeMember) return;
+
+    setIsUploading(true);
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const clientMessageId = `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const localBlobUrl = URL.createObjectURL(blob);
+
+    const optimisticMessage: Message = {
+      id: tempId,
+      client_message_id: clientMessageId,
+      family_id: currentFamily.id,
+      sender_id: user.id,
+      media_url: localBlobUrl,
+      media_type: 'image/jpeg',
+      is_edited: false,
+      status: 'sending',
+      created_at: new Date().toISOString(),
+      sender_name: user.full_name,
+      sender_avatar: user.avatar_url,
+      sender_nickname: activeMember.nickname,
+    };
+
+    setMessages((prev) => {
+      const next = [...prev, optimisticMessage];
       localChatStorage.saveMessages(currentFamily.id, next);
       return next;
     });
@@ -447,217 +403,358 @@ export const ChatPage: React.FC = () => {
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', blob, `photo_${Date.now()}.${ext}`);
 
-      const mediaRes = await api.post('/media/upload', formData, {
+      const uploadRes = await api.post('/media/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      const uploadedUrl = uploadRes.data.url;
 
-      const chatRes = await api.post<Message>('/messages/', {
-        media_url: mediaRes.data.public_url,
-        media_thumbnail_url: mediaRes.data.thumbnail_url,
-        media_type: mediaRes.data.mime_type,
-        client_message_id: clientMsgId,
+      const res = await api.post<Message>('/messages/', {
+        media_url: uploadedUrl,
+        media_type: 'image/jpeg',
+        client_message_id: clientMessageId,
       });
 
-      const serverMsg = chatRes.data;
-      setMessages((current) => {
-        const next = reconcileMessages(current, [serverMsg]);
+      setMessages((prev) => {
+        const next = prev.map((m) => (m.client_message_id === clientMessageId ? res.data : m));
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
-    } catch (err: any) {
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: res.data,
+      });
+    } catch (err) {
       setMessages((prev) => {
-        const next: Message[] = prev.map((m) =>
-          m.id === clientMsgId || m.client_message_id === clientMsgId
-            ? { ...m, status: 'failed' as const }
-            : m
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId ? { ...m, status: 'failed' as const } : m
         );
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
-      setError('Fotoğraf yüklenemedi: ' + err.message);
     } finally {
       setIsUploading(false);
     }
   };
 
-  const base64ToBlob = (base64: string, mimeType = 'image/jpeg'): Blob => {
-    const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: mimeType });
-  };
-
+  // Camera & Photo Selection Handlers
   const handleCameraClick = async (source: 'camera' | 'photos') => {
     try {
       const image = await CapCamera.getPhoto({
         quality: 85,
         allowEditing: false,
-        resultType: CameraResultType.Base64,
+        resultType: CameraResultType.Uri,
         source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
       });
 
-      if (image.base64String) {
-        const mimeType = image.format ? `image/${image.format}` : 'image/jpeg';
-        const blob = base64ToBlob(image.base64String, mimeType);
-        const file = new File([blob], `photo_${Date.now()}.${image.format || 'jpg'}`, { type: mimeType });
-        await handlePhotoUpload(file, image.base64String);
+      if (image.webPath) {
+        const response = await fetch(image.webPath);
+        const blob = await response.blob();
+        handleSendMedia(blob, image.format || 'jpg');
       }
     } catch (err: any) {
-      console.warn('Capacitor camera error, using fallback:', err);
-      fileInputRef.current?.click();
+      if (err.message !== 'User cancelled photos app') {
+        fileInputRef.current?.click();
+      }
     }
   };
 
-  const handleDeleteMessage = useCallback(
-    async (msgId: string) => {
-      if (!confirm('Bu mesajı silmek istiyor musunuz?')) return;
-      try {
-        await api.delete(`/messages/${msgId}`);
-        setMessages((prev) => {
-          const next = prev.filter((m) => m.id !== msgId);
-          if (currentFamily) {
-            localChatStorage.saveMessages(currentFamily.id, next);
-          }
-          return next;
-        });
-      } catch (err: any) {
-        alert('Mesaj silinemedi: ' + err.message);
-      }
-    },
-    [currentFamily]
-  );
-
-  // 9. Memoized Grouping and Date Calculation
-  const renderedMessageList = useMemo(() => {
-    const items: React.ReactNode[] = [];
-
-    for (let i = 0; i < messages.length; i++) {
-      const current = messages[i];
-      const prev = messages[i - 1];
-      const next = messages[i + 1];
-
-      if (!prev || !isSameDay(new Date(current.created_at), new Date(prev.created_at))) {
-        items.push(
-          <DateSeparator key={`date-${current.created_at}-${current.id}`} date={current.created_at} />
-        );
-      }
-
-      const isMe = current.sender_id === user?.id;
-
-      const isFirstInGroup =
-        !prev ||
-        prev.sender_id !== current.sender_id ||
-        !isSameDay(new Date(current.created_at), new Date(prev.created_at)) ||
-        Math.abs(new Date(current.created_at).getTime() - new Date(prev.created_at).getTime()) >
-          180000;
-
-      const isLastInGroup =
-        !next ||
-        next.sender_id !== current.sender_id ||
-        !isSameDay(new Date(next.created_at), new Date(current.created_at)) ||
-        Math.abs(new Date(next.created_at).getTime() - new Date(current.created_at).getTime()) >
-          180000;
-
-      items.push(
-        <MessageBubble
-          key={current.id}
-          message={current}
-          isMe={isMe}
-          isFirstInGroup={isFirstInGroup}
-          isLastInGroup={isLastInGroup}
-          onDelete={handleDeleteMessage}
-          onRetry={handleRetry}
-          onImageClick={(url) => setSelectedImage(url)}
-        />
-      );
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleSendMedia(file, file.name.split('.').pop() || 'jpg');
     }
+  };
 
-    return items;
-  }, [messages, user?.id, handleDeleteMessage, handleRetry]);
+  // Long-Press & Multi-Selection Handlers
+  const handleLongPressMessage = (id: string) => {
+    setIsSelectionMode(true);
+    setSelectedMessageIds((prev) => new Set(prev).add(id));
+  };
+
+  const handleToggleSelectMessage = (id: string) => {
+    setSelectedMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      if (next.size === 0) {
+        setIsSelectionMode(false);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    const myMessages = messages.filter((m) => m.sender_id === user?.id || activeMember?.role === 'admin');
+    setSelectedMessageIds(new Set(myMessages.map((m) => m.id)));
+  };
+
+  const handleCancelSelection = () => {
+    setIsSelectionMode(false);
+    setSelectedMessageIds(new Set());
+  };
+
+  // Batch Delete Messages (WhatsApp Style)
+  const handleBatchDelete = async () => {
+    const ids = Array.from(selectedMessageIds);
+    if (ids.length === 0 || isDeletingBatch) return;
+
+    setIsDeletingBatch(true);
+    try {
+      await api.post('/messages/batch-delete', {
+        message_ids: ids,
+        for_everyone: true,
+      });
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          ids.includes(msg.id)
+            ? { ...msg, content: '🚫 Bu mesaj silindi', media_url: undefined, media_thumbnail_url: undefined }
+            : msg
+        )
+      );
+
+      // Broadcast delete to group
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'message_deleted',
+        payload: { message_ids: ids },
+      });
+
+      handleCancelSelection();
+    } catch (err) {
+      console.warn('Batch delete error:', err);
+    } finally {
+      setIsDeletingBatch(false);
+    }
+  };
+
+  // Typing Emitter
+  const handleTyping = () => {
+    if (!user || !activeMember) return;
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: {
+        userId: user.id,
+        userName: user.full_name,
+        nickname: activeMember.nickname,
+      },
+    });
+  };
+
+  const handleStopTyping = () => {
+    if (!user) return;
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'stop_typing',
+      payload: { userId: user.id },
+    });
+  };
+
+  // Wallpaper Class
+  const currentWallpaperClass = useMemo(() => {
+    return WALLPAPERS.find((w) => w.id === wallpaper)?.bgClass || 'bg-warm-50';
+  }, [wallpaper]);
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-8.5rem)] bg-[#efeae2]/35 relative">
+    <div className={`flex flex-col h-full flex-1 relative overflow-hidden ${currentWallpaperClass}`}>
       {/* Hidden file input for web fallback */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={(e) => {
-          if (e.target.files?.[0]) {
-            handlePhotoUpload(e.target.files[0]);
-          }
-        }}
+        onChange={handleFileInputChange}
       />
 
-      {/* Error banner */}
-      {error && (
-        <div className="p-2.5 bg-red-50 text-red-700 text-xs flex items-center justify-between border-b border-red-100 z-10">
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="font-bold p-1">
-            Kapat
+      {/* TOP BAR / SELECTION HEADER */}
+      {isSelectionMode ? (
+        <div className="bg-family-700 text-white px-4 py-3 flex items-center justify-between shadow-md z-30 animate-in slide-in-from-top duration-150">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleCancelSelection}
+              className="p-1.5 rounded-xl hover:bg-white/20 transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <span className="font-extrabold text-sm sm:text-base">
+              {selectedMessageIds.size} mesaj seçildi
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSelectAll}
+              className="text-xs font-bold px-2.5 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 transition cursor-pointer"
+            >
+              Tümünü Seç
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBatchDelete}
+              disabled={isDeletingBatch}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-extrabold shadow-sm transition cursor-pointer"
+            >
+              {isDeletingBatch ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4" />
+              )}
+              <span>Sil</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white/90 backdrop-blur-md border-b border-gray-200/80 px-4 py-2.5 flex items-center justify-between z-20">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-family-500 to-rose-500 text-white flex items-center justify-center shadow-xs">
+              <MessageCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-black text-gray-900 leading-tight">
+                {currentFamily?.name || 'Aile Sohbeti'}
+              </h2>
+              <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Canlı & Uçtan Uca Aile</span>
+              </p>
+            </div>
+          </div>
+
+          {/* Settings Trigger */}
+          <button
+            type="button"
+            onClick={() => setShowSettingsModal(true)}
+            className="p-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 transition active:scale-95 cursor-pointer shadow-2xs"
+            title="Sohbet Ayarları"
+          >
+            <Sliders className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* Messages Scroll Container */}
+      {/* MESSAGES SCROLL CONTAINER */}
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-3 sm:px-4 py-2 sm:py-3 space-y-0.5 overscroll-contain"
+        className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-1 relative"
       >
-        {/* Loading Older Indicator */}
+        {/* Loading Spinner */}
+        {isLoading && (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-8 h-8 animate-spin text-family-600" />
+          </div>
+        )}
+
+        {/* Older Messages Indicator */}
         {isLoadingOlder && (
           <div className="flex justify-center py-2">
-            <Loader2 className="w-5 h-5 text-family-600 animate-spin" />
+            <Loader2 className="w-5 h-5 animate-spin text-family-500" />
           </div>
         )}
 
-        {isLoading ? (
-          <div className="flex justify-center items-center py-16">
-            <Loader2 className="w-8 h-8 text-family-600 animate-spin" />
+        {/* Error Banner */}
+        {error && (
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-700 text-center font-bold">
+            {error}
           </div>
-        ) : messages.length === 0 ? (
-          <div className="text-center py-16 text-gray-400 select-none">
-            <div className="w-16 h-16 rounded-3xl bg-white flex items-center justify-center mx-auto mb-2 shadow-xs border border-gray-100">
-              <Smile className="w-8 h-8 text-family-400" />
+        )}
+
+        {/* Empty State */}
+        {!isLoading && messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 text-center px-4">
+            <div className="w-16 h-16 rounded-3xl bg-rose-100/80 text-rose-600 flex items-center justify-center mb-3 shadow-inner">
+              <Sparkles className="w-8 h-8" />
             </div>
-            <p className="text-sm font-bold text-gray-700">Henüz mesaj yok</p>
-            <p className="text-xs text-gray-400 mt-1">
-              İlk mesajı siz gönderin ve aile sohbetini başlatın!
+            <h3 className="font-black text-gray-800 text-base">Sohbete İlk Mesajı Atın! ❤️</h3>
+            <p className="text-xs text-gray-500 mt-1 max-w-xs leading-relaxed">
+              Ailenizle günaydınlaşın, fotoğraflar veya sıcacık bir GIF göndererek neşelendirin.
             </p>
           </div>
-        ) : (
-          renderedMessageList
         )}
 
-        {/* Dynamic Typing Indicator */}
-        <TypingIndicator typingUsers={typingUsers} />
+        {/* Message Stream */}
+        {messages.map((msg, index) => {
+          const isMe = msg.sender_id === user?.id;
+          const prevMsg = messages[index - 1];
+          const nextMsg = messages[index + 1];
+
+          const isFirstInGroup = !prevMsg || prevMsg.sender_id !== msg.sender_id;
+          const isLastInGroup = !nextMsg || nextMsg.sender_id !== msg.sender_id;
+
+          const showDateSeparator =
+            !prevMsg || !isSameDay(new Date(msg.created_at), new Date(prevMsg.created_at));
+
+          const isSelected = selectedMessageIds.has(msg.id);
+
+          return (
+            <React.Fragment key={msg.id || msg.client_message_id}>
+              {showDateSeparator && <DateSeparator date={msg.created_at} />}
+              <MessageBubble
+                message={msg}
+                isMe={isMe}
+                isFirstInGroup={isFirstInGroup}
+                isLastInGroup={isLastInGroup}
+                fontSize={fontSize}
+                isSelectionMode={isSelectionMode}
+                isSelected={isSelected}
+                onToggleSelect={handleToggleSelectMessage}
+                onLongPress={handleLongPressMessage}
+                onImageClick={(url) => setSelectedImage(url)}
+                onRetry={() => handleSendMessage(msg.content || '')}
+              />
+            </React.Fragment>
+          );
+        })}
       </div>
 
-      {/* Floating Scroll-to-Bottom Button */}
+      {/* Typing Indicator */}
+      <TypingIndicator typingUsers={typingUsers} />
+
+      {/* Scroll To Bottom Floating Button */}
       <ScrollToBottomButton
         visible={showScrollBottom}
         unreadCount={unreadCount}
         onClick={() => scrollToBottom(true)}
       />
 
-      {/* Isolated High-Speed Chat Input */}
+      {/* CHAT INPUT BAR */}
       <ChatInput
-        onSend={handleSendText}
+        onSend={handleSendMessage}
+        onSendGif={handleSendGif}
         onCameraClick={handleCameraClick}
-        onTyping={handleStartTyping}
+        onTyping={handleTyping}
         onStopTyping={handleStopTyping}
         isUploading={isUploading}
+        disabled={isLoading || !currentFamily}
       />
 
+      {/* Full-Screen Pinch-to-Zoom Image Modal */}
       {selectedImage && (
         <PinchZoomViewer src={selectedImage} onClose={() => setSelectedImage(null)} />
+      )}
+
+      {/* Chat Customization Settings Modal */}
+      {showSettingsModal && (
+        <ChatSettingsModal
+          fontSize={fontSize}
+          onChangeFontSize={handleChangeFontSize}
+          notificationsEnabled={notificationsEnabled}
+          onToggleNotifications={handleToggleNotifications}
+          wallpaper={wallpaper}
+          onChangeWallpaper={handleChangeWallpaper}
+          onClose={() => setShowSettingsModal(false)}
+        />
       )}
     </div>
   );

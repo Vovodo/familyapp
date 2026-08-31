@@ -68,11 +68,11 @@ class NotificationService {
 
       await LocalNotifications.createChannel({
         id: GENERAL_CHANNEL_ID,
-        name: 'Aile Genel Bildirimleri 🔔',
-        description: 'Mesajlar, alışveriş listesi ve hatırlatıcı bildirimleri',
-        importance: 4,
-        visibility: 1,
-        sound: 'beep.wav',
+        name: 'Aile Mesaj ve Bildirimleri 🔔',
+        description: 'Sohbet mesajları, alışveriş listesi ve hatırlatıcı bildirimleri',
+        importance: 5, // High / Heads-up Pop-up
+        visibility: 1, // Public on lockscreen
+        sound: 'default',
         vibration: true,
         lights: true,
         lightColor: '#3B82F6',

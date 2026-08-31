@@ -1,16 +1,96 @@
+import re
+import httpx
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from loguru import logger
 from backend.app.db.session import get_db
-from backend.app.models.models import Message, FamilyMember, User
+from backend.app.models.models import Message, FamilyMember, User, DeviceToken
 from backend.app.schemas.schemas import (
     MessageCreate,
     MessageUpdate,
     MessageResponse
 )
 from backend.app.api.deps import get_current_user, get_current_family_member
+from backend.app.services.push_service import push_service
 
 router = APIRouter()
+
+
+class BatchDeleteRequest(BaseModel):
+    message_ids: List[str]
+    for_everyone: bool = True
+
+
+class LinkPreviewResponse(BaseModel):
+    url: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    image: Optional[str] = None
+    site_name: Optional[str] = None
+    favicon: Optional[str] = None
+
+
+@router.get("/link-preview", response_model=LinkPreviewResponse)
+async def get_link_preview(
+    url: str = Query(..., description="Target URL to fetch OpenGraph metadata")
+):
+    """
+    Fetches OpenGraph title, image and description for TikTok, Instagram, YouTube or web links.
+    """
+    clean_url = url.strip()
+    if not clean_url.startswith(("http://", "https://")):
+        clean_url = "https://" + clean_url
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True, verify=False) as client:
+            resp = await client.get(clean_url, headers=headers)
+            if resp.status_code != 200:
+                return LinkPreviewResponse(url=clean_url)
+
+            html = resp.text[:50000] # Parse first 50KB
+
+            # Extract OpenGraph tags via regex
+            def get_meta(property_name: str) -> Optional[str]:
+                m = re.search(rf'<meta\s+[^>]*property=["\']og:{property_name}["\'][^>]*content=["\']([^"\']+)["\']', html, re.I)
+                if not m:
+                    m = re.search(rf'<meta\s+[^>]*content=["\']([^"\']+)["\'][^>]*property=["\']og:{property_name}["\']', html, re.I)
+                if not m:
+                    m = re.search(rf'<meta\s+[^>]*name=["\'](?:twitter:)?{property_name}["\'][^>]*content=["\']([^"\']+)["\']', html, re.I)
+                return m.group(1) if m else None
+
+            title = get_meta("title")
+            if not title:
+                title_match = re.search(r'<title[^>]*>([^<]+)</title>', html, re.I)
+                title = title_match.group(1).strip() if title_match else None
+
+            description = get_meta("description")
+            image = get_meta("image")
+            site_name = get_meta("site_name")
+
+            # Infer site name from domain if missing
+            if not site_name:
+                try:
+                    site_name = clean_url.split("//")[1].split("/")[0].replace("www.", "")
+                except Exception:
+                    site_name = None
+
+            return LinkPreviewResponse(
+                url=clean_url,
+                title=title[:120] if title else None,
+                description=description[:200] if description else None,
+                image=image,
+                site_name=site_name
+            )
+    except Exception as e:
+        logger.debug(f"Link preview fetch failed for {clean_url}: {e}")
+        return LinkPreviewResponse(url=clean_url)
 
 
 @router.get("/", response_model=List[MessageResponse])
@@ -22,7 +102,6 @@ def get_messages(
 ):
     """
     Returns messages for the family with cursor pagination.
-    Optimized: Eliminates N+1 queries with single batch lookup for family members and users.
     """
     query = (
         db.query(Message)
@@ -39,13 +118,12 @@ def get_messages(
             query = query.filter(Message.created_at < cursor_msg[0])
 
     messages = query.limit(limit).all()
-    # Reverse so they appear chronologically in chat UI (oldest to newest)
     messages.reverse()
 
     if not messages:
         return []
 
-    # Batch load all family members & user profiles for this family (1 query instead of N*2)
+    # Batch load all family members & user profiles for this family
     members_data = (
         db.query(FamilyMember, User)
         .outerjoin(User, FamilyMember.user_id == User.id)
@@ -53,7 +131,6 @@ def get_messages(
         .all()
     )
 
-    # O(1) hash map lookup
     member_map = {}
     for fm, u in members_data:
         member_map[fm.user_id] = {
@@ -91,14 +168,14 @@ def get_messages(
 
 
 @router.post("/", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
-def send_message(
+async def send_message(
     msg_in: MessageCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Sends a new text or media message to the family group with idempotent client_message_id deduplication.
+    Sends a new text or media message to the family group with instant FCM push notification.
     """
     if not msg_in.content and not msg_in.media_url:
         raise HTTPException(
@@ -106,7 +183,7 @@ def send_message(
             detail="Mesaj metni veya medya içeriği gereklidir."
         )
 
-    # Idempotency Guard: If client_message_id already exists for this family, return existing record
+    # Idempotency Guard
     if msg_in.client_message_id:
         existing = (
             db.query(Message)
@@ -148,9 +225,6 @@ def send_message(
 
     # Dispatch Push Notification to all other family members
     try:
-        from backend.app.models.models import DeviceToken
-        from backend.app.services.push_service import push_service
-
         other_members = db.query(FamilyMember).filter(
             FamilyMember.family_id == member.family_id,
             FamilyMember.user_id != current_user.id
@@ -165,21 +239,17 @@ def send_message(
 
             if active_tokens:
                 sender_display = member.nickname or current_user.full_name or "Aile Üyesi"
-                import asyncio
-                asyncio.create_task(
-                    push_service.send_chat_push(
-                        db=db,
-                        device_tokens=active_tokens,
-                        sender_name=sender_display,
-                        sender_id=current_user.id,
-                        family_id=member.family_id,
-                        message_id=msg.id,
-                        content=msg.content,
-                        media_type=msg.media_type
-                    )
+                await push_service.send_chat_push(
+                    db=db,
+                    device_tokens=active_tokens,
+                    sender_name=sender_display,
+                    sender_id=current_user.id,
+                    family_id=member.family_id,
+                    message_id=msg.id,
+                    content=msg.content,
+                    media_type=msg.media_type
                 )
     except Exception as e:
-        from loguru import logger
         logger.warning(f"Failed to dispatch chat push notification: {e}")
 
     return MessageResponse(
@@ -199,15 +269,55 @@ def send_message(
     )
 
 
-@router.delete("/{message_id}")
-def delete_message(
-    message_id: str,
+@router.post("/batch-delete")
+def batch_delete_messages(
+    payload: BatchDeleteRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Deletes a message if the current user is sender or family admin.
+    Deletes multiple selected messages. If for_everyone is true, replaces content with 'Bu mesaj silindi'.
+    """
+    if not payload.message_ids:
+        return {"deleted_count": 0}
+
+    messages = (
+        db.query(Message)
+        .filter(
+            Message.id.in_(payload.message_ids),
+            Message.family_id == member.family_id
+        )
+        .all()
+    )
+
+    deleted_count = 0
+    for msg in messages:
+        # Check permissions: sender or family admin
+        if msg.sender_id == current_user.id or member.role == "admin":
+            if payload.for_everyone:
+                msg.content = "🚫 Bu mesaj silindi"
+                msg.media_url = None
+                msg.media_thumbnail_url = None
+                msg.is_edited = True
+            else:
+                db.delete(msg)
+            deleted_count += 1
+
+    db.commit()
+    return {"status": "success", "deleted_count": deleted_count}
+
+
+@router.delete("/{message_id}")
+def delete_message(
+    message_id: str,
+    for_everyone: bool = Query(True, description="Replace with 'This message was deleted' banner"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Deletes a single message.
     """
     msg = (
         db.query(Message)
@@ -223,6 +333,14 @@ def delete_message(
             detail="Bu mesajı silme yetkiniz yok."
         )
 
-    db.delete(msg)
-    db.commit()
-    return {"message": "Mesaj silindi."}
+    if for_everyone:
+        msg.content = "🚫 Bu mesaj silindi"
+        msg.media_url = None
+        msg.media_thumbnail_url = None
+        msg.is_edited = True
+        db.commit()
+        return {"status": "success", "message": "Mesaj silindi olarak işaretlendi."}
+    else:
+        db.delete(msg)
+        db.commit()
+        return {"status": "success", "message": "Mesaj tamamen silindi."}
