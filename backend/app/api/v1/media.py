@@ -13,6 +13,52 @@ from loguru import logger
 router = APIRouter()
 
 ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
+ALLOWED_AUDIO_MIME_TYPES = {
+    "audio/webm", "audio/mp4", "audio/ogg", "audio/mpeg", "audio/wav", "audio/aac", "audio/x-m4a", "audio/m4a", "audio/3gpp"
+}
+
+
+@router.post("/upload-audio")
+async def upload_audio_endpoint(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Uploads a voice recording (audio note) and returns the public media URL.
+    """
+    content_type = file.content_type or "audio/webm"
+    file_bytes = await file.read()
+
+    if len(file_bytes) > settings.MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Ses kaydı boyutu çok büyük. Maksimum {settings.MAX_UPLOAD_SIZE // (1024 * 1024)}MB yükleyebilirsiniz."
+        )
+
+    ext = "webm"
+    if "mp4" in content_type or "m4a" in content_type:
+        ext = "m4a"
+    elif "ogg" in content_type:
+        ext = "ogg"
+    elif "wav" in content_type:
+        ext = "wav"
+    elif "mpeg" in content_type or "mp3" in content_type:
+        ext = "mp3"
+
+    audio_path, audio_url = storage_service.upload_audio(
+        family_id=member.family_id,
+        audio_bytes=file_bytes,
+        extension=ext,
+        content_type=content_type
+    )
+
+    return {
+        "url": audio_url,
+        "path": audio_path,
+        "media_type": "audio"
+    }
 
 
 @router.post("/upload", response_model=MediaResponse, status_code=status.HTTP_201_CREATED)

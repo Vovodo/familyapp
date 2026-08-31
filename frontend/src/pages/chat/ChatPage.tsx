@@ -453,6 +453,78 @@ export const ChatPage: React.FC = () => {
     }
   };
 
+  // Send Audio Voice Message
+  const handleSendAudio = async (blob: Blob, durationSecs: number) => {
+    if (!currentFamily || !user || !activeMember) return;
+
+    setIsUploading(true);
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const clientMessageId = `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const localBlobUrl = URL.createObjectURL(blob);
+
+    const optimisticMessage: Message = {
+      id: tempId,
+      client_message_id: clientMessageId,
+      family_id: currentFamily.id,
+      sender_id: user.id,
+      media_url: localBlobUrl,
+      media_type: 'audio',
+      is_edited: false,
+      status: 'sending',
+      created_at: new Date().toISOString(),
+      sender_name: user.full_name,
+      sender_avatar: user.avatar_url,
+      sender_nickname: activeMember.nickname,
+    };
+
+    setMessages((prev) => {
+      const next = [...prev, optimisticMessage];
+      localChatStorage.saveMessages(currentFamily.id, next);
+      return next;
+    });
+    setTimeout(() => scrollToBottom(true), 20);
+
+    try {
+      const formData = new FormData();
+      const ext = blob.type.includes('mp4') || blob.type.includes('m4a') ? 'm4a' : 'webm';
+      formData.append('file', blob, `voice_${Date.now()}.${ext}`);
+
+      const uploadRes = await api.post('/media/upload-audio', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const uploadedUrl = uploadRes.data.url;
+
+      const res = await api.post<Message>('/messages/', {
+        media_url: uploadedUrl,
+        media_type: 'audio',
+        client_message_id: clientMessageId,
+      });
+
+      setMessages((prev) => {
+        const next = prev.map((m) => (m.client_message_id === clientMessageId ? res.data : m));
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: res.data,
+      });
+    } catch (err) {
+      console.warn('Send audio error:', err);
+      setMessages((prev) => {
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId ? { ...m, status: 'failed' as const } : m
+        );
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   // Camera & Photo Selection Handlers
   const handleCameraClick = async (source: 'camera' | 'photos') => {
     try {
@@ -753,6 +825,7 @@ export const ChatPage: React.FC = () => {
       <ChatInput
         onSend={handleSendMessage}
         onSendGif={handleSendGif}
+        onSendAudio={handleSendAudio}
         onCameraClick={handleCameraClick}
         onTyping={handleTyping}
         onStopTyping={handleStopTyping}

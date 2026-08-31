@@ -180,7 +180,14 @@ class PushNotificationService:
             return len(tokens)
 
         title = sender_name
-        body = content if content else ("📷 Fotoğraf" if media_type == "image" else "📎 Medya içeriği")
+        if content:
+            body = content
+        elif media_type == "audio" or (media_type and "audio" in media_type):
+            body = "🎤 Sesli Mesaj"
+        elif media_type == "image" or (media_type and "image" in media_type):
+            body = "📷 Fotoğraf"
+        else:
+            body = "📎 Medya içeriği"
 
         android_config = messaging.AndroidConfig(
             priority="high",

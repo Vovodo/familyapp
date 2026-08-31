@@ -132,5 +132,45 @@ class StorageService:
 
         return main_path, main_url, thumb_path, thumb_url
 
+    def upload_audio(
+        self,
+        family_id: str,
+        audio_bytes: bytes,
+        extension: str = "webm",
+        content_type: str = "audio/webm"
+    ) -> Tuple[str, str]:
+        """
+        Uploads an audio voice note to Supabase Storage or Local Storage.
+        Returns: (audio_path, audio_url)
+        """
+        unique_id = str(uuid.uuid4())
+        audio_filename = f"voice_{unique_id}.{extension}"
+        audio_path = f"{family_id}/audio/{audio_filename}"
+
+        if self.supabase_client:
+            try:
+                bucket = settings.STORAGE_BUCKET_NAME
+                self.supabase_client.storage.from_(bucket).upload(
+                    path=audio_path,
+                    file=audio_bytes,
+                    file_options={"content-type": content_type}
+                )
+                audio_url = self.supabase_client.storage.from_(bucket).get_public_url(audio_path)
+                return audio_path, audio_url
+            except Exception as e:
+                logger.error(f"Supabase audio upload failed: {e}. Falling back to local storage.")
+
+        # Local fallback
+        fam_dir_audio = os.path.join(settings.UPLOAD_DIR, "audio", family_id)
+        os.makedirs(fam_dir_audio, exist_ok=True)
+        local_audio_file = os.path.join(fam_dir_audio, audio_filename)
+
+        with open(local_audio_file, "wb") as f:
+            f.write(audio_bytes)
+
+        audio_url = f"/uploads/audio/{family_id}/{audio_filename}"
+        return audio_path, audio_url
+
 
 storage_service = StorageService()
+

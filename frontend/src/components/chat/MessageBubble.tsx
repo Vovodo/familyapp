@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Message } from '../../types';
 import { LinkPreviewCard } from './LinkPreviewCard';
+import { AudioMessagePlayer } from './AudioMessagePlayer';
 import { FontSizeOption } from './ChatSettingsModal';
 
 interface MessageBubbleProps {
@@ -205,8 +206,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
             </div>
           )}
 
-          {/* Media Attachment (Photo / GIF) */}
-          {message.media_url && !isDeleted && (
+          {/* Audio Voice Note Attachment */}
+          {message.media_url && !isDeleted && (message.media_type === 'audio' || message.media_type?.startsWith('audio/') || /\.(webm|m4a|mp3|ogg|wav|aac)(\?.*)?$/i.test(message.media_url)) ? (
+            <div className="-mx-1 -mt-1">
+              <AudioMessagePlayer audioUrl={message.media_url} isMe={isMe} />
+            </div>
+          ) : message.media_url && !isDeleted ? (
+            /* Media Attachment (Photo / GIF) */
             <div className="mb-2 -mx-1.5 -mt-1.5 rounded-2xl overflow-hidden bg-black/5 relative">
               {!imageLoaded && (
                 <div className="w-full h-44 sm:h-52 bg-black/10 animate-pulse flex items-center justify-center text-xs text-gray-400">
@@ -227,7 +233,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                 loading="lazy"
               />
             </div>
-          )}
+          ) : null}
 
           {/* Text Message Content */}
           {message.content && (
