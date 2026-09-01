@@ -18,11 +18,13 @@ import {
   Lock,
   UserMinus,
   Camera,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { api } from '../../services/api';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
+import { PermissionAssistantModal } from '../../components/common/PermissionAssistantModal';
 
 export const FamilySettingsPage: React.FC = () => {
   const { user, logout, updateProfile } = useAuth();
@@ -32,6 +34,7 @@ export const FamilySettingsPage: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
 
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -522,6 +525,28 @@ export const FamilySettingsPage: React.FC = () => {
         </div>
       )}
 
+      {/* İzinler & Bildirim Yönetimi Card */}
+      <div className="bg-white rounded-3xl p-4 border border-gray-100 shadow-md space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold flex-shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-gray-900">İzinler & Bildirim Durumu</h4>
+              <p className="text-[10px] text-gray-500">Bildirim, ses, kamera ve alarm izinlerini inceleyin</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowPermissionsModal(true)}
+            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer"
+          >
+            Yönet
+          </button>
+        </div>
+      </div>
+
       {/* Web APK Download Banner */}
       <DownloadApkButton variant="compact" />
 
@@ -669,6 +694,14 @@ export const FamilySettingsPage: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Permission Assistant Modal */}
+      {showPermissionsModal && (
+        <PermissionAssistantModal
+          forceOpen={true}
+          onClose={() => setShowPermissionsModal(false)}
+        />
       )}
     </div>
   );

@@ -1,9 +1,8 @@
-import json
-import os
-from typing import List, Optional
+from datetime import datetime, timezone, timedelta
+from typing import List, Optional, Dict
 from loguru import logger
 from sqlalchemy.orm import Session
-from backend.app.models.models import DeviceToken
+from backend.app.models.models import DeviceToken, Message, User, Family
 
 try:
     import firebase_admin
@@ -186,15 +185,53 @@ class PushNotificationService:
             logger.warning("FCM not configured! (FIREBASE_CREDENTIALS_JSON or firebase_service_account.json missing on server).")
             return len(tokens)
 
-        title = sender_name
-        if content:
-            body = content
-        elif media_type == "audio" or (media_type and "audio" in media_type):
-            body = "🎤 Sesli Mesaj"
-        elif media_type == "image" or (media_type and "image" in media_type):
-            body = "📷 Fotoğraf"
-        else:
-            body = "📎 Medya içeriği"
+        # Build WhatsApp-style Stacked Multi-Message Preview (InboxStyle)
+        family_name = "Aile Sohbeti"
+        try:
+            fam = db.query(Family).filter(Family.id == family_id).first()
+            if fam and fam.name:
+                family_name = fam.name
+
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+            recent_msgs = (
+                db.query(Message, User)
+                .outerjoin(User, Message.sender_id == User.id)
+                .filter(Message.family_id == family_id, Message.created_at >= cutoff)
+                .order_by(Message.created_at.desc())
+                .limit(4)
+                .all()
+            )
+            recent_msgs.reverse()
+
+            if len(recent_msgs) > 1:
+                lines = []
+                for m, u in recent_msgs:
+                    u_display = u.full_name.split()[0] if u and u.full_name else "Biri"
+                    if m.content:
+                        m_text = m.content
+                    elif m.media_type and "audio" in m.media_type:
+                        m_text = "🎤 Sesli Mesaj"
+                    elif m.media_type and "image" in m.media_type:
+                        m_text = "📷 Fotoğraf"
+                    else:
+                        m_text = "📎 Medya"
+                    lines.append(f"{u_display}: {m_text}")
+                body = "\n".join(lines)
+                title = f"{family_name} ({len(lines)} mesaj)"
+            else:
+                title = sender_name
+                if content:
+                    body = content
+                elif media_type and "audio" in media_type:
+                    body = "🎤 Sesli Mesaj"
+                elif media_type and "image" in media_type:
+                    body = "📷 Fotoğraf"
+                else:
+                    body = "📎 Medya"
+        except Exception as e:
+            logger.warning(f"Error compiling stacked chat preview: {e}")
+            title = sender_name
+            body = content or "Yeni bir mesajınız var"
 
         # Validate avatar URL format
         valid_avatar = sender_avatar if sender_avatar and sender_avatar.startswith("http") else None
