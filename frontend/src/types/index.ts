@@ -43,6 +43,54 @@ export interface SyncStatus {
   mandatory_sync_health: string;
 }
 
+export interface CategoryQuotaMetric {
+  category: 'CHAT' | 'IMAGE' | 'AUDIO';
+  percent_quota: number;
+  quota_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
+  usage_percent: number;
+  item_count: number;
+}
+
+export interface StorageQuotaBreakdown {
+  family_id?: string;
+  total_capacity_bytes: number;
+  total_used_bytes: number;
+  total_available_bytes: number;
+  total_usage_percent: number;
+  occupancy_level: 'NORMAL' | 'WARNING' | 'HIGH' | 'CRITICAL';
+  chat: CategoryQuotaMetric;
+  image: CategoryQuotaMetric;
+  audio: CategoryQuotaMetric;
+}
+
+export interface StorageReconciliationReport {
+  status: string;
+  reconciled_at: string;
+  db_total_bytes: number;
+  storage_actual_bytes: number;
+  discrepancy_bytes: number;
+  orphan_files_detected: number;
+  orphan_files_purged: number;
+  purged_bytes: number;
+  details: string[];
+}
+
+export interface CleanupJobLog {
+  id: string;
+  family_id?: string;
+  category: string;
+  trigger_reason: string;
+  required_bytes: number;
+  freed_bytes: number;
+  deleted_messages_count: number;
+  deleted_storage_objects_count: number;
+  status: string;
+  started_at: string;
+  completed_at?: string;
+}
+
 export interface RestoreProgress {
   step: 'fetching' | 'saving_messages' | 'downloading_media' | 'completed' | 'error';
   percent: number;

@@ -35,7 +35,25 @@ export const AdminDashboardPage: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
   const [testEmailResult, setTestEmailResult] = useState<string | null>(null);
+  const [isReconcilingStorage, setIsReconcilingStorage] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+
+  const handleReconcileStorageAdmin = async () => {
+    setIsReconcilingStorage(true);
+    setReconcileResult(null);
+    try {
+      const res = await api.post('/sync/storage-reconcile');
+      const d = res.data;
+      setReconcileResult(
+        `✓ Mutabakat Başarılı: ${d.orphan_files_detected} yetim dosya bulundu, ${d.orphan_files_purged} adet temizlendi (${(d.purged_bytes / (1024 * 1024)).toFixed(2)} MB).`
+      );
+    } catch (err: any) {
+      setReconcileResult(`✗ Hata: ${err.message || 'Mutabakat başarısız'}`);
+    } finally {
+      setIsReconcilingStorage(false);
+    }
+  };
 
   const fetchStatus = async () => {
     setIsRefreshing(true);
@@ -214,7 +232,7 @@ export const AdminDashboardPage: React.FC = () => {
           </div>
 
           {/* 3. Storage */}
-          <div className="bg-white rounded-3xl p-4 border border-gray-100 shadow-sm space-y-2">
+          <div className="bg-white rounded-3xl p-4 border border-gray-100 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
@@ -240,6 +258,30 @@ export const AdminDashboardPage: React.FC = () => {
                 <span>{data.integrations.storage.status}</span>
               </span>
             </div>
+
+            {/* Reconciliation Trigger Button */}
+            <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+              <span className="text-[11px] text-gray-500">
+                Kota & Yetim Dosya Temizliği
+              </span>
+              <button
+                onClick={handleReconcileStorageAdmin}
+                disabled={isReconcilingStorage}
+                className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+              >
+                {isReconcilingStorage ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                <span>Mutabakat Yap</span>
+              </button>
+            </div>
+            {reconcileResult && (
+              <div className="text-xs font-semibold p-2 bg-purple-50 text-purple-900 rounded-xl text-center">
+                {reconcileResult}
+              </div>
+            )}
           </div>
 
           {/* 4. Resend Email */}

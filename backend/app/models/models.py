@@ -358,3 +358,57 @@ class PollVote(Base):
     poll = relationship("Poll", back_populates="votes")
     user = relationship("User", foreign_keys=[user_id])
 
+
+class StorageObject(Base):
+    __tablename__ = "storage_objects"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id = Column(String(36), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    storage_path = Column(Text, nullable=False, index=True)
+    public_url = Column(Text, nullable=False)
+    category = Column(String(20), nullable=False, index=True) # 'CHAT', 'IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT', 'OTHER'
+    file_size = Column(BigInteger, nullable=False, default=0) # Size in bytes
+    mime_type = Column(String(100), nullable=True)
+    checksum = Column(String(64), nullable=True, index=True) # SHA256 hash
+    status = Column(String(30), default="backed_up", index=True) # 'pending', 'backed_up', 'marked_for_deletion', 'deleted'
+    is_protected = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+    backed_up_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_storage_family_category_status", "family_id", "category", "status"),
+        Index("idx_storage_retention_order", "category", "status", "backed_up_at"),
+        Index("idx_storage_family_backed_up", "family_id", "backed_up_at"),
+        Index("idx_storage_checksum", "family_id", "checksum"),
+    )
+
+    family = relationship("Family", backref="storage_objects")
+    user = relationship("User", foreign_keys=[user_id])
+    message = relationship("Message", foreign_keys=[message_id])
+
+
+class StorageCleanupJob(Base):
+    __tablename__ = "storage_cleanup_jobs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=True, index=True)
+    category = Column(String(20), nullable=False) # 'CHAT', 'IMAGE', 'AUDIO', 'GLOBAL'
+    trigger_reason = Column(String(100), nullable=False) # 'preflight_incoming_backup', 'manual_cleanup', 'reconciliation'
+    required_bytes = Column(BigInteger, default=0)
+    freed_bytes = Column(BigInteger, default=0)
+    deleted_messages_count = Column(Integer, default=0)
+    deleted_storage_objects_count = Column(Integer, default=0)
+    status = Column(String(30), default="completed") # 'in_progress', 'completed', 'failed'
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), default=get_utc_now)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_cleanup_family_created", "family_id", "started_at"),
+    )
+
+    family = relationship("Family", backref="cleanup_jobs")
+

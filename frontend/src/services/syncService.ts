@@ -2,7 +2,14 @@ import { api } from './api';
 import { cacheService } from './cacheService';
 import { localChatStorage, reconcileMessages } from './localChatStorage';
 import { localMediaVault } from './localMediaVault';
-import { Message, SyncStatus, RestoreProgress } from '../types';
+import {
+  Message,
+  SyncStatus,
+  RestoreProgress,
+  StorageQuotaBreakdown,
+  StorageReconciliationReport,
+  CleanupJobLog,
+} from '../types';
 
 /**
  * syncService.ts
@@ -10,6 +17,7 @@ import { Message, SyncStatus, RestoreProgress } from '../types';
  * 1. ZORUNLU BULUT SENKRONİZASYONU: Instant sync for Notes, Tasks, Budget, Shopping, Reminders.
  * 2. OPSİYONEL TOPLU SOHBET YEDEKLEMESİ: Batch & incremental sync queue for Chat and Media.
  * 3. KONTROLLÜ RESTORE MOTORU: Safe, resumable chat and binary media restoration for new devices.
+ * 4. AKILLI STORAGE QUOTA & RETENTION: Categorized quota tracking and reconciliation.
  */
 
 class SyncService {
@@ -47,6 +55,39 @@ class SyncService {
       return res.data;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Fetches granular storage quota breakdown across CHAT (50%), IMAGE (40%), AUDIO (10%)
+   */
+  public async getStorageBreakdown(): Promise<StorageQuotaBreakdown | null> {
+    try {
+      const res = await api.get<StorageQuotaBreakdown>('/sync/storage-breakdown');
+      return res.data;
+    } catch (err) {
+      console.warn('[SYNC] Failed to fetch storage breakdown:', err);
+      return null;
+    }
+  }
+
+  /**
+   * [ADMIN ONLY] Triggers Supabase Storage reconciliation and orphan cleanup
+   */
+  public async triggerStorageReconcile(): Promise<StorageReconciliationReport> {
+    const res = await api.post<StorageReconciliationReport>('/sync/storage-reconcile');
+    return res.data;
+  }
+
+  /**
+   * [ADMIN ONLY] Fetches historical audit log of cleanup and retention operations
+   */
+  public async getCleanupHistory(limit: number = 20): Promise<CleanupJobLog[]> {
+    try {
+      const res = await api.get<CleanupJobLog[]>('/sync/cleanup-history', { params: { limit } });
+      return res.data;
+    } catch {
+      return [];
     }
   }
 

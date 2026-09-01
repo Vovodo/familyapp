@@ -182,6 +182,80 @@ class StorageService:
         audio_url = f"/uploads/audio/{family_id}/{audio_filename}"
         return audio_path, audio_url
 
+    def delete_file(self, storage_path: str) -> bool:
+        """
+        Deletes a file from Supabase Storage bucket and/or local upload storage.
+        """
+        success = False
+        if self.supabase_client and storage_path:
+            try:
+                bucket = settings.STORAGE_BUCKET_NAME
+                self.supabase_client.storage.from_(bucket).remove([storage_path])
+                success = True
+                logger.info(f"[STORAGE] Deleted from Supabase: {storage_path}")
+            except Exception as e:
+                logger.warning(f"[STORAGE] Supabase delete warning: {e}")
+
+        # Local fallback cleanup
+        local_candidates = [
+            os.path.join(settings.UPLOAD_DIR, storage_path),
+            os.path.join(settings.UPLOAD_DIR, "original", storage_path),
+            os.path.join(settings.UPLOAD_DIR, "thumbnails", storage_path),
+            os.path.join(settings.UPLOAD_DIR, "audio", storage_path),
+        ]
+        for p in local_candidates:
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                    success = True
+                    logger.info(f"[STORAGE] Deleted from local disk: {p}")
+                except Exception as ex:
+                    logger.debug(f"[STORAGE] Local remove error: {ex}")
+
+        return success
+
+    def list_all_files(self, prefix: str = "") -> list:
+        """
+        Lists stored files in the Supabase Storage bucket or local directory.
+        """
+        files = []
+        if self.supabase_client:
+            try:
+                bucket = settings.STORAGE_BUCKET_NAME
+                res = self.supabase_client.storage.from_(bucket).list(path=prefix)
+                if res:
+                    for item in res:
+                        files.append({
+                            "name": item.get("name"),
+                            "id": item.get("id"),
+                            "created_at": item.get("created_at"),
+                            "updated_at": item.get("updated_at"),
+                            "metadata": item.get("metadata", {}),
+                        })
+                return files
+            except Exception as e:
+                logger.warning(f"[STORAGE] Error listing Supabase files: {e}")
+
+        # Local directory listing fallback
+        base_dir = settings.UPLOAD_DIR
+        if os.path.exists(base_dir):
+            for root, _, filenames in os.walk(base_dir):
+                for fn in filenames:
+                    full_p = os.path.join(root, fn)
+                    rel_p = os.path.relpath(full_p, base_dir).replace("\\", "/")
+                    try:
+                        stat = os.stat(full_p)
+                        files.append({
+                            "name": fn,
+                            "path": rel_p,
+                            "size": stat.st_size,
+                            "created_at": stat.st_ctime,
+                        })
+                    except Exception:
+                        pass
+        return files
+
 
 storage_service = StorageService()
+
 

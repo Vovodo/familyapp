@@ -19,9 +19,12 @@ logger = setup_logging()
 
 def run_safe_migrations():
     """
-    Ensures all new columns exist in Postgres/SQLite database without breaking existing tables.
+    Ensures all new tables and columns exist in Postgres/SQLite database without breaking existing tables.
     """
     try:
+        # Create all declared tables if they do not exist
+        Base.metadata.create_all(bind=engine)
+
         with engine.connect() as conn:
             migrations = [
                 "ALTER TABLE families ADD COLUMN IF NOT EXISTS created_by VARCHAR(36);",

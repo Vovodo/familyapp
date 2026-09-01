@@ -48,11 +48,38 @@ async def upload_audio_endpoint(
     elif "mpeg" in content_type or "mp3" in content_type:
         ext = "mp3"
 
+    from backend.app.services.quota_retention_service import quota_retention_service, QuotaExceededException
+
+    checksum = quota_retention_service.compute_sha256(file_bytes)
+    try:
+        quota_retention_service.preflight_and_prepare_space(
+            db=db,
+            family_id=member.family_id,
+            incoming_bytes_by_category={"AUDIO": len(file_bytes)}
+        )
+    except QuotaExceededException as qe:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(qe)
+        )
+
     audio_path, audio_url = storage_service.upload_audio(
         family_id=member.family_id,
         audio_bytes=file_bytes,
         extension=ext,
         content_type=content_type
+    )
+
+    quota_retention_service.register_storage_object(
+        db=db,
+        family_id=member.family_id,
+        user_id=current_user.id,
+        storage_path=audio_path,
+        public_url=audio_url,
+        category="AUDIO",
+        file_size=len(file_bytes),
+        mime_type=content_type,
+        checksum=checksum
     )
 
     return {
@@ -142,6 +169,23 @@ async def upload_photo(
             detail="Fotoğraf işlenirken bir hata oluştu."
         )
 
+    from backend.app.services.quota_retention_service import quota_retention_service, QuotaExceededException
+
+    total_img_bytes = len(opt_bytes) + len(thumb_bytes)
+    checksum = quota_retention_service.compute_sha256(opt_bytes)
+
+    try:
+        quota_retention_service.preflight_and_prepare_space(
+            db=db,
+            family_id=member.family_id,
+            incoming_bytes_by_category={"IMAGE": total_img_bytes}
+        )
+    except QuotaExceededException as qe:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(qe)
+        )
+
     main_path, main_url, thumb_path, thumb_url = storage_service.upload_image(
         family_id=member.family_id,
         file_name=file.filename or "photo.jpg",
@@ -157,12 +201,24 @@ async def upload_photo(
         thumbnail_url=thumb_url,
         file_name=file.filename,
         mime_type="image/jpeg",
-        file_size=len(opt_bytes),
+        file_size=total_img_bytes,
         caption=caption
     )
     db.add(media)
     db.commit()
     db.refresh(media)
+
+    quota_retention_service.register_storage_object(
+        db=db,
+        family_id=member.family_id,
+        user_id=current_user.id,
+        storage_path=main_path,
+        public_url=main_url,
+        category="IMAGE",
+        file_size=total_img_bytes,
+        mime_type="image/jpeg",
+        checksum=checksum
+    )
 
     return MediaResponse(
         id=media.id,

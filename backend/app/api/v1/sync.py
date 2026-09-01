@@ -140,3 +140,57 @@ def get_mandatory_cloud_data(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Zorunlu bulut verileri alınamadı."
         )
+
+
+@router.get("/storage-breakdown")
+def get_storage_breakdown(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member),
+):
+    """
+    Returns granular storage quota breakdown across CHAT (50%), IMAGE (40%), AUDIO (10%) partitions and occupancy level.
+    """
+    from backend.app.services.quota_retention_service import quota_retention_service
+    return quota_retention_service.get_storage_usage_breakdown(db, member.family_id)
+
+
+@router.post("/storage-reconcile")
+def run_storage_reconciliation(
+    db: Session = Depends(get_db),
+    admin_member: FamilyMember = Depends(get_current_admin_member),
+):
+    """
+    [ADMIN ONLY] Compares database records with physical storage bucket and cleans orphaned files.
+    """
+    from backend.app.services.quota_retention_service import quota_retention_service
+    try:
+        report = quota_retention_service.reconcile_storage(db, admin_member.family_id)
+        return report
+    except Exception as e:
+        logger.error(f"Error during storage reconciliation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Storage mutabakatı çalıştırılamadı."
+        )
+
+
+@router.get("/cleanup-history")
+def get_cleanup_history(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    admin_member: FamilyMember = Depends(get_current_admin_member),
+):
+    """
+    [ADMIN ONLY] Returns historical audit logs of storage retention and cleanup operations.
+    """
+    from backend.app.models.models import StorageCleanupJob
+    jobs = (
+        db.query(StorageCleanupJob)
+        .filter(StorageCleanupJob.family_id == admin_member.family_id)
+        .order_by(StorageCleanupJob.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return jobs
+

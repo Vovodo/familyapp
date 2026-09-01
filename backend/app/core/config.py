@@ -42,6 +42,31 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE: int = 15 * 1024 * 1024  # 15MB
 
+    # Storage Quota & Retention Engine Settings (Configurable, Logical Partitions)
+    TOTAL_STORAGE_CAPACITY_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB default
+    CHAT_QUOTA_PERCENT: int = 50   # 50% = 1 GB
+    IMAGE_QUOTA_PERCENT: int = 40  # 40% = 800 MB
+    AUDIO_QUOTA_PERCENT: int = 10  # 10% = 200 MB
+    ORPHAN_GRACE_PERIOD_HOURS: int = 2
+
+    @property
+    def chat_quota_bytes(self) -> int:
+        return int(self.TOTAL_STORAGE_CAPACITY_BYTES * (self.CHAT_QUOTA_PERCENT / 100.0))
+
+    @property
+    def image_quota_bytes(self) -> int:
+        return int(self.TOTAL_STORAGE_CAPACITY_BYTES * (self.IMAGE_QUOTA_PERCENT / 100.0))
+
+    @property
+    def audio_quota_bytes(self) -> int:
+        return int(self.TOTAL_STORAGE_CAPACITY_BYTES * (self.AUDIO_QUOTA_PERCENT / 100.0))
+
+    def validate_quota_allocation(self) -> bool:
+        total_percent = self.CHAT_QUOTA_PERCENT + self.IMAGE_QUOTA_PERCENT + self.AUDIO_QUOTA_PERCENT
+        if total_percent != 100:
+            raise ValueError(f"Storage quota allocation must equal exactly 100%. Current sum: {total_percent}%")
+        return True
+
     # Resend Email Integration
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "Ailem <bildirim@rfqcollector.com>"

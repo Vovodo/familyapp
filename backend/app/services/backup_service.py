@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from loguru import logger
 
+from backend.app.core.config import settings
 from backend.app.models.models import (
     Family,
     FamilyMember,
@@ -95,6 +96,40 @@ class BackupSyncService:
                 backup_timestamp=datetime.now(timezone.utc)
             )
 
+        # 1. Calculate incoming bytes per category for Pre-flight Check
+        incoming_chat_bytes = 0
+        incoming_image_bytes = 0
+        incoming_audio_bytes = 0
+
+        for item in messages_payload:
+            incoming_chat_bytes += max(200, len(item.content.encode('utf-8')) if item.content else 200)
+            if item.media_type and "audio" in item.media_type:
+                incoming_audio_bytes += 100 * 1024 # estimated 100KB per voice note if not specified
+            elif item.media_type and ("image" in item.media_type or item.media_url):
+                incoming_image_bytes += 250 * 1024 # estimated 250KB per image if not specified
+
+        # 2. Run Atomic Storage Pre-Flight and Retention Preparation
+        from backend.app.services.quota_retention_service import quota_retention_service, QuotaExceededException
+        try:
+            quota_retention_service.preflight_and_prepare_space(
+                db=db,
+                family_id=family_id,
+                incoming_bytes_by_category={
+                    "CHAT": incoming_chat_bytes,
+                    "IMAGE": incoming_image_bytes,
+                    "AUDIO": incoming_audio_bytes,
+                }
+            )
+        except QuotaExceededException as qe:
+            logger.error(f"[BACKUP] Storage quota exceeded for family {family_id}: {qe}")
+            return BatchChatBackupResponse(
+                status="failed_storage_quota",
+                saved_count=0,
+                total_backup_messages=family.chat_backup_message_count or 0,
+                total_backup_size_bytes=family.chat_backup_size_bytes or 0,
+                backup_timestamp=datetime.now(timezone.utc)
+            )
+
         saved_count = 0
         now = datetime.now(timezone.utc)
 
@@ -128,6 +163,22 @@ class BackupSyncService:
                 )
                 db.add(new_msg)
                 saved_count += 1
+
+                # Register media StorageObject if message contains an attachment
+                if item.media_url:
+                    cat = "AUDIO" if (item.media_type and "audio" in item.media_type) else "IMAGE"
+                    fsize = 100 * 1024 if cat == "AUDIO" else 250 * 1024
+                    quota_retention_service.register_storage_object(
+                        db=db,
+                        family_id=family_id,
+                        user_id=member.user_id,
+                        storage_path=item.media_url.replace(f"{settings.SUPABASE_URL}/storage/v1/object/public/{settings.STORAGE_BUCKET_NAME}/", ""),
+                        public_url=item.media_url,
+                        category=cat,
+                        file_size=fsize,
+                        mime_type=item.media_type,
+                        message_id=msg_id
+                    )
 
         db.flush()
 

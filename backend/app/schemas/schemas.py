@@ -221,6 +221,56 @@ class MandatoryDataSyncResponse(BaseModel):
     members: List[Dict[str, Any]] = []
 
 
+# --- Storage Quota & Retention Schemas ---
+class CategoryQuotaMetric(BaseModel):
+    category: str
+    percent_quota: int
+    quota_bytes: int
+    used_bytes: int
+    available_bytes: int
+    usage_percent: float
+    item_count: int
+
+
+class StorageQuotaBreakdown(BaseModel):
+    family_id: Optional[str] = None
+    total_capacity_bytes: int
+    total_used_bytes: int
+    total_available_bytes: int
+    total_usage_percent: float
+    occupancy_level: str # 'NORMAL', 'WARNING', 'HIGH', 'CRITICAL'
+    chat: CategoryQuotaMetric
+    image: CategoryQuotaMetric
+    audio: CategoryQuotaMetric
+
+
+class StorageReconciliationResponse(BaseModel):
+    status: str
+    reconciled_at: datetime
+    db_total_bytes: int
+    storage_actual_bytes: int
+    discrepancy_bytes: int
+    orphan_files_detected: int
+    orphan_files_purged: int
+    purged_bytes: int
+    details: List[str] = []
+
+
+class CleanupJobLogResponse(BaseModel):
+    id: str
+    family_id: Optional[str] = None
+    category: str
+    trigger_reason: str
+    required_bytes: int
+    freed_bytes: int
+    deleted_messages_count: int
+    deleted_storage_objects_count: int
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
 
 # --- Message & Chat Schemas ---
 class MessageBase(BaseModel):

@@ -23,12 +23,16 @@ import {
   CloudUpload,
   CloudDownload,
   RefreshCw,
+  HardDrive,
+  MessageSquare,
+  Image as ImageIcon,
+  Mic,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { api } from '../../services/api';
 import { syncService } from '../../services/syncService';
-import { SyncStatus } from '../../types';
+import { SyncStatus, StorageQuotaBreakdown } from '../../types';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 import { PermissionAssistantModal } from '../../components/common/PermissionAssistantModal';
 import { CloudRestorePromptModal } from '../../components/common/CloudRestorePromptModal';
@@ -45,10 +49,12 @@ export const FamilySettingsPage: React.FC = () => {
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
 
-  // Cloud Backup & Sync State
+  // Cloud Backup & Storage Quota State
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [storageBreakdown, setStorageBreakdown] = useState<StorageQuotaBreakdown | null>(null);
   const [isUpdatingBackup, setIsUpdatingBackup] = useState(false);
   const [isManualBackupRunning, setIsManualBackupRunning] = useState(false);
+  const [isReconciling, setIsReconciling] = useState(false);
   const [showRestoreModal, setShowRestoreModal] = useState(false);
 
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -143,6 +149,9 @@ export const FamilySettingsPage: React.FC = () => {
       syncService.getSyncStatus().then((s) => {
         if (s) setSyncStatus(s);
       });
+      syncService.getStorageBreakdown().then((b) => {
+        if (b) setStorageBreakdown(b);
+      });
     }
   }, [currentFamily?.id]);
 
@@ -153,6 +162,8 @@ export const FamilySettingsPage: React.FC = () => {
       const updated = await syncService.toggleCloudChatBackup(newVal);
       setSyncStatus(updated);
       await updateFamilySettings({ cloud_chat_backup_enabled: newVal });
+      const b = await syncService.getStorageBreakdown();
+      if (b) setStorageBreakdown(b);
     } catch (err: any) {
       alert('Yedekleme ayarı değiştirilemedi: ' + (err.message || 'Lütfen tekrar deneyin.'));
     } finally {
@@ -167,11 +178,33 @@ export const FamilySettingsPage: React.FC = () => {
       await syncService.flushBackupQueue(currentFamily.id);
       const updated = await syncService.getSyncStatus();
       if (updated) setSyncStatus(updated);
+      const b = await syncService.getStorageBreakdown();
+      if (b) setStorageBreakdown(b);
       alert('Sohbet verileri buluta başarıyla yedeklendi!');
     } catch (err: any) {
       alert('Yedekleme sırasında hata: ' + (err.message || 'Lütfen tekrar deneyin.'));
     } finally {
       setIsManualBackupRunning(false);
+    }
+  };
+
+  const handleReconcileStorage = async () => {
+    if (!isAdmin || isReconciling) return;
+    setIsReconciling(true);
+    try {
+      const report = await syncService.triggerStorageReconcile();
+      const b = await syncService.getStorageBreakdown();
+      if (b) setStorageBreakdown(b);
+      const purgedMb = (report.purged_bytes / (1024 * 1024)).toFixed(2);
+      alert(
+        `Storage Mutabakatı Tamamlandı!\n` +
+        `• Taranan Yetim Dosya: ${report.orphan_files_detected}\n` +
+        `• Temizlenen Yetim Dosya: ${report.orphan_files_purged} (${purgedMb} MB)`
+      );
+    } catch (err: any) {
+      alert('Mutabakat işlemi sırasında hata: ' + (err.message || 'Lütfen tekrar deneyin.'));
+    } finally {
+      setIsReconciling(false);
     }
   };
 
@@ -578,8 +611,8 @@ export const FamilySettingsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Bulut Sohbet Yedeklemesi & Senkronizasyon Card */}
-      <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-md space-y-3.5">
+      {/* Bulut Depolama & Akıllı Kota Yönetimi Card */}
+      <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-md space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold flex-shrink-0 ${
@@ -591,7 +624,7 @@ export const FamilySettingsPage: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h4 className="text-xs font-black text-gray-900">Bulut Sohbet Yedeklemesi</h4>
+                <h4 className="text-xs font-black text-gray-900">Bulut Sohbet & Medya Yedeklemesi</h4>
                 <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-md ${
                   syncStatus?.cloud_chat_backup_enabled
                     ? 'bg-emerald-100 text-emerald-800'
@@ -599,10 +632,21 @@ export const FamilySettingsPage: React.FC = () => {
                 }`}>
                   {syncStatus?.cloud_chat_backup_enabled ? 'Aktif' : 'Kapalı'}
                 </span>
+                {storageBreakdown && (
+                  <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-md ${
+                    storageBreakdown.occupancy_level === 'NORMAL'
+                      ? 'bg-blue-100 text-blue-800'
+                      : storageBreakdown.occupancy_level === 'WARNING'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-rose-100 text-rose-800 animate-pulse'
+                  }`}>
+                    {storageBreakdown.occupancy_level === 'NORMAL' ? 'Kapasite Normal' : storageBreakdown.occupancy_level === 'WARNING' ? 'Kota %70+' : 'Kritik Doluluk'}
+                  </span>
+                )}
               </div>
               <p className="text-[10px] text-gray-500 mt-0.5">
                 {syncStatus?.cloud_chat_backup_enabled
-                  ? 'Sohbet mesajları ve medya buluta artımlı olarak yedekleniyor.'
+                  ? 'Sohbet ve medya buluta güvenle yedeklenir. Kotaya ulaşıldığında en eski yedekler otomatik temizlenir.'
                   : 'Sohbet verileri yalnızca cihazınızın yerel diskinde saklanıyor (Offline-First).'}
               </p>
             </div>
@@ -626,6 +670,103 @@ export const FamilySettingsPage: React.FC = () => {
             </button>
           )}
         </div>
+
+        {/* Global Storage Total Bar */}
+        {storageBreakdown && (
+          <div className="p-3 bg-gray-50 rounded-2xl border border-gray-100 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-1.5 font-bold text-gray-700">
+                <HardDrive className="w-3.5 h-3.5 text-gray-500" />
+                <span>Toplam Bulut Alanı</span>
+              </div>
+              <span className="font-extrabold text-gray-800">
+                {(storageBreakdown.total_used_bytes / (1024 * 1024)).toFixed(1)} MB / {(storageBreakdown.total_capacity_bytes / (1024 * 1024 * 1024)).toFixed(1)} GB (%{storageBreakdown.total_usage_percent})
+              </span>
+            </div>
+            <div className="w-full bg-gray-200 h-2.5 rounded-full overflow-hidden flex">
+              <div
+                style={{ width: `${Math.min(100, storageBreakdown.chat.usage_percent * 0.5)}%` }}
+                className="bg-indigo-500 h-full transition-all"
+                title="Sohbet"
+              />
+              <div
+                style={{ width: `${Math.min(100, storageBreakdown.image.usage_percent * 0.4)}%` }}
+                className="bg-emerald-500 h-full transition-all"
+                title="Fotoğraflar"
+              />
+              <div
+                style={{ width: `${Math.min(100, storageBreakdown.audio.usage_percent * 0.1)}%` }}
+                className="bg-amber-500 h-full transition-all"
+                title="Ses Kayıtları"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Categorized Logical Partitions Breakdown */}
+        {storageBreakdown && (
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            {/* 1. Chat Quota */}
+            <div className="p-2.5 bg-indigo-50/60 rounded-2xl border border-indigo-100/80 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 font-bold text-indigo-900 text-[11px]">
+                  <MessageSquare className="w-3 h-3 text-indigo-600" />
+                  <span>Sohbet</span>
+                </div>
+                <span className="text-[10px] text-indigo-700 font-extrabold">%50</span>
+              </div>
+              <div className="text-[10px] text-indigo-800 font-bold">
+                {(storageBreakdown.chat.used_bytes / (1024 * 1024)).toFixed(1)} / 1024 MB
+              </div>
+              <div className="w-full bg-indigo-200/80 h-1.5 rounded-full overflow-hidden">
+                <div
+                  style={{ width: `${Math.min(100, storageBreakdown.chat.usage_percent)}%` }}
+                  className="bg-indigo-600 h-full rounded-full transition-all"
+                />
+              </div>
+            </div>
+
+            {/* 2. Image Quota */}
+            <div className="p-2.5 bg-emerald-50/60 rounded-2xl border border-emerald-100/80 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 font-bold text-emerald-900 text-[11px]">
+                  <ImageIcon className="w-3 h-3 text-emerald-600" />
+                  <span>Fotoğraf</span>
+                </div>
+                <span className="text-[10px] text-emerald-700 font-extrabold">%40</span>
+              </div>
+              <div className="text-[10px] text-emerald-800 font-bold">
+                {(storageBreakdown.image.used_bytes / (1024 * 1024)).toFixed(1)} / 800 MB
+              </div>
+              <div className="w-full bg-emerald-200/80 h-1.5 rounded-full overflow-hidden">
+                <div
+                  style={{ width: `${Math.min(100, storageBreakdown.image.usage_percent)}%` }}
+                  className="bg-emerald-600 h-full rounded-full transition-all"
+                />
+              </div>
+            </div>
+
+            {/* 3. Audio Quota */}
+            <div className="p-2.5 bg-amber-50/60 rounded-2xl border border-amber-100/80 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 font-bold text-amber-900 text-[11px]">
+                  <Mic className="w-3 h-3 text-amber-600" />
+                  <span>Ses</span>
+                </div>
+                <span className="text-[10px] text-amber-700 font-extrabold">%10</span>
+              </div>
+              <div className="text-[10px] text-amber-800 font-bold">
+                {(storageBreakdown.audio.used_bytes / (1024 * 1024)).toFixed(1)} / 200 MB
+              </div>
+              <div className="w-full bg-amber-200/80 h-1.5 rounded-full overflow-hidden">
+                <div
+                  style={{ width: `${Math.min(100, storageBreakdown.audio.usage_percent)}%` }}
+                  className="bg-amber-600 h-full rounded-full transition-all"
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Backup Metrics Details */}
         <div className="p-3 bg-gray-50 rounded-2xl border border-gray-100 grid grid-cols-2 gap-2 text-xs">
@@ -651,14 +792,14 @@ export const FamilySettingsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Manual Actions */}
-        <div className="flex gap-2 pt-1">
+        {/* Action Buttons */}
+        <div className="flex flex-wrap gap-2 pt-1">
           {syncStatus?.cloud_chat_backup_enabled && (
             <button
               type="button"
               disabled={isManualBackupRunning}
               onClick={handleManualBackupNow}
-              className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              className="flex-1 min-w-[130px] py-2.5 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               {isManualBackupRunning ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -672,11 +813,27 @@ export const FamilySettingsPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowRestoreModal(true)}
-            className="flex-1 py-2.5 bg-indigo-50 hover:bg-indigo-100 active:scale-95 text-indigo-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-100"
+            className="flex-1 min-w-[130px] py-2.5 bg-indigo-50 hover:bg-indigo-100 active:scale-95 text-indigo-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-100"
           >
             <CloudDownload className="w-3.5 h-3.5 text-indigo-600" />
             <span>Sohbeti Geri Yükle</span>
           </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              disabled={isReconciling}
+              onClick={handleReconcileStorage}
+              className="w-full py-2 bg-gray-50 hover:bg-gray-100 active:scale-95 text-gray-600 font-bold text-[11px] rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer border border-gray-200/70 disabled:opacity-50"
+            >
+              {isReconciling ? (
+                <Loader2 className="w-3 h-3 animate-spin text-gray-600" />
+              ) : (
+                <RefreshCw className="w-3 h-3 text-gray-500" />
+              )}
+              <span>Storage Mutabakatı & Yetim Dosya Temizliği</span>
+            </button>
+          )}
         </div>
       </div>
 
