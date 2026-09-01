@@ -91,14 +91,27 @@ export const ChatPage: React.FC = () => {
     localStorage.setItem('ailem_chat_wallpaper', wp);
   };
 
-  // Clear Chat History (Clears text messages, preserves local photos and audio in vault)
+  // Clear Chat History (Clears text & active messages, preserves local photos and audio in vault)
   const handleClearChatHistory = async () => {
     if (!currentFamily) return;
     setMessages([]);
     localChatStorage.saveMessages(currentFamily.id, []);
+    setShowSettingsModal(false);
+
+    // Broadcast clear event to other family devices
+    if (supabase && currentFamily) {
+      supabase.channel(`family-chat-${currentFamily.id}`).send({
+        type: 'broadcast',
+        event: 'chat_cleared',
+        payload: { family_id: currentFamily.id },
+      });
+    }
+
     try {
-      await api.post('/messages/cleanup-old?days=1');
-    } catch {}
+      await api.post('/messages/clear-history');
+    } catch (err) {
+      console.warn('Failed to clear chat history on server:', err);
+    }
   };
 
   // Scroll Helpers
@@ -292,6 +305,12 @@ export const ChatPage: React.FC = () => {
               : msg
           )
         );
+      })
+      .on('broadcast', { event: 'chat_cleared' }, () => {
+        setMessages([]);
+        if (currentFamily) {
+          localChatStorage.saveMessages(currentFamily.id, []);
+        }
       })
       .on('broadcast', { event: 'poll_voted' }, ({ payload }) => {
         setMessages((prev) => {

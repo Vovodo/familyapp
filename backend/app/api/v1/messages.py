@@ -678,6 +678,28 @@ def get_poll_details(
     }
 
 
+@router.post("/clear-history")
+def clear_chat_history(
+    preserve_media_vault: bool = Query(True),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Clears all messages from the chat view and active database for the current family.
+    Preserves binary media files in the family photo album / local vault.
+    """
+    deleted_count = db.query(Message).filter(Message.family_id == member.family_id).delete()
+    db.commit()
+
+    logger.info(f"Chat history cleared ({deleted_count} messages) for family {member.family_id} by user {current_user.id}")
+    return {
+        "status": "success",
+        "deleted_count": deleted_count,
+        "message": "Sohbet geçmişi başarıyla temizlendi."
+    }
+
+
 @router.post("/cleanup-old")
 def cleanup_old_messages(
     days: int = Query(14, ge=1, le=365, description="Kaç günden eski mesajların temizleneceği"),
