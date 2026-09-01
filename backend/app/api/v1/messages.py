@@ -560,22 +560,19 @@ async def vote_poll(
     if payload.option_index >= len(options_list):
         raise HTTPException(status_code=400, detail="Geçersiz seçenek.")
 
-    # Upsert user's vote
-    existing_vote = db.query(PollVote).filter(
+    # Atomic vote replace: Delete any existing vote for this user on this poll and insert new
+    db.query(PollVote).filter(
         PollVote.poll_id == poll.id,
         PollVote.user_id == current_user.id
-    ).first()
+    ).delete()
 
-    if existing_vote:
-        existing_vote.option_index = payload.option_index
-    else:
-        new_vote = PollVote(
-            poll_id=poll.id,
-            user_id=current_user.id,
-            option_index=payload.option_index
-        )
-        db.add(new_vote)
-
+    new_vote = PollVote(
+        id=str(uuid.uuid4()),
+        poll_id=poll.id,
+        user_id=current_user.id,
+        option_index=payload.option_index
+    )
+    db.add(new_vote)
     db.commit()
 
     # Calculate tallies and voter details

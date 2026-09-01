@@ -38,14 +38,35 @@ export function reconcileMessages(current: Message[], incoming: Message[]): Mess
   // 2. Process incoming server/realtime messages
   for (const inc of incoming) {
     const clientKey = inc.client_message_id;
+    let existing: Message | undefined;
     if (clientKey && map.has(clientKey)) {
-      const existing = map.get(clientKey)!;
+      existing = map.get(clientKey)!;
       map.delete(existing.id);
       map.delete(clientKey);
     } else if (map.has(inc.id)) {
+      existing = map.get(inc.id);
       map.delete(inc.id);
     }
-    map.set(inc.id, { ...inc, status: 'sent' });
+
+    // Smart merge for poll messages: preserve local user's vote if server snapshot is stale
+    let mergedPoll = inc.poll;
+    if (inc.media_type === 'poll' && existing?.poll && inc.poll) {
+      if (
+        existing.poll.my_vote !== undefined &&
+        existing.poll.my_vote !== null &&
+        (inc.poll.my_vote === undefined || inc.poll.my_vote === null)
+      ) {
+        mergedPoll = {
+          ...inc.poll,
+          my_vote: existing.poll.my_vote,
+          tallies: existing.poll.tallies || inc.poll.tallies,
+          voters: existing.poll.voters || inc.poll.voters,
+          total_votes: Math.max(existing.poll.total_votes || 0, inc.poll.total_votes || 0),
+        };
+      }
+    }
+
+    map.set(inc.id, { ...inc, poll: mergedPoll, status: 'sent' });
   }
 
   // 3. Extract unique list

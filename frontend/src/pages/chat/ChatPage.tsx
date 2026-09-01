@@ -301,6 +301,11 @@ export const ChatPage: React.FC = () => {
               msg.id === payload.message_id ||
               msg.poll?.message_id === payload.message_id
             ) {
+              const myVote =
+                payload.voter_id === user?.id && payload.option_index !== undefined
+                  ? payload.option_index
+                  : msg.poll?.my_vote;
+
               return {
                 ...msg,
                 poll: {
@@ -308,6 +313,7 @@ export const ChatPage: React.FC = () => {
                   tallies: payload.tallies,
                   voters: payload.voters,
                   total_votes: payload.total_votes,
+                  my_vote: myVote,
                 },
               };
             }

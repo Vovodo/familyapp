@@ -103,58 +103,55 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
   const totalVotes = Object.values(tallies).reduce((a, b) => a + Number(b), 0);
   const maxVotes = Math.max(0, ...Object.values(tallies).map(Number));
 
-  // 0ms Optimistic Instant Vote
+  // 0ms Optimistic Instant Vote with 100% Synchronous Avatar & Percentage Animation
   const handleVote = async (optionIndex: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (isExpired) return;
 
-    const prevOption = selectedOption;
-    if (prevOption === optionIndex) return; // Already voted for this option
+    if (selectedOption === optionIndex) return; // Already voted for this option
 
     // 1. Instant optimistic state update
     setSelectedOption(optionIndex);
 
-    const newTallies = { ...tallies };
-    if (prevOption !== null && prevOption !== undefined && newTallies[prevOption]) {
-      newTallies[prevOption] = Math.max(0, newTallies[prevOption] - 1);
-    }
-    newTallies[optionIndex] = (newTallies[optionIndex] || 0) + 1;
-
-    const newVoters: Record<string | number, PollVoter[]> = { ...votersMap };
     const currentUserVoter: PollVoter = {
       user_id: user?.id || 'me',
       name: user?.full_name || 'Ben',
       avatar: user?.avatar_url || null,
     };
 
-    // Remove from previous option voters
-    if (prevOption !== null && prevOption !== undefined && newVoters[prevOption]) {
-      newVoters[prevOption] = newVoters[prevOption].filter((v) => v.user_id !== user?.id);
+    // Deep clean votersMap: strip current user from ALL options so they only appear once
+    const newVoters: Record<string | number, PollVoter[]> = {};
+    for (let i = 0; i < poll.options.length; i++) {
+      const list: PollVoter[] = votersMap[i] || votersMap[String(i)] || [];
+      newVoters[i] = list.filter(
+        (v) => v.user_id !== user?.id && v.name !== user?.full_name
+      );
     }
-    // Add to new option voters
-    const existingList = newVoters[optionIndex] ? [...newVoters[optionIndex]] : [];
-    if (!existingList.some((v) => v.user_id === user?.id)) {
-      existingList.push(currentUserVoter);
-    }
-    newVoters[optionIndex] = existingList;
 
+    // Add user to the chosen option
+    if (!newVoters[optionIndex]) newVoters[optionIndex] = [];
+    newVoters[optionIndex].push(currentUserVoter);
+
+    // Recompute tallies strictly from clean voter arrays
+    const newTallies: Record<string | number, number> = {};
+    for (let i = 0; i < poll.options.length; i++) {
+      newTallies[i] = (newVoters[i] || []).length;
+    }
     const newTotalVotes = Object.values(newTallies).reduce((a, b) => a + Number(b), 0);
 
-    setPoll((prev) =>
-      prev
-        ? {
-            ...prev,
-            tallies: newTallies,
-            voters: newVoters,
-            total_votes: newTotalVotes,
-            my_vote: optionIndex,
-          }
-        : prev
-    );
+    const updatedPoll: PollData = {
+      ...poll,
+      tallies: newTallies,
+      voters: newVoters,
+      total_votes: newTotalVotes,
+      my_vote: optionIndex,
+    };
+
+    setPoll(updatedPoll);
 
     if (navigator.vibrate) navigator.vibrate(25);
 
-    // 2. Broadcast optimistic update over WebSocket for other family members
+    // 2. Broadcast single authoritative websocket event to family chat channel
     const targetPollId = poll.poll_id || poll.message_id || message.id;
     if (supabase && currentFamily) {
       const payload = {
@@ -163,13 +160,10 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
         tallies: newTallies,
         voters: newVoters,
         total_votes: newTotalVotes,
+        voter_id: user?.id,
+        option_index: optionIndex,
       };
       supabase.channel(`family-chat-${currentFamily.id}`).send({
-        type: 'broadcast',
-        event: 'poll_voted',
-        payload,
-      });
-      supabase.channel(`poll-${targetPollId}`).send({
         type: 'broadcast',
         event: 'poll_voted',
         payload,
@@ -187,17 +181,18 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
         option_index: optionIndex,
       });
 
-      setPoll((prev) =>
-        prev
-          ? {
-              ...prev,
-              tallies: res.data.tallies || newTallies,
-              voters: res.data.voters || newVoters,
-              total_votes: res.data.total_votes || newTotalVotes,
-              my_vote: res.data.my_vote,
-            }
-          : prev
-      );
+      if (res.data) {
+        setPoll((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            tallies: res.data.tallies || newTallies,
+            voters: res.data.voters || newVoters,
+            total_votes: res.data.total_votes || newTotalVotes,
+            my_vote: res.data.my_vote !== undefined ? res.data.my_vote : optionIndex,
+          };
+        });
+      }
     } catch (err) {
       console.warn('Vote background sync warning:', err);
     }
