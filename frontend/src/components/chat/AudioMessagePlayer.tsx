@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause, Mic, RotateCcw } from 'lucide-react';
+import { localMediaVault } from '../../services/localMediaVault';
 
 interface AudioMessagePlayerProps {
   audioUrl: string;
@@ -16,7 +17,8 @@ const resolveAudioUrl = (url: string): string => {
     url.startsWith('blob:') ||
     url.startsWith('http://') ||
     url.startsWith('https://') ||
-    url.startsWith('data:')
+    url.startsWith('data:') ||
+    url.startsWith('capacitor://')
   ) {
     return url;
   }
@@ -28,7 +30,7 @@ const resolveAudioUrl = (url: string): string => {
 };
 
 export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl, isMe }) => {
-  const resolvedUrl = resolveAudioUrl(audioUrl);
+  const [playableSrc, setPlayableSrc] = useState<string>(() => resolveAudioUrl(audioUrl));
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -36,6 +38,19 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
+
+  // 0ms Local-First Disk Cache Check
+  useEffect(() => {
+    let isSubscribed = true;
+    localMediaVault.getMediaUrl(audioUrl, 'audio').then((localSrc) => {
+      if (isSubscribed && localSrc) {
+        setPlayableSrc(localSrc);
+      }
+    });
+    return () => {
+      isSubscribed = false;
+    };
+  }, [audioUrl]);
 
   // Format seconds to mm:ss
   const formatTime = (secs: number) => {
@@ -147,7 +162,7 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
     setCurrentTime(0);
     setDuration(0);
     audio.load(); // Force reload with new src
-  }, [resolvedUrl]);
+  }, [playableSrc]);
 
   useEffect(() => {
     return () => {
@@ -173,16 +188,15 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
       {/* Hidden Native Audio Element */}
       <audio
         ref={audioRef}
-        src={resolvedUrl}
+        src={playableSrc}
         preload="auto"
-        crossOrigin="anonymous"
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
         onPause={() => setIsPlaying(false)}
         onPlay={() => setIsPlaying(true)}
         onError={(e) => {
-          console.warn('[AudioPlayer] Load error:', (e.target as HTMLAudioElement).error?.message, 'url:', resolvedUrl);
+          console.warn('[AudioPlayer] Playback error:', (e.target as HTMLAudioElement).error?.message, 'src:', playableSrc);
         }}
       />
 

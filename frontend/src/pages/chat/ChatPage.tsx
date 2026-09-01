@@ -8,6 +8,7 @@ import { Message } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { localChatStorage, reconcileMessages } from '../../services/localChatStorage';
+import { localMediaVault } from '../../services/localMediaVault';
 import { MessageBubble } from '../../components/chat/MessageBubble';
 import { ChatInput } from '../../components/chat/ChatInput';
 import { DateSeparator } from '../../components/chat/DateSeparator';
@@ -282,6 +283,30 @@ export const ChatPage: React.FC = () => {
           )
         );
       })
+      .on('broadcast', { event: 'poll_voted' }, ({ payload }) => {
+        setMessages((prev) => {
+          const next = prev.map((msg) => {
+            if (
+              msg.poll?.poll_id === payload.poll_id ||
+              msg.id === payload.message_id ||
+              msg.poll?.message_id === payload.message_id
+            ) {
+              return {
+                ...msg,
+                poll: {
+                  ...msg.poll!,
+                  tallies: payload.tallies,
+                  voters: payload.voters,
+                  total_votes: payload.total_votes,
+                },
+              };
+            }
+            return msg;
+          });
+          localChatStorage.saveMessages(currentFamily.id, next);
+          return next;
+        });
+      })
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
         if (payload.userId !== user.id) {
           setTypingUsers((prev) => {
@@ -443,14 +468,17 @@ export const ChatPage: React.FC = () => {
     setIsUploading(true);
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const clientMessageId = `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const localBlobUrl = URL.createObjectURL(blob);
+    const imageFilename = `photo_${Date.now()}.${ext}`;
+
+    // 1. Save directly into local "family/images" disk vault (0ms load)
+    const localVaultUrl = await localMediaVault.saveMedia(imageFilename, blob, 'images');
 
     const optimisticMessage: Message = {
       id: tempId,
       client_message_id: clientMessageId,
       family_id: currentFamily.id,
       sender_id: user.id,
-      media_url: localBlobUrl,
+      media_url: localVaultUrl,
       media_type: 'image/jpeg',
       is_edited: false,
       status: 'sending',
@@ -469,7 +497,7 @@ export const ChatPage: React.FC = () => {
 
     try {
       const formData = new FormData();
-      formData.append('file', blob, `photo_${Date.now()}.${ext}`);
+      formData.append('file', blob, imageFilename);
 
       const uploadRes = await api.post('/media/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -513,14 +541,18 @@ export const ChatPage: React.FC = () => {
     setIsUploading(true);
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const clientMessageId = `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const localBlobUrl = URL.createObjectURL(blob);
+    const ext = blob.type.includes('mp4') || blob.type.includes('m4a') ? 'm4a' : 'webm';
+    const audioFilename = `voice_${Date.now()}.${ext}`;
+
+    // 1. Save directly into local "family/audio" disk vault (0ms load)
+    const localVaultUrl = await localMediaVault.saveMedia(audioFilename, blob, 'audio');
 
     const optimisticMessage: Message = {
       id: tempId,
       client_message_id: clientMessageId,
       family_id: currentFamily.id,
       sender_id: user.id,
-      media_url: localBlobUrl,
+      media_url: localVaultUrl,
       media_type: 'audio',
       is_edited: false,
       status: 'sending',
@@ -540,8 +572,7 @@ export const ChatPage: React.FC = () => {
 
     try {
       const formData = new FormData();
-      const ext = blob.type.includes('mp4') || blob.type.includes('m4a') ? 'm4a' : 'webm';
-      formData.append('file', blob, `voice_${Date.now()}.${ext}`);
+      formData.append('file', blob, audioFilename);
 
       const uploadRes = await api.post('/media/upload-audio', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },

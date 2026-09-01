@@ -157,16 +157,22 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
     // 2. Broadcast optimistic update over WebSocket for other family members
     const targetPollId = poll.poll_id || poll.message_id || message.id;
     if (supabase && currentFamily) {
-      const channel = supabase.channel(`poll-${targetPollId}`);
-      channel.send({
+      const payload = {
+        poll_id: targetPollId,
+        message_id: message.id,
+        tallies: newTallies,
+        voters: newVoters,
+        total_votes: newTotalVotes,
+      };
+      supabase.channel(`family-chat-${currentFamily.id}`).send({
         type: 'broadcast',
         event: 'poll_voted',
-        payload: {
-          poll_id: targetPollId,
-          tallies: newTallies,
-          voters: newVoters,
-          total_votes: newTotalVotes,
-        },
+        payload,
+      });
+      supabase.channel(`poll-${targetPollId}`).send({
+        type: 'broadcast',
+        event: 'poll_voted',
+        payload,
       });
     }
 
@@ -221,11 +227,11 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
       {/* Options List */}
       <div className="space-y-2">
         {poll.options.map((option, idx) => {
-          const voteCount = Number(tallies[idx] || 0);
+          const voteCount = Number(tallies[idx] ?? tallies[String(idx)] ?? 0);
           const percent = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
           const isSelected = selectedOption === idx;
           const isWinner = isExpired && maxVotes > 0 && voteCount === maxVotes;
-          const optionVoters: PollVoter[] = votersMap[idx] || [];
+          const optionVoters: PollVoter[] = votersMap[idx] || votersMap[String(idx)] || [];
 
           return (
             <button
