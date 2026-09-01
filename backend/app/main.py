@@ -26,6 +26,11 @@ def run_safe_migrations():
             migrations = [
                 "ALTER TABLE families ADD COLUMN IF NOT EXISTS created_by VARCHAR(36);",
                 "ALTER TABLE families ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE;",
+                "ALTER TABLE families ADD COLUMN IF NOT EXISTS cloud_chat_backup_enabled BOOLEAN DEFAULT FALSE;",
+                "ALTER TABLE families ADD COLUMN IF NOT EXISTS last_chat_backup_at TIMESTAMP WITH TIME ZONE;",
+                "ALTER TABLE families ADD COLUMN IF NOT EXISTS chat_backup_size_bytes BIGINT DEFAULT 0;",
+                "ALTER TABLE families ADD COLUMN IF NOT EXISTS chat_backup_message_count INTEGER DEFAULT 0;",
+                "ALTER TABLE families ADD COLUMN IF NOT EXISTS chat_backup_media_count INTEGER DEFAULT 0;",
                 "ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_thumbnail_url VARCHAR(500);",
                 "ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(20);",
                 "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE;",

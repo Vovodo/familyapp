@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    BigInteger,
     Float,
     Text,
     UniqueConstraint,
@@ -53,6 +54,14 @@ class Family(Base):
     invite_code = Column(String(12), unique=True, index=True, nullable=False)
     is_public = Column(Boolean, default=False) # Public vs Private
     created_by = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    
+    # Cloud Chat & Media Backup Configuration
+    cloud_chat_backup_enabled = Column(Boolean, default=False)
+    last_chat_backup_at = Column(DateTime(timezone=True), nullable=True)
+    chat_backup_size_bytes = Column(BigInteger, default=0)
+    chat_backup_message_count = Column(Integer, default=0)
+    chat_backup_media_count = Column(Integer, default=0)
+
     created_at = Column(DateTime(timezone=True), default=get_utc_now)
     updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
 

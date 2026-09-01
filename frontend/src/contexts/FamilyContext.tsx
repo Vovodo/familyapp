@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Family, FamilyMember } from '../types';
 import { api, storage } from '../services/api';
+import { syncService } from '../services/syncService';
+import { CloudRestorePromptModal } from '../components/common/CloudRestorePromptModal';
 import { useAuth } from './AuthContext';
 
 interface FamilyContextType {
@@ -12,7 +14,7 @@ interface FamilyContextType {
   joinFamily: (inviteCode: string, nickname?: string) => Promise<Family>;
   refreshFamily: () => Promise<void>;
   selectFamily: (familyId: string) => Promise<void>;
-  updateFamilySettings: (data: { name?: string; is_public?: boolean }) => Promise<void>;
+  updateFamilySettings: (data: { name?: string; is_public?: boolean; cloud_chat_backup_enabled?: boolean }) => Promise<void>;
   removeMember: (memberId: string) => Promise<void>;
   leaveFamily: () => Promise<void>;
   deleteFamily: (familyId: string) => Promise<void>;
@@ -25,6 +27,24 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
   const [myFamilies, setMyFamilies] = useState<Family[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [showRestorePrompt, setShowRestorePrompt] = useState<boolean>(false);
+
+  // Trigger Mandatory Cloud Sync and Check Restore Need when Active Family Changes
+  useEffect(() => {
+    if (currentFamily?.id) {
+      // 1. ZORUNLU BULUT SENKRONİZASYONU: Sync Notes, Tasks, Budget, Shopping, Reminders
+      syncService.syncMandatoryData(currentFamily.id);
+
+      // 2. Fresh Install / New Device Restore Prompt for Cloud Chat
+      if (currentFamily.cloud_chat_backup_enabled) {
+        const restoredKey = `ailem_chat_restored_${currentFamily.id}`;
+        const hasPrompted = localStorage.getItem(restoredKey);
+        if (!hasPrompted) {
+          setShowRestorePrompt(true);
+        }
+      }
+    }
+  }, [currentFamily?.id, currentFamily?.cloud_chat_backup_enabled]);
 
   const fetchFamilies = useCallback(async () => {
     if (!user) {
@@ -171,6 +191,15 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }}
     >
       {children}
+
+      {/* Fresh Install / New Device Cloud Restore Prompt */}
+      {showRestorePrompt && currentFamily && (
+        <CloudRestorePromptModal
+          familyId={currentFamily.id}
+          familyName={currentFamily.name}
+          onFinished={() => setShowRestorePrompt(false)}
+        />
+      )}
     </FamilyContext.Provider>
   );
 };

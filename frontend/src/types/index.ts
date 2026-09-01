@@ -24,8 +24,33 @@ export interface Family {
   invite_code: string;
   is_public?: boolean;
   created_by?: string;
+  cloud_chat_backup_enabled?: boolean;
+  last_chat_backup_at?: string | null;
+  chat_backup_size_bytes?: number;
+  chat_backup_message_count?: number;
+  chat_backup_media_count?: number;
   created_at: string;
   members: FamilyMember[];
+}
+
+export interface SyncStatus {
+  family_id: string;
+  cloud_chat_backup_enabled: boolean;
+  last_chat_backup_at?: string | null;
+  chat_backup_size_bytes: number;
+  chat_backup_message_count: number;
+  chat_backup_media_count: number;
+  mandatory_sync_health: string;
+}
+
+export interface RestoreProgress {
+  step: 'fetching' | 'saving_messages' | 'downloading_media' | 'completed' | 'error';
+  percent: number;
+  completedMessages: number;
+  totalMessages: number;
+  completedMedia: number;
+  totalMedia: number;
+  error?: string;
 }
 
 export interface PollVoter {

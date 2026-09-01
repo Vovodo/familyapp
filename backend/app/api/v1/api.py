@@ -13,6 +13,7 @@ from backend.app.api.v1.admin import router as admin_router
 from backend.app.api.v1.downloads import router as downloads_router
 from backend.app.api.v1.notifications import router as notifications_router
 from backend.app.api.v1.events import router as events_router
+from backend.app.api.v1.sync import router as sync_router
 
 api_router = APIRouter()
 
@@ -29,5 +30,6 @@ api_router.include_router(notes_router, prefix="/notes", tags=["Notlar"])
 api_router.include_router(reminders_router, prefix="/reminders", tags=["Hatırlatıcılar"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["Bildirimler"])
 api_router.include_router(events_router, prefix="/events", tags=["SSE Olaylar"])
+api_router.include_router(sync_router, prefix="/sync", tags=["Senkronizasyon ve Yedekleme"])
 api_router.include_router(admin_router, prefix="/admin", tags=["Sistem Yönetimi"])
 

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Users,
@@ -19,12 +19,21 @@ import {
   UserMinus,
   Camera,
   ShieldCheck,
+  Cloud,
+  CloudUpload,
+  CloudDownload,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { api } from '../../services/api';
+import { syncService } from '../../services/syncService';
+import { SyncStatus } from '../../types';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 import { PermissionAssistantModal } from '../../components/common/PermissionAssistantModal';
+import { CloudRestorePromptModal } from '../../components/common/CloudRestorePromptModal';
+import { format } from 'date-fns';
+import { tr } from 'date-fns/locale';
 
 export const FamilySettingsPage: React.FC = () => {
   const { user, logout, updateProfile } = useAuth();
@@ -35,6 +44,12 @@ export const FamilySettingsPage: React.FC = () => {
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+
+  // Cloud Backup & Sync State
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [isUpdatingBackup, setIsUpdatingBackup] = useState(false);
+  const [isManualBackupRunning, setIsManualBackupRunning] = useState(false);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
 
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -119,6 +134,44 @@ export const FamilySettingsPage: React.FC = () => {
       alert('Görünürlük ayarlanamadı: ' + err.message);
     } finally {
       setIsUpdatingPrivacy(false);
+    }
+  };
+
+  // Load Cloud Backup Status
+  useEffect(() => {
+    if (currentFamily?.id) {
+      syncService.getSyncStatus().then((s) => {
+        if (s) setSyncStatus(s);
+      });
+    }
+  }, [currentFamily?.id]);
+
+  const handleToggleCloudBackup = async (newVal: boolean) => {
+    if (!isAdmin || isUpdatingBackup) return;
+    setIsUpdatingBackup(true);
+    try {
+      const updated = await syncService.toggleCloudChatBackup(newVal);
+      setSyncStatus(updated);
+      await updateFamilySettings({ cloud_chat_backup_enabled: newVal });
+    } catch (err: any) {
+      alert('Yedekleme ayarı değiştirilemedi: ' + (err.message || 'Lütfen tekrar deneyin.'));
+    } finally {
+      setIsUpdatingBackup(false);
+    }
+  };
+
+  const handleManualBackupNow = async () => {
+    if (!currentFamily || isManualBackupRunning) return;
+    setIsManualBackupRunning(true);
+    try {
+      await syncService.flushBackupQueue(currentFamily.id);
+      const updated = await syncService.getSyncStatus();
+      if (updated) setSyncStatus(updated);
+      alert('Sohbet verileri buluta başarıyla yedeklendi!');
+    } catch (err: any) {
+      alert('Yedekleme sırasında hata: ' + (err.message || 'Lütfen tekrar deneyin.'));
+    } finally {
+      setIsManualBackupRunning(false);
     }
   };
 
@@ -525,6 +578,108 @@ export const FamilySettingsPage: React.FC = () => {
         </div>
       )}
 
+      {/* Bulut Sohbet Yedeklemesi & Senkronizasyon Card */}
+      <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-md space-y-3.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold flex-shrink-0 ${
+              syncStatus?.cloud_chat_backup_enabled
+                ? 'bg-emerald-50 text-emerald-600'
+                : 'bg-gray-100 text-gray-500'
+            }`}>
+              <Cloud className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs font-black text-gray-900">Bulut Sohbet Yedeklemesi</h4>
+                <span className={`text-[10px] font-extrabold px-1.5 py-0.2 rounded-md ${
+                  syncStatus?.cloud_chat_backup_enabled
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-gray-200 text-gray-700'
+                }`}>
+                  {syncStatus?.cloud_chat_backup_enabled ? 'Aktif' : 'Kapalı'}
+                </span>
+              </div>
+              <p className="text-[10px] text-gray-500 mt-0.5">
+                {syncStatus?.cloud_chat_backup_enabled
+                  ? 'Sohbet mesajları ve medya buluta artımlı olarak yedekleniyor.'
+                  : 'Sohbet verileri yalnızca cihazınızın yerel diskinde saklanıyor (Offline-First).'}
+              </p>
+            </div>
+          </div>
+
+          {/* Admin Toggle Switch */}
+          {isAdmin && (
+            <button
+              type="button"
+              disabled={isUpdatingBackup}
+              onClick={() => handleToggleCloudBackup(!syncStatus?.cloud_chat_backup_enabled)}
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer flex-shrink-0 ${
+                syncStatus?.cloud_chat_backup_enabled ? 'bg-emerald-600' : 'bg-gray-300'
+              }`}
+            >
+              <div
+                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                  syncStatus?.cloud_chat_backup_enabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          )}
+        </div>
+
+        {/* Backup Metrics Details */}
+        <div className="p-3 bg-gray-50 rounded-2xl border border-gray-100 grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold block">Son Yedekleme</span>
+            <span className="font-extrabold text-gray-800 text-[11px]">
+              {syncStatus?.last_chat_backup_at
+                ? format(new Date(syncStatus.last_chat_backup_at), 'd MMM yyyy, HH:mm', { locale: tr })
+                : 'Henüz yapılmadı'}
+            </span>
+          </div>
+
+          <div>
+            <span className="text-[10px] text-gray-400 font-bold block">Bulut Yedek Boyutu</span>
+            <span className="font-extrabold text-emerald-700 text-[11px]">
+              {syncStatus?.chat_backup_size_bytes
+                ? `${(syncStatus.chat_backup_size_bytes / (1024 * 1024)).toFixed(1)} MB`
+                : '0 MB'}{' '}
+              <span className="text-gray-400 font-normal text-[10px]">
+                ({syncStatus?.chat_backup_message_count || 0} mesaj)
+              </span>
+            </span>
+          </div>
+        </div>
+
+        {/* Manual Actions */}
+        <div className="flex gap-2 pt-1">
+          {syncStatus?.cloud_chat_backup_enabled && (
+            <button
+              type="button"
+              disabled={isManualBackupRunning}
+              onClick={handleManualBackupNow}
+              className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 active:scale-95 text-gray-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              {isManualBackupRunning ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <CloudUpload className="w-3.5 h-3.5 text-family-600" />
+              )}
+              <span>Şimdi Yedekle</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setShowRestoreModal(true)}
+            className="flex-1 py-2.5 bg-indigo-50 hover:bg-indigo-100 active:scale-95 text-indigo-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-100"
+          >
+            <CloudDownload className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Sohbeti Geri Yükle</span>
+          </button>
+        </div>
+      </div>
+
       {/* İzinler & Bildirim Yönetimi Card */}
       <div className="bg-white rounded-3xl p-4 border border-gray-100 shadow-md space-y-2.5">
         <div className="flex items-center justify-between">
@@ -701,6 +856,21 @@ export const FamilySettingsPage: React.FC = () => {
         <PermissionAssistantModal
           forceOpen={true}
           onClose={() => setShowPermissionsModal(false)}
+        />
+      )}
+
+      {/* Cloud Restore Modal */}
+      {showRestoreModal && currentFamily && (
+        <CloudRestorePromptModal
+          familyId={currentFamily.id}
+          familyName={currentFamily.name}
+          onFinished={async (restored) => {
+            setShowRestoreModal(false);
+            if (restored) {
+              const updated = await syncService.getSyncStatus();
+              if (updated) setSyncStatus(updated);
+            }
+          }}
         />
       )}
     </div>

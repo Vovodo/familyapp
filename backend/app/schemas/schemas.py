@@ -124,6 +124,7 @@ class ResetPasswordRequest(BaseModel):
 class FamilySettingsUpdate(BaseModel):
     name: Optional[str] = None
     is_public: Optional[bool] = None
+    cloud_chat_backup_enabled: Optional[bool] = None
 
 
 class FamilyMemberResponse(BaseModel):
@@ -142,9 +143,82 @@ class FamilyResponse(FamilyBase):
     invite_code: str
     is_public: bool = False
     created_by: Optional[str]
+    cloud_chat_backup_enabled: bool = False
+    last_chat_backup_at: Optional[datetime] = None
+    chat_backup_size_bytes: int = 0
+    chat_backup_message_count: int = 0
+    chat_backup_media_count: int = 0
     created_at: datetime
     members: List[FamilyMemberResponse] = []
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- Sync & Backup Schemas ---
+class SyncStatusResponse(BaseModel):
+    family_id: str
+    cloud_chat_backup_enabled: bool
+    last_chat_backup_at: Optional[datetime] = None
+    chat_backup_size_bytes: int = 0
+    chat_backup_message_count: int = 0
+    chat_backup_media_count: int = 0
+    mandatory_sync_health: str = "ok"
+
+
+class BackupItemPayload(BaseModel):
+    id: Optional[str] = None
+    client_message_id: Optional[str] = None
+    sender_id: str
+    content: Optional[str] = None
+    media_url: Optional[str] = None
+    media_type: Optional[str] = None
+    created_at: datetime
+
+
+class BatchChatBackupRequest(BaseModel):
+    messages: List[BackupItemPayload] = []
+
+
+class BatchChatBackupResponse(BaseModel):
+    status: str
+    saved_count: int
+    total_backup_messages: int
+    total_backup_size_bytes: int
+    backup_timestamp: datetime
+
+
+class ChatRestoreItem(BaseModel):
+    id: str
+    client_message_id: Optional[str] = None
+    sender_id: str
+    sender_name: Optional[str] = None
+    sender_avatar: Optional[str] = None
+    sender_nickname: Optional[str] = None
+    content: Optional[str] = None
+    media_url: Optional[str] = None
+    media_thumbnail_url: Optional[str] = None
+    media_type: Optional[str] = None
+    created_at: datetime
+
+
+class ChatRestoreResponse(BaseModel):
+    family_id: str
+    family_name: str
+    total_messages: int
+    total_media_files: int
+    total_size_bytes: int
+    messages: List[ChatRestoreItem]
+    has_more: bool = False
+
+
+class MandatoryDataSyncResponse(BaseModel):
+    family_id: str
+    synced_at: datetime
+    notes: List[Dict[str, Any]] = []
+    tasks: List[Dict[str, Any]] = []
+    budget: List[Dict[str, Any]] = []
+    shopping: List[Dict[str, Any]] = []
+    reminders: List[Dict[str, Any]] = []
+    members: List[Dict[str, Any]] = []
 
 
 
