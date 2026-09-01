@@ -331,80 +331,80 @@ export const HomePage: React.FC = () => {
       subtitle: 'Mesajlar, anketler ve sesler',
       icon: MessageCircle,
       to: '/chat',
-      bgColor: 'bg-rose-50',
+      bgColor: 'bg-rose-50/80',
       iconBg: 'bg-rose-500',
       textColor: 'text-rose-900',
-      badge: '💬 Sohbet Et',
+      badge: 'Sohbet Et',
     },
     {
       title: 'Yapılacaklar Listesi',
       subtitle: 'Aile içi iş ve görev paylaşımı',
       icon: ListTodo,
       to: '/tasks',
-      bgColor: 'bg-teal-50',
+      bgColor: 'bg-teal-50/80',
       iconBg: 'bg-teal-600',
       textColor: 'text-teal-900',
-      badge: '📋 Aile İşleri',
+      badge: 'Görevler',
     },
     {
       title: 'Ortak Bütçe & Harcama',
       subtitle: 'Gelir, gider ve aylık kasa raporu',
       icon: Wallet,
       to: '/budget',
-      bgColor: 'bg-indigo-50',
+      bgColor: 'bg-indigo-50/80',
       iconBg: 'bg-indigo-600',
       textColor: 'text-indigo-900',
-      badge: '💳 Kasa & Rapor',
+      badge: 'Kasa & Rapor',
     },
     {
       title: 'Alışveriş Listesi',
       subtitle: 'Market ve ev ihtiyaçları',
       icon: ShoppingBag,
       to: '/shopping',
-      bgColor: 'bg-emerald-50',
+      bgColor: 'bg-emerald-50/80',
       iconBg: 'bg-emerald-500',
       textColor: 'text-emerald-900',
-      badge: '🛒 Ortak Liste',
+      badge: 'Ortak Liste',
     },
     {
       title: 'Hatırlatıcılar',
       subtitle: 'Randevular ve özel günler',
       icon: Bell,
       to: '/reminders',
-      bgColor: 'bg-amber-50',
+      bgColor: 'bg-amber-50/80',
       iconBg: 'bg-amber-500',
       textColor: 'text-amber-900',
-      badge: '🔔 Alarm & Not',
+      badge: 'Alarmlar',
     },
     {
       title: 'Aile Notları',
-      subtitle: 'Önemli bilgiler ve şifreler',
+      subtitle: 'Önemli bilgiler ve tarifler',
       icon: StickyNote,
       to: '/notes',
-      bgColor: 'bg-sky-50',
-      iconBg: 'bg-sky-500',
-      textColor: 'text-sky-900',
-      badge: '📝 Not Defteri',
+      bgColor: 'bg-purple-50/80',
+      iconBg: 'bg-purple-500',
+      textColor: 'text-purple-900',
+      badge: 'Notlar',
     },
     {
       title: 'Fotoğraf & Anılar',
-      subtitle: 'Güzel anlar albümü',
+      subtitle: 'Aile albümü ve paylaşımlar',
       icon: ImageIcon,
       to: '/gallery',
-      bgColor: 'bg-purple-50',
-      iconBg: 'bg-purple-500',
-      textColor: 'text-purple-900',
-      badge: '📷 Galeri',
+      bgColor: 'bg-sky-50/80',
+      iconBg: 'bg-sky-500',
+      textColor: 'text-sky-900',
+      badge: 'Albüm',
     },
     {
-      title: 'Aile Üyeleri',
-      subtitle: 'Davet kodu ve ayarlar',
+      title: 'Aile Yönetimi',
+      subtitle: 'Üye daveti ve ayarlar',
       icon: Users,
       to: '/family',
-      bgColor: 'bg-orange-50',
-      iconBg: 'bg-orange-500',
-      textColor: 'text-orange-900',
-      badge: '❤️ Ailemiz',
+      bgColor: 'bg-gray-50/80',
+      iconBg: 'bg-gray-600',
+      textColor: 'text-gray-900',
+      badge: 'Ayarlar',
     },
   ];
 
@@ -465,7 +465,7 @@ export const HomePage: React.FC = () => {
               <Coffee className="w-5 h-5" />
             </div>
             <div className="text-left min-w-0">
-              <div className="text-xs font-black truncate">Çay Koydum ☕</div>
+              <div className="text-xs font-black truncate">Çay Koydum</div>
               <div className="text-[10px] text-amber-100 truncate">Sizi bekliyor</div>
             </div>
           </button>
@@ -481,7 +481,7 @@ export const HomePage: React.FC = () => {
               <Car className="w-5 h-5" />
             </div>
             <div className="text-left min-w-0">
-              <div className="text-xs font-black truncate">Eve Geliyorum 🚗</div>
+              <div className="text-xs font-black truncate">Eve Geliyorum</div>
               <div className="text-[10px] text-blue-100 truncate">Yola çıktım</div>
             </div>
           </button>
@@ -497,7 +497,7 @@ export const HomePage: React.FC = () => {
               <Utensils className="w-5 h-5" />
             </div>
             <div className="text-left min-w-0">
-              <div className="text-xs font-black truncate">Yemek Hazır 🍲</div>
+              <div className="text-xs font-black truncate">Yemek Hazır</div>
               <div className="text-[10px] text-emerald-100 truncate">Sofraya buyrun</div>
             </div>
           </button>

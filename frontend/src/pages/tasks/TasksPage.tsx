@@ -18,14 +18,18 @@ import { useFamily } from '../../contexts/FamilyContext';
 import { TaskItem } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
+import { cacheService } from '../../services/cacheService';
 import { playTaskCompleteSound } from '../../services/soundService';
 
 export const TasksPage: React.FC = () => {
   const { user } = useAuth();
   const { currentFamily } = useFamily();
 
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const cacheKey = currentFamily ? `tasks_${currentFamily.id}` : '';
+  const [tasks, setTasks] = useState<TaskItem[]>(() =>
+    cacheKey ? cacheService.get<TaskItem[]>(cacheKey) || [] : []
+  );
+  const [isLoading, setIsLoading] = useState(() => (cacheKey ? !cacheService.get(cacheKey) : true));
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
 
   // New task form state
@@ -47,6 +51,7 @@ export const TasksPage: React.FC = () => {
     try {
       const res = await api.get<TaskItem[]>('/tasks/');
       setTasks(res.data);
+      if (cacheKey) cacheService.set(cacheKey, res.data);
     } catch (err) {
       console.warn('Failed to fetch tasks:', err);
     } finally {
@@ -248,7 +253,7 @@ export const TasksPage: React.FC = () => {
             <Sparkles className="w-7 h-7" />
           </div>
           <h3 className="font-black text-gray-800 text-base">
-            {activeTab === 'active' ? 'Harika! Bekleyen hiçbir iş yok 🎉' : 'Henüz tamamlanan bir iş yok.'}
+            {activeTab === 'active' ? 'Harika! Bekleyen hiçbir iş yok' : 'Henüz tamamlanan bir iş yok'}
           </h3>
           <p className="text-xs text-gray-500 max-w-xs mx-auto">
             {activeTab === 'active'

@@ -106,7 +106,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({ onClose, onSub
               type="text"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Örn: Bugün ne yemek yapalım? 🍲"
+              placeholder="Örn: Bu hafta sonu nereye gidelim?"
               className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
               autoFocus
             />
@@ -193,7 +193,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({ onClose, onSub
               {isSubmitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                <span>Anketi Başlat 📊</span>
+                <span className="flex items-center gap-1.5"><BarChart2 className="w-4 h-4" /> Anketi Başlat</span>
               )}
             </button>
           </div>

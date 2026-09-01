@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Check, Clock, Trophy, Loader2 } from 'lucide-react';
-import { Message, PollData } from '../../types';
+import { Check, Clock, Crown, BarChart3, Users } from 'lucide-react';
+import { Message, PollData, PollVoter } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -18,7 +18,6 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
   const [poll, setPoll] = useState<PollData | null>(() => {
     if (message.poll) return message.poll;
     try {
-      // If poll data was serialized in content
       const parsed = JSON.parse(message.content || '{}');
       if (parsed.poll_id || parsed.options) return parsed;
     } catch {
@@ -27,46 +26,69 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
     return null;
   });
 
-  const [isVoting, setIsVoting] = useState(false);
-  const [selectedOption, setSelectedOption] = useState<number | null>(() => poll?.my_vote ?? null);
+  const [selectedOption, setSelectedOption] = useState<number | null>(
+    () => poll?.my_vote ?? null
+  );
 
-  // Fetch live poll status
+  // Sync with message.poll prop if updated
   useEffect(() => {
-    const pollId = poll?.poll_id || message.id;
-    if (!pollId) return;
+    if (message.poll) {
+      setPoll(message.poll);
+      if (message.poll.my_vote !== undefined && message.poll.my_vote !== null) {
+        setSelectedOption(message.poll.my_vote);
+      }
+    }
+  }, [message.poll]);
 
-    api.get<PollData>(`/messages/poll/${pollId}`)
-      .then((res) => {
-        setPoll(res.data);
-        if (res.data.my_vote !== undefined && res.data.my_vote !== null) {
-          setSelectedOption(res.data.my_vote);
-        }
-      })
-      .catch(() => {});
+  // Fetch live poll details on mount if poll data is missing or incomplete
+  useEffect(() => {
+    const targetId = poll?.poll_id || poll?.message_id || message.id;
+    if (!targetId) return;
+
+    // Only fetch if missing voters or tallies
+    if (!poll || !poll.voters) {
+      api
+        .get<PollData>(`/messages/poll/${targetId}`)
+        .then((res) => {
+          setPoll((prev) => ({ ...prev, ...res.data }));
+          if (res.data.my_vote !== undefined && res.data.my_vote !== null) {
+            setSelectedOption(res.data.my_vote);
+          }
+        })
+        .catch(() => {});
+    }
   }, [message.id, poll?.poll_id]);
 
-  // Realtime poll vote listener
+  // Realtime Supabase Broadcast listener
   useEffect(() => {
-    if (!currentFamily || !supabase || !poll?.poll_id) return;
+    const targetPollId = poll?.poll_id || poll?.message_id || message.id;
+    if (!currentFamily || !supabase || !targetPollId) return;
 
-    const channel = supabase.channel(`poll-${poll.poll_id}`);
+    const channel = supabase.channel(`poll-${targetPollId}`);
     channel
       .on('broadcast', { event: 'poll_voted' }, ({ payload }) => {
-        if (payload.poll_id === poll.poll_id) {
-          setPoll((prev) => (prev ? { ...prev, ...payload } : prev));
-        }
+        setPoll((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            tallies: payload.tallies ?? prev.tallies,
+            voters: payload.voters ?? prev.voters,
+            total_votes: payload.total_votes ?? prev.total_votes,
+          };
+        });
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentFamily?.id, poll?.poll_id]);
+  }, [currentFamily?.id, poll?.poll_id, message.id]);
 
   if (!poll || !poll.options || poll.options.length === 0) {
     return (
-      <div className="p-3 text-xs italic text-gray-500">
-        📊 Anket bilgileri yükleniyor...
+      <div className="p-3 text-xs italic text-gray-500 flex items-center gap-2">
+        <BarChart3 className="w-4 h-4 animate-pulse text-indigo-500" />
+        <span>Anket bilgileri yükleniyor...</span>
       </div>
     );
   }
@@ -77,22 +99,85 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
 
   // Calculate total votes and max votes for crown
   const tallies = poll.tallies || {};
+  const votersMap = poll.voters || {};
   const totalVotes = Object.values(tallies).reduce((a, b) => a + Number(b), 0);
   const maxVotes = Math.max(0, ...Object.values(tallies).map(Number));
 
+  // 0ms Optimistic Instant Vote
   const handleVote = async (optionIndex: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isExpired || isVoting) return;
+    if (isExpired) return;
 
-    setIsVoting(true);
+    const prevOption = selectedOption;
+    if (prevOption === optionIndex) return; // Already voted for this option
+
+    // 1. Instant optimistic state update
     setSelectedOption(optionIndex);
 
+    const newTallies = { ...tallies };
+    if (prevOption !== null && prevOption !== undefined && newTallies[prevOption]) {
+      newTallies[prevOption] = Math.max(0, newTallies[prevOption] - 1);
+    }
+    newTallies[optionIndex] = (newTallies[optionIndex] || 0) + 1;
+
+    const newVoters: Record<string | number, PollVoter[]> = { ...votersMap };
+    const currentUserVoter: PollVoter = {
+      user_id: user?.id || 'me',
+      name: user?.full_name || 'Ben',
+      avatar: user?.avatar_url || null,
+    };
+
+    // Remove from previous option voters
+    if (prevOption !== null && prevOption !== undefined && newVoters[prevOption]) {
+      newVoters[prevOption] = newVoters[prevOption].filter((v) => v.user_id !== user?.id);
+    }
+    // Add to new option voters
+    const existingList = newVoters[optionIndex] ? [...newVoters[optionIndex]] : [];
+    if (!existingList.some((v) => v.user_id === user?.id)) {
+      existingList.push(currentUserVoter);
+    }
+    newVoters[optionIndex] = existingList;
+
+    const newTotalVotes = Object.values(newTallies).reduce((a, b) => a + Number(b), 0);
+
+    setPoll((prev) =>
+      prev
+        ? {
+            ...prev,
+            tallies: newTallies,
+            voters: newVoters,
+            total_votes: newTotalVotes,
+            my_vote: optionIndex,
+          }
+        : prev
+    );
+
+    if (navigator.vibrate) navigator.vibrate(25);
+
+    // 2. Broadcast optimistic update over WebSocket for other family members
+    const targetPollId = poll.poll_id || poll.message_id || message.id;
+    if (supabase && currentFamily) {
+      const channel = supabase.channel(`poll-${targetPollId}`);
+      channel.send({
+        type: 'broadcast',
+        event: 'poll_voted',
+        payload: {
+          poll_id: targetPollId,
+          tallies: newTallies,
+          voters: newVoters,
+          total_votes: newTotalVotes,
+        },
+      });
+    }
+
+    // 3. Sync with backend API in background
     try {
       const res = await api.post<{
         tallies: Record<string | number, number>;
+        voters: Record<string | number, PollVoter[]>;
         total_votes: number;
         my_vote: number;
-      }>(`/messages/poll/${poll.poll_id}/vote`, {
+      }>(`/messages/poll/${targetPollId}/vote`, {
         option_index: optionIndex,
       });
 
@@ -100,44 +185,33 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
         prev
           ? {
               ...prev,
-              tallies: res.data.tallies,
-              total_votes: res.data.total_votes,
+              tallies: res.data.tallies || newTallies,
+              voters: res.data.voters || newVoters,
+              total_votes: res.data.total_votes || newTotalVotes,
               my_vote: res.data.my_vote,
             }
           : prev
       );
-
-      if (navigator.vibrate) navigator.vibrate(30);
-
-      // Broadcast update
-      if (supabase && currentFamily) {
-        const channel = supabase.channel(`poll-${poll.poll_id}`);
-        channel.send({
-          type: 'broadcast',
-          event: 'poll_voted',
-          payload: {
-            poll_id: poll.poll_id,
-            tallies: res.data.tallies,
-            total_votes: res.data.total_votes,
-          },
-        });
-      }
     } catch (err) {
-      console.warn('Vote error:', err);
-    } finally {
-      setIsVoting(false);
+      console.warn('Vote background sync warning:', err);
     }
   };
 
   return (
     <div
-      className="w-full min-w-[240px] sm:min-w-[280px] max-w-sm select-none p-1 space-y-3"
+      className="w-full min-w-[250px] sm:min-w-[290px] max-w-sm select-none p-1 space-y-3"
       onClick={(e) => e.stopPropagation()}
     >
       {/* Poll Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-xl">📊</span>
+          <div
+            className={`w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 ${
+              isMe ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-600'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" />
+          </div>
           <h4 className={`text-sm font-black leading-snug ${isMe ? 'text-white' : 'text-gray-900'}`}>
             {poll.question}
           </h4>
@@ -151,46 +225,47 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
           const percent = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
           const isSelected = selectedOption === idx;
           const isWinner = isExpired && maxVotes > 0 && voteCount === maxVotes;
+          const optionVoters: PollVoter[] = votersMap[idx] || [];
 
           return (
             <button
               key={idx}
               type="button"
-              disabled={isExpired || isVoting}
+              disabled={isExpired}
               onClick={(e) => handleVote(idx, e)}
-              className={`w-full relative overflow-hidden text-left p-2.5 rounded-2xl border transition-all active:scale-[0.99] cursor-pointer disabled:cursor-default ${
+              className={`w-full relative overflow-hidden text-left p-2.5 rounded-2xl border transition-all duration-150 active:scale-[0.98] cursor-pointer disabled:cursor-default ${
                 isSelected
                   ? isMe
-                    ? 'border-white/60 bg-white/20'
-                    : 'border-family-500 bg-family-50/80 shadow-xs'
+                    ? 'border-white/70 bg-white/25 shadow-sm'
+                    : 'border-family-500 bg-family-50/90 shadow-sm'
                   : isMe
                   ? 'border-white/20 bg-white/10 hover:bg-white/15'
-                  : 'border-gray-200/90 bg-gray-50/80 hover:bg-gray-100/80'
+                  : 'border-gray-200/90 bg-gray-50/80 hover:bg-gray-100/90'
               }`}
             >
-              {/* Animated progress fill bar */}
+              {/* Animated Progress Fill Bar */}
               <div
-                className={`absolute inset-y-0 left-0 transition-all duration-300 pointer-events-none rounded-xl ${
+                className={`absolute inset-y-0 left-0 transition-all duration-500 pointer-events-none rounded-xl ${
                   isSelected
                     ? isMe
-                      ? 'bg-white/30'
-                      : 'bg-family-200/80'
+                      ? 'bg-white/35'
+                      : 'bg-family-200/90'
                     : isMe
                     ? 'bg-white/15'
-                    : 'bg-gray-200/70'
+                    : 'bg-gray-200/75'
                 }`}
                 style={{ width: `${percent}%` }}
               />
 
-              {/* Option Content & Stats */}
+              {/* Option Text & Stats */}
               <div className="relative z-10 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0 flex-1">
                   <div
-                    className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 ${
+                    className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 transition-all ${
                       isSelected
                         ? isMe
-                          ? 'bg-white text-family-700 border-white'
-                          : 'bg-family-600 text-white border-family-600'
+                          ? 'bg-white text-family-700 border-white shadow-xs'
+                          : 'bg-family-600 text-white border-family-600 shadow-xs'
                         : isMe
                         ? 'border-white/40'
                         : 'border-gray-400'
@@ -209,26 +284,65 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
 
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   {isWinner && (
-                    <span title="Kazanan Şık!" className="text-sm">
-                      👑
-                    </span>
+                    <div className="p-0.5 rounded-full bg-amber-100 text-amber-600" title="Kazanan Şık!">
+                      <Crown className="w-3.5 h-3.5 fill-amber-400" />
+                    </div>
                   )}
                   <span
                     className={`text-[11px] font-black ${
-                      isMe ? 'text-white/90' : 'text-gray-600'
+                      isMe ? 'text-white/95' : 'text-gray-700'
                     }`}
                   >
                     %{percent}
                   </span>
                   <span
                     className={`text-[10px] font-medium ${
-                      isMe ? 'text-white/70' : 'text-gray-400'
+                      isMe ? 'text-white/75' : 'text-gray-400'
                     }`}
                   >
                     ({voteCount})
                   </span>
                 </div>
               </div>
+
+              {/* Voter Avatars Cluster */}
+              {optionVoters.length > 0 && (
+                <div className="relative z-10 flex items-center gap-1.5 mt-1.5 pt-1 border-t border-black/5">
+                  <div className="flex items-center -space-x-1.5 overflow-hidden">
+                    {optionVoters.slice(0, 5).map((voter, vIdx) =>
+                      voter.avatar ? (
+                        <img
+                          key={vIdx}
+                          src={voter.avatar}
+                          alt={voter.name}
+                          title={voter.name}
+                          className="w-5 h-5 rounded-full border-2 border-white object-cover shadow-xs"
+                        />
+                      ) : (
+                        <div
+                          key={vIdx}
+                          title={voter.name}
+                          className="w-5 h-5 rounded-full border-2 border-white bg-gradient-to-tr from-indigo-600 to-purple-600 text-white font-black text-[9px] flex items-center justify-center shadow-xs"
+                        >
+                          {voter.name.charAt(0).toUpperCase()}
+                        </div>
+                      )
+                    )}
+                    {optionVoters.length > 5 && (
+                      <span className="w-5 h-5 rounded-full border-2 border-white bg-gray-200 text-gray-700 font-bold text-[8px] flex items-center justify-center shadow-xs">
+                        +{optionVoters.length - 5}
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    className={`text-[9px] font-semibold truncate ${
+                      isMe ? 'text-white/80' : 'text-gray-500'
+                    }`}
+                  >
+                    {optionVoters.map((v) => v.name.split(' ')[0]).join(', ')}
+                  </span>
+                </div>
+              )}
             </button>
           );
         })}
@@ -244,12 +358,15 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
           <Clock className="w-3 h-3" />
           <span>
             {isExpired
-              ? 'Anket Tamamlandı 🏁'
+              ? 'Anket Tamamlandı'
               : `Bitiş: ${expiresAt.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`}
           </span>
         </div>
 
-        <span>{totalVotes} oy kullanıldı</span>
+        <div className="flex items-center gap-1">
+          <Users className="w-3 h-3" />
+          <span>{totalVotes} oy</span>
+        </div>
       </div>
     </div>
   );

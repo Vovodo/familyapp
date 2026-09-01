@@ -28,14 +28,22 @@ export interface Family {
   members: FamilyMember[];
 }
 
+export interface PollVoter {
+  user_id: string;
+  name: string;
+  avatar: string | null;
+}
+
 export interface PollData {
   poll_id: string;
+  message_id?: string;
   question: string;
   options: string[];
   duration_hours: number;
   expires_at: string;
   is_closed: boolean;
   tallies?: Record<string | number, number>;
+  voters?: Record<string | number, PollVoter[]>;
   total_votes?: number;
   my_vote?: number | null;
 }

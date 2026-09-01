@@ -22,25 +22,26 @@ import { useFamily } from '../../contexts/FamilyContext';
 import { BudgetItem, BudgetSummary } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
+import { cacheService } from '../../services/cacheService';
 
 const CATEGORIES_EXPENSE = [
-  '🛒 Market & Gıda',
-  '💡 Faturalar (Elektrik, Su, Doğalgaz)',
-  '🏠 Kira & Aidat',
-  '🚗 Ulaşım & Yakıt',
-  '💊 Sağlık & Eczane',
-  '👕 Giyim & Alışveriş',
-  '☕ Kafe & Eğlence',
-  '👶 Çocuk & Eğitim',
-  '📦 Diğer Giderler',
+  'Market & Gıda',
+  'Faturalar (Elektrik, Su, Doğalgaz)',
+  'Kira & Aidat',
+  'Ulaşım & Yakıt',
+  'Sağlık & Eczane',
+  'Giyim & Alışveriş',
+  'Kafe & Eğlence',
+  'Çocuk & Eğitim',
+  'Diğer Giderler',
 ];
 
 const CATEGORIES_INCOME = [
-  '💼 Maaş',
-  '📈 Ek Gelir & Prim',
-  '🎁 Harçlık & Destek',
-  '🏢 Kira Geliri',
-  '💰 Diğer Gelir',
+  'Maaş',
+  'Ek Gelir & Prim',
+  'Harçlık & Destek',
+  'Kira Geliri',
+  'Diğer Gelir',
 ];
 
 export const BudgetPage: React.FC = () => {
@@ -52,9 +53,12 @@ export const BudgetPage: React.FC = () => {
   const selectedMonth = currentDate.getMonth() + 1;
   const selectedYear = currentDate.getFullYear();
 
-  const [transactions, setTransactions] = useState<BudgetItem[]>([]);
-  const [summary, setSummary] = useState<BudgetSummary | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const cacheKey = currentFamily ? `budget_${currentFamily.id}_${selectedMonth}_${selectedYear}` : '';
+  const cachedData = cacheKey ? cacheService.get<{ tx: BudgetItem[]; sum: BudgetSummary }>(cacheKey) : null;
+
+  const [transactions, setTransactions] = useState<BudgetItem[]>(() => cachedData?.tx || []);
+  const [summary, setSummary] = useState<BudgetSummary | null>(() => cachedData?.sum || null);
+  const [isLoading, setIsLoading] = useState(() => !cachedData);
   const [viewMode, setViewMode] = useState<'transactions' | 'report'>('transactions');
 
   // Add transaction form
@@ -81,6 +85,7 @@ export const BudgetPage: React.FC = () => {
       ]);
       setTransactions(txRes.data);
       setSummary(sumRes.data);
+      if (cacheKey) cacheService.set(cacheKey, { tx: txRes.data, sum: sumRes.data });
     } catch (err) {
       console.warn('Failed to fetch budget:', err);
     } finally {
@@ -89,7 +94,6 @@ export const BudgetPage: React.FC = () => {
   };
 
   useEffect(() => {
-    setIsLoading(true);
     fetchBudgetData();
   }, [currentFamily?.id, selectedMonth, selectedYear]);
 
@@ -509,7 +513,7 @@ export const BudgetPage: React.FC = () => {
           <div className="bg-white w-full max-w-sm rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-black text-gray-900">
-                {txType === 'expense' ? 'Gider (Harcama) Ekle 🛒' : 'Gelir (Kasa) Ekle 💰'}
+                {txType === 'expense' ? 'Gider (Harcama) Ekle' : 'Gelir (Kasa) Ekle'}
               </h3>
               <button
                 onClick={() => setShowAddModal(false)}

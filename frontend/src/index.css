@@ -20,34 +20,42 @@
     scrollbar-gutter: stable;
   }
 
-  /* Safe touch target size for accessible family members (minimum 48px) */
+  /* Universal tactile button response (WhatsApp / iOS feel) */
   button, a, input, select {
     touch-action: manipulation;
   }
+
+  button:not(:disabled):active, .interactive-card:active {
+    transform: scale(0.96);
+  }
+
+  button, a, .interactive-card {
+    transition: transform 0.12s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  }
 }
 
-/* Custom scrollbar */
+/* Custom sleek scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: #cbd5e1;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: #94a3b8;
 }
 
 /* Smooth transitions for mobile UI */
 .transition-touch {
-  transition: transform 0.1s ease-in-out, opacity 0.1s ease-in-out;
+  transition: transform 0.1s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.1s ease-in-out;
 }
 .transition-touch:active {
-  transform: scale(0.97);
+  transform: scale(0.95);
 }
 
 @keyframes floatUp {
@@ -76,7 +84,7 @@
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-6px);
+    transform: translateY(-5px);
   }
 }
 
@@ -84,3 +92,18 @@
   animation: bounceShort 2s infinite ease-in-out;
 }
 
+/* Gentle fade slide up for cards */
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUpFade 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

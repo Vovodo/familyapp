@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
 
 
@@ -174,6 +174,7 @@ class MessageResponse(MessageBase):
     sender_name: Optional[str] = None
     sender_avatar: Optional[str] = None
     sender_nickname: Optional[str] = None
+    poll: Optional[Dict[str, Any]] = None
     model_config = ConfigDict(from_attributes=True)
 
 

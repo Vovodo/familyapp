@@ -151,6 +151,72 @@ def get_messages(
             "nickname": fm.nickname
         }
 
+    # Batch load polls and voter profiles for all poll messages
+    poll_msg_ids = [m.id for m in messages if m.media_type == "poll"]
+    poll_map = {}
+    if poll_msg_ids:
+        polls = db.query(Poll).filter(Poll.message_id.in_(poll_msg_ids)).all()
+        poll_ids = [p.id for p in polls]
+        votes = (
+            db.query(PollVote, User)
+            .outerjoin(User, PollVote.user_id == User.id)
+            .filter(PollVote.poll_id.in_(poll_ids))
+            .all()
+        )
+        votes_by_poll: Dict[str, list] = {}
+        for pv, u in votes:
+            if pv.poll_id not in votes_by_poll:
+                votes_by_poll[pv.poll_id] = []
+            votes_by_poll[pv.poll_id].append({
+                "user_id": pv.user_id,
+                "option_index": pv.option_index,
+                "name": u.full_name if u else "Aile Üyesi",
+                "avatar": u.avatar_url if u else None,
+            })
+
+        now = datetime.now(timezone.utc)
+        for p in polls:
+            try:
+                options_list = json.loads(p.options) if isinstance(p.options, str) else p.options
+            except Exception:
+                options_list = []
+            pv_list = votes_by_poll.get(p.id, [])
+            tallies = {i: 0 for i in range(len(options_list))}
+            voters = {i: [] for i in range(len(options_list))}
+            my_vote = None
+
+            for v in pv_list:
+                opt_idx = v["option_index"]
+                if opt_idx in tallies:
+                    tallies[opt_idx] += 1
+                if opt_idx in voters:
+                    voters[opt_idx].append({
+                        "user_id": v["user_id"],
+                        "name": v["name"],
+                        "avatar": v["avatar"],
+                    })
+                if v["user_id"] == member.user_id:
+                    my_vote = opt_idx
+
+            exp = p.expires_at
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            is_expired = p.is_closed or now > exp
+
+            poll_map[p.message_id] = {
+                "poll_id": p.id,
+                "message_id": p.message_id,
+                "question": p.question,
+                "options": options_list,
+                "duration_hours": p.duration_hours,
+                "expires_at": p.expires_at.isoformat(),
+                "is_closed": is_expired,
+                "total_votes": len(pv_list),
+                "tallies": tallies,
+                "voters": voters,
+                "my_vote": my_vote
+            }
+
     results = []
     for msg in messages:
         sender_info = member_map.get(msg.sender_id, {
@@ -173,7 +239,8 @@ def get_messages(
                 created_at=msg.created_at,
                 sender_name=sender_info["name"],
                 sender_avatar=sender_info["avatar"],
-                sender_nickname=sender_info["nickname"]
+                sender_nickname=sender_info["nickname"],
+                poll=poll_map.get(msg.id)
             )
         )
     return results
@@ -466,7 +533,14 @@ async def vote_poll(
     """
     Casts or updates a user's vote on an active poll.
     """
-    poll = db.query(Poll).filter(Poll.id == poll_id, Poll.family_id == member.family_id).first()
+    poll = (
+        db.query(Poll)
+        .filter(
+            (Poll.id == poll_id) | (Poll.message_id == poll_id),
+            Poll.family_id == member.family_id
+        )
+        .first()
+    )
     if not poll:
         raise HTTPException(status_code=404, detail="Anket bulunamadı.")
 
@@ -478,13 +552,17 @@ async def vote_poll(
     if poll.is_closed or now > exp:
         raise HTTPException(status_code=400, detail="Bu anketin süresi dolmuştur.")
 
-    options_list = json.loads(poll.options)
+    try:
+        options_list = json.loads(poll.options) if isinstance(poll.options, str) else poll.options
+    except Exception:
+        options_list = []
+
     if payload.option_index >= len(options_list):
         raise HTTPException(status_code=400, detail="Geçersiz seçenek.")
 
     # Upsert user's vote
     existing_vote = db.query(PollVote).filter(
-        PollVote.poll_id == poll_id,
+        PollVote.poll_id == poll.id,
         PollVote.user_id == current_user.id
     ).first()
 
@@ -492,7 +570,7 @@ async def vote_poll(
         existing_vote.option_index = payload.option_index
     else:
         new_vote = PollVote(
-            poll_id=poll_id,
+            poll_id=poll.id,
             user_id=current_user.id,
             option_index=payload.option_index
         )
@@ -500,19 +578,35 @@ async def vote_poll(
 
     db.commit()
 
-    # Calculate tallies
-    all_votes = db.query(PollVote).filter(PollVote.poll_id == poll_id).all()
+    # Calculate tallies and voter details
+    votes_data = (
+        db.query(PollVote, User)
+        .outerjoin(User, PollVote.user_id == User.id)
+        .filter(PollVote.poll_id == poll.id)
+        .all()
+    )
+
     tallies: Dict[int, int] = {i: 0 for i in range(len(options_list))}
-    for v in all_votes:
+    voters: Dict[int, list] = {i: [] for i in range(len(options_list))}
+
+    for v, u in votes_data:
         if v.option_index in tallies:
             tallies[v.option_index] += 1
+        if v.option_index in voters:
+            voters[v.option_index].append({
+                "user_id": v.user_id,
+                "name": u.full_name if u else "Aile Üyesi",
+                "avatar": u.avatar_url if u else None,
+            })
 
     return {
         "status": "success",
-        "poll_id": poll_id,
+        "poll_id": poll.id,
+        "message_id": poll.message_id,
         "my_vote": payload.option_index,
-        "total_votes": len(all_votes),
+        "total_votes": len(votes_data),
         "tallies": tallies,
+        "voters": voters,
         "is_closed": False
     }
 
@@ -527,7 +621,14 @@ def get_poll_details(
     """
     Returns live tallies and status for a poll.
     """
-    poll = db.query(Poll).filter(Poll.id == poll_id, Poll.family_id == member.family_id).first()
+    poll = (
+        db.query(Poll)
+        .filter(
+            (Poll.id == poll_id) | (Poll.message_id == poll_id),
+            Poll.family_id == member.family_id
+        )
+        .first()
+    )
     if not poll:
         raise HTTPException(status_code=404, detail="Anket bulunamadı.")
 
@@ -537,14 +638,31 @@ def get_poll_details(
         exp = exp.replace(tzinfo=timezone.utc)
     is_expired = poll.is_closed or now > exp
 
-    options_list = json.loads(poll.options)
-    all_votes = db.query(PollVote).filter(PollVote.poll_id == poll_id).all()
+    try:
+        options_list = json.loads(poll.options) if isinstance(poll.options, str) else poll.options
+    except Exception:
+        options_list = []
+
+    votes_data = (
+        db.query(PollVote, User)
+        .outerjoin(User, PollVote.user_id == User.id)
+        .filter(PollVote.poll_id == poll.id)
+        .all()
+    )
+
     tallies: Dict[int, int] = {i: 0 for i in range(len(options_list))}
+    voters: Dict[int, list] = {i: [] for i in range(len(options_list))}
     my_vote = None
 
-    for v in all_votes:
+    for v, u in votes_data:
         if v.option_index in tallies:
             tallies[v.option_index] += 1
+        if v.option_index in voters:
+            voters[v.option_index].append({
+                "user_id": v.user_id,
+                "name": u.full_name if u else "Aile Üyesi",
+                "avatar": u.avatar_url if u else None,
+            })
         if v.user_id == current_user.id:
             my_vote = v.option_index
 
@@ -556,8 +674,9 @@ def get_poll_details(
         "duration_hours": poll.duration_hours,
         "expires_at": poll.expires_at.isoformat(),
         "is_closed": is_expired,
-        "total_votes": len(all_votes),
+        "total_votes": len(votes_data),
         "tallies": tallies,
+        "voters": voters,
         "my_vote": my_vote
     }
 
