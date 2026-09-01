@@ -86,19 +86,24 @@ def seed_admin_user():
 from backend.app.services.cleanup_service import run_periodic_cleanup_job
 import asyncio
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: create tables, run safe migrations, seed admin, and start auto-cleanup job
-    logger.info("Initializing database tables...")
+def init_db_sync():
+    """Initializes tables, safe migrations, and default admin in background thread."""
+    logger.info("Initializing database tables and migrations in background...")
     try:
         Base.metadata.create_all(bind=engine)
         run_safe_migrations()
         logger.info("Database tables and migrations initialized successfully.")
         seed_admin_user()
-        # Launch automatic 14-day old message purge job in background
-        asyncio.create_task(run_periodic_cleanup_job())
     except Exception as e:
-        logger.error(f"Error initializing startup tasks: {e}")
+        logger.error(f"Error during database initialization: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Run DB init in background so Uvicorn opens port 8000 immediately
+    asyncio.create_task(asyncio.to_thread(init_db_sync))
+    # Launch automatic 14-day old message purge job in background
+    asyncio.create_task(run_periodic_cleanup_job())
     yield
     # Shutdown
     logger.info("Shutting down Aile Uygulaması API...")
