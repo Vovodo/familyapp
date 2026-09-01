@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    Float,
     Text,
     UniqueConstraint,
     Index
@@ -255,4 +256,96 @@ class VerificationCode(Base):
     __table_args__ = (
         Index("idx_verification_email_purpose", "email", "purpose", "is_used"),
     )
+
+
+class TaskItem(Base):
+    __tablename__ = "task_items"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    assigned_to = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    priority = Column(String(20), default="normal") # 'normal' or 'urgent'
+    is_completed = Column(Boolean, default=False, index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_by = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    due_date = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_tasks_family_completed", "family_id", "is_completed"),
+    )
+
+    # Relationships
+    family = relationship("Family", backref="task_items")
+    creator = relationship("User", foreign_keys=[created_by])
+    assignee = relationship("User", foreign_keys=[assigned_to])
+    completer = relationship("User", foreign_keys=[completed_by])
+
+
+class BudgetItem(Base):
+    __tablename__ = "budget_items"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    type = Column(String(20), nullable=False) # 'expense' or 'income'
+    amount = Column(Float, nullable=False)
+    category = Column(String(50), default="Diğer") # Market & Mutfak, Faturalar, vb.
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    transaction_date = Column(DateTime(timezone=True), default=get_utc_now, index=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_budget_family_date", "family_id", "transaction_date"),
+    )
+
+    family = relationship("Family", backref="budget_items")
+    creator = relationship("User", foreign_keys=[created_by])
+
+
+class Poll(Base):
+    __tablename__ = "polls"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    message_id = Column(String(36), ForeignKey("messages.id", ondelete="CASCADE"), nullable=True, index=True)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    creator_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    question = Column(String(300), nullable=False)
+    options = Column(Text, nullable=False) # JSON encoded list of strings
+    duration_hours = Column(Integer, default=12)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    is_closed = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_polls_family_created", "family_id", "created_at"),
+    )
+
+    family = relationship("Family", backref="polls")
+    creator = relationship("User", foreign_keys=[creator_id])
+    votes = relationship("PollVote", back_populates="poll", cascade="all, delete-orphan")
+
+
+class PollVote(Base):
+    __tablename__ = "poll_votes"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    poll_id = Column(String(36), ForeignKey("polls.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    option_index = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("poll_id", "user_id", name="uq_poll_user_vote"),
+        Index("idx_poll_votes_poll_user", "poll_id", "user_id"),
+    )
+
+    poll = relationship("Poll", back_populates="votes")
+    user = relationship("User", foreign_keys=[user_id])
 

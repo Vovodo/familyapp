@@ -428,4 +428,106 @@ class PushNotificationService:
             logger.error(f"FCM send_poke_push failed: {e}")
             return 0
 
+    async def send_status_action_push(
+        self,
+        db: Session,
+        device_tokens: List[DeviceToken],
+        action_type: str,
+        title: str,
+        body: str,
+        sender_name: str,
+        sender_id: str,
+        family_id: str,
+        action_id: str,
+        sender_avatar: Optional[str] = None
+    ) -> int:
+        """
+        Sends specialized family status push (tea, coming_home, meal, heart) with unique color and tags.
+        """
+        if not device_tokens:
+            return 0
+
+        tokens = [dt.token for dt in device_tokens if dt.token]
+        if not tokens:
+            return 0
+
+        if not self.is_initialized:
+            self._initialize_firebase()
+        if not self.is_initialized:
+            return len(tokens)
+
+        # Color and vibration customization based on action type
+        color_map = {
+            "tea": "#D97706",         # Amber/brown
+            "coming_home": "#2563EB", # Vibrant blue/indigo
+            "meal": "#059669",        # Emerald green
+            "heart": "#E11D48"        # Rose red
+        }
+        notif_color = color_map.get(action_type, "#4F46E5")
+
+        vibrate_pattern = [0, 200, 100, 200, 100, 200]
+        valid_avatar = sender_avatar if sender_avatar and sender_avatar.startswith("http") else None
+
+        android_config = messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                title=title,
+                body=body,
+                channel_id=HEART_CHANNEL_ID if action_type == "heart" else GENERAL_CHANNEL_ID,
+                sound="default",
+                priority="high",
+                visibility="public",
+                color=notif_color,
+                image=valid_avatar,
+                default_vibrate_timings=False,
+                vibrate_timings_millis=vibrate_pattern,
+                tag=f"action_{action_type}_{family_id}",
+                click_action="OPEN_HOME"
+            ),
+            data={
+                "type": action_type,
+                "action_id": action_id,
+                "sender_name": sender_name,
+                "sender_id": sender_id,
+                "sender_avatar": valid_avatar or "",
+                "family_id": family_id,
+                "message": body
+            }
+        )
+
+        message = messaging.MulticastMessage(
+            tokens=tokens,
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+                image=valid_avatar
+            ),
+            data={
+                "type": action_type,
+                "action_id": action_id,
+                "sender_name": sender_name,
+                "sender_id": sender_id,
+                "sender_avatar": valid_avatar or "",
+                "family_id": family_id,
+                "message": body
+            },
+            android=android_config
+        )
+
+        try:
+            response = messaging.send_each_for_multicast(message)
+            logger.info(f"FCM Status Action ({action_type}) Multicast: {response.success_count} success, {response.failure_count} failure")
+            if response.failure_count > 0:
+                failed_indices = [idx for idx, resp in enumerate(response.responses) if not resp.success]
+                failed_tokens = [tokens[idx] for idx in failed_indices]
+                if failed_tokens:
+                    db.query(DeviceToken).filter(DeviceToken.token.in_(failed_tokens)).update(
+                        {"is_active": False}, synchronize_session=False
+                    )
+                    db.commit()
+            return response.success_count
+        except Exception as e:
+            logger.error(f"FCM send_status_action_push failed: {e}")
+            return 0
+
 push_service = PushNotificationService()

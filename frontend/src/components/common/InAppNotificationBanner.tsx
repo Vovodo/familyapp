@@ -1,14 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { MessageSquare, X, Heart, Clock, HandMetal } from 'lucide-react';
+import { MessageSquare, X, Heart, Clock, Coffee, Car, Utensils } from 'lucide-react';
 import { supabase } from '../../services/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
-import { playMessageReceived, playHeartSound, playPokeSound } from '../../services/soundService';
+import {
+  playMessageReceived,
+  playHeartSound,
+  playPokeSound,
+  playTeaSound,
+  playCarHornSound,
+  playMealSound,
+} from '../../services/soundService';
 
 interface InAppAlert {
   id: string;
-  type: 'chat' | 'reminder' | 'heart' | 'poke';
+  type: 'chat' | 'reminder' | 'heart' | 'poke' | 'tea' | 'coming_home' | 'meal';
   title: string;
   body: string;
   avatarUrl?: string | null;
@@ -51,6 +58,7 @@ export const InAppNotificationBanner: React.FC = () => {
         if (!bodyText) {
           if (msg.media_type === 'audio') bodyText = '🎤 Sesli mesaj';
           else if (msg.media_type === 'image') bodyText = '📷 Fotoğraf';
+          else if (msg.media_type === 'poll') bodyText = '📊 Yeni bir anket başlattı';
           else bodyText = 'Yeni bir mesaj';
         }
 
@@ -88,7 +96,6 @@ export const InAppNotificationBanner: React.FC = () => {
     channel.on('broadcast', { event: 'poke_received' }, (payload) => {
       const data = payload.payload;
       if (!data || data.sender_id === user.id) return;
-      // If target_user_id is specified, make sure it's for me or whole family
       if (data.target_user_id && data.target_user_id !== user.id) return;
 
       playPokeSound();
@@ -101,6 +108,29 @@ export const InAppNotificationBanner: React.FC = () => {
         body: `${data.sender_name || 'Bir aile üyesi'} sizi dürtüyor!`,
         avatarUrl: data.sender_avatar,
         link: '/chat',
+      });
+    });
+
+    // 4. Listen to real-time quick status actions (tea, coming_home, meal)
+    channel.on('broadcast', { event: 'quick_action_received' }, (payload) => {
+      const data = payload.payload;
+      if (!data || data.sender_id === user.id) return;
+
+      const actType = data.action_type || data.type;
+      if (actType === 'tea') playTeaSound();
+      else if (actType === 'coming_home') playCarHornSound();
+      else if (actType === 'meal') playMealSound();
+      else if (actType === 'heart') playHeartSound();
+
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]);
+
+      setAlert({
+        id: `act-${Date.now()}`,
+        type: actType,
+        title: data.title || 'Aile Bildirimi',
+        body: data.message || `${data.sender_name || 'Bir aile üyesi'} bildirim gönderdi.`,
+        avatarUrl: data.sender_avatar,
+        link: '/',
       });
     });
 
@@ -134,6 +164,12 @@ export const InAppNotificationBanner: React.FC = () => {
         return 'border-rose-300 bg-rose-50/95 shadow-rose-200/50';
       case 'poke':
         return 'border-orange-300 bg-orange-50/95 shadow-orange-200/50 ring-2 ring-orange-400/30';
+      case 'tea':
+        return 'border-amber-300 bg-amber-50/95 shadow-amber-200/50 ring-2 ring-amber-400/30';
+      case 'coming_home':
+        return 'border-blue-300 bg-blue-50/95 shadow-blue-200/50 ring-2 ring-blue-400/30';
+      case 'meal':
+        return 'border-emerald-300 bg-emerald-50/95 shadow-emerald-200/50 ring-2 ring-emerald-400/30';
       case 'reminder':
         return 'border-amber-300 bg-amber-50/95 shadow-amber-200/50';
       default:
@@ -147,6 +183,12 @@ export const InAppNotificationBanner: React.FC = () => {
         return 'bg-rose-500 text-white';
       case 'poke':
         return 'bg-orange-500 text-white';
+      case 'tea':
+        return 'bg-amber-600 text-white';
+      case 'coming_home':
+        return 'bg-blue-600 text-white';
+      case 'meal':
+        return 'bg-emerald-600 text-white';
       case 'reminder':
         return 'bg-amber-500 text-white';
       default:
@@ -172,6 +214,18 @@ export const InAppNotificationBanner: React.FC = () => {
             <div className="w-11 h-11 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center font-bold">
               <Heart className="w-6 h-6 fill-rose-500 text-rose-500 animate-pulse" />
             </div>
+          ) : alert.type === 'tea' ? (
+            <div className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
+              <Coffee className="w-6 h-6 animate-pulse" />
+            </div>
+          ) : alert.type === 'coming_home' ? (
+            <div className="w-11 h-11 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+              <Car className="w-6 h-6 animate-pulse" />
+            </div>
+          ) : alert.type === 'meal' ? (
+            <div className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+              <Utensils className="w-6 h-6 animate-pulse" />
+            </div>
           ) : alert.type === 'poke' ? (
             <div className="w-11 h-11 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center font-bold">
               <span className="text-2xl animate-bounce">👉</span>
@@ -192,6 +246,12 @@ export const InAppNotificationBanner: React.FC = () => {
           >
             {alert.type === 'heart' ? (
               <Heart className="w-2.5 h-2.5 fill-current" />
+            ) : alert.type === 'tea' ? (
+              <Coffee className="w-2.5 h-2.5" />
+            ) : alert.type === 'coming_home' ? (
+              <Car className="w-2.5 h-2.5" />
+            ) : alert.type === 'meal' ? (
+              <Utensils className="w-2.5 h-2.5" />
             ) : alert.type === 'poke' ? (
               <span className="text-[9px] leading-none">👉</span>
             ) : alert.type === 'reminder' ? (
@@ -209,6 +269,12 @@ export const InAppNotificationBanner: React.FC = () => {
               className={`text-xs font-black truncate ${
                 alert.type === 'poke'
                   ? 'text-orange-950'
+                  : alert.type === 'tea'
+                  ? 'text-amber-950'
+                  : alert.type === 'coming_home'
+                  ? 'text-blue-950'
+                  : alert.type === 'meal'
+                  ? 'text-emerald-950'
                   : alert.type === 'heart'
                   ? 'text-rose-950'
                   : 'text-gray-900'
@@ -222,6 +288,12 @@ export const InAppNotificationBanner: React.FC = () => {
             className={`text-xs truncate mt-0.5 font-medium ${
               alert.type === 'poke'
                 ? 'text-orange-800 font-semibold'
+                : alert.type === 'tea'
+                ? 'text-amber-800 font-semibold'
+                : alert.type === 'coming_home'
+                ? 'text-blue-800 font-semibold'
+                : alert.type === 'meal'
+                ? 'text-emerald-800 font-semibold'
                 : alert.type === 'heart'
                 ? 'text-rose-800 font-semibold'
                 : 'text-gray-600'

@@ -17,6 +17,7 @@ import { PinchZoomViewer } from '../../components/common/PinchZoomViewer';
 import { ChatSettingsModal, FontSizeOption, WallpaperOption, WALLPAPERS } from '../../components/chat/ChatSettingsModal';
 import { playMessageSent, playMessageReceived } from '../../services/soundService';
 import { MemberProfilePopup } from '../../components/chat/MemberProfilePopup';
+import { CreatePollModal } from '../../components/chat/CreatePollModal';
 
 export const ChatPage: React.FC = () => {
   const { user } = useAuth();
@@ -32,6 +33,14 @@ export const ChatPage: React.FC = () => {
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+
+  // Single Message Delete State (15-min limit)
+  const [messageToDelete, setMessageToDelete] = useState<Message | null>(null);
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
+  const [isDeletingSingle, setIsDeletingSingle] = useState(false);
+
+  // Poll Modal State
+  const [showPollModal, setShowPollModal] = useState(false);
 
   // Multi-Selection State (Only user's own messages)
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
@@ -599,59 +608,35 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  // Long-Press & Multi-Selection Handlers (ONLY for user's own messages)
+  // Long-Press Single Message Delete (15-min limit)
   const handleLongPressMessage = (id: string) => {
     const targetMsg = messages.find((m) => m.id === id);
-    if (targetMsg && targetMsg.sender_id === user?.id) {
-      setIsSelectionMode(true);
-      setSelectedMessageIds(new Set([id]));
+    if (!targetMsg || targetMsg.sender_id !== user?.id || targetMsg.content === '🚫 Bu mesaj silindi') return;
+
+    const msgTime = new Date(targetMsg.created_at).getTime();
+    const ageMs = Date.now() - msgTime;
+
+    if (ageMs > 15 * 60 * 1000) {
+      setDeleteNotice('Mesajlar yalnızca ilk 15 dakika içinde silinebilir.');
+      setTimeout(() => setDeleteNotice(null), 3000);
+      return;
     }
+
+    setMessageToDelete(targetMsg);
   };
 
-  const handleToggleSelectMessage = (id: string) => {
-    const targetMsg = messages.find((m) => m.id === id);
-    if (!targetMsg || targetMsg.sender_id !== user?.id) return;
+  const handleConfirmDeleteSingleMessage = async () => {
+    if (!messageToDelete) return;
+    const id = messageToDelete.id;
+    setIsDeletingSingle(true);
 
-    setSelectedMessageIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      if (next.size === 0) {
-        setIsSelectionMode(false);
-      }
-      return next;
-    });
-  };
-
-  const handleSelectAll = () => {
-    const myMessages = messages.filter((m) => m.sender_id === user?.id);
-    setSelectedMessageIds(new Set(myMessages.map((m) => m.id)));
-  };
-
-  const handleCancelSelection = () => {
-    setIsSelectionMode(false);
-    setSelectedMessageIds(new Set());
-  };
-
-  // Batch Delete Messages
-  const handleBatchDelete = async () => {
-    const ids = Array.from(selectedMessageIds);
-    if (ids.length === 0 || isDeletingBatch) return;
-
-    setIsDeletingBatch(true);
     try {
-      await api.post('/messages/batch-delete', {
-        message_ids: ids,
-        for_everyone: true,
-      });
+      await api.delete(`/messages/${id}?for_everyone=true`);
 
       setMessages((prev) =>
         prev.map((msg) =>
-          ids.includes(msg.id)
-            ? { ...msg, content: '🚫 Bu mesaj silindi', media_url: undefined, media_thumbnail_url: undefined }
+          msg.id === id
+            ? { ...msg, content: '🚫 Bu mesaj silindi', media_url: undefined, media_thumbnail_url: undefined, is_edited: true }
             : msg
         )
       );
@@ -659,14 +644,45 @@ export const ChatPage: React.FC = () => {
       channelRef.current?.send({
         type: 'broadcast',
         event: 'message_deleted',
-        payload: { message_ids: ids },
+        payload: { message_ids: [id] },
+      });
+    } catch (err: any) {
+      console.warn('Single delete error:', err);
+    } finally {
+      setIsDeletingSingle(false);
+      setMessageToDelete(null);
+    }
+  };
+
+  // Create Poll in Chat
+  const handleCreatePoll = async (question: string, options: string[], durationHours: number) => {
+    if (!currentFamily || !user) return;
+    const clientMessageId = `poll-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    try {
+      const res = await api.post<Message>('/messages/poll', {
+        question,
+        options,
+        duration_hours: durationHours,
+        client_message_id: clientMessageId,
       });
 
-      handleCancelSelection();
-    } catch (err) {
-      console.warn('Batch delete error:', err);
-    } finally {
-      setIsDeletingBatch(false);
+      setMessages((prev) => {
+        const next = [...prev, res.data];
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
+      setTimeout(() => scrollToBottom(true), 20);
+      playMessageSent();
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: res.data,
+      });
+    } catch (err: any) {
+      console.warn('Poll creation error:', err);
+      throw err;
     }
   };
 
@@ -709,77 +725,43 @@ export const ChatPage: React.FC = () => {
         onChange={handleFileInputChange}
       />
 
-      {/* STICKY TOP BAR / SELECTION HEADER (Glued to top at all times) */}
+      {/* STICKY TOP BAR (Glued to top at all times) */}
       <div className="sticky top-0 z-40 w-full shadow-xs">
-        {isSelectionMode ? (
-          <div className="bg-family-700 text-white px-4 py-3 flex items-center justify-between shadow-md animate-in slide-in-from-top duration-150">
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleCancelSelection}
-                className="p-1.5 rounded-xl hover:bg-white/20 transition cursor-pointer"
-                title="Vazgeç"
-              >
-                <X className="w-5 h-5" />
-              </button>
-              <span className="font-extrabold text-sm sm:text-base">
-                {selectedMessageIds.size} mesaj seçildi
-              </span>
+        <div className="bg-white/95 backdrop-blur-md border-b border-gray-200/80 px-4 py-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-family-500 to-rose-500 text-white flex items-center justify-center shadow-xs">
+              <MessageCircle className="w-5 h-5" />
             </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleSelectAll}
-                className="text-xs font-bold px-2.5 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 transition cursor-pointer"
-              >
-                Tümünü Seç
-              </button>
-
-              <button
-                type="button"
-                onClick={handleBatchDelete}
-                disabled={isDeletingBatch || selectedMessageIds.size === 0}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 active:scale-95 text-white text-xs font-extrabold shadow-sm transition cursor-pointer disabled:opacity-50"
-              >
-                {isDeletingBatch ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Trash2 className="w-4 h-4" />
-                )}
-                <span>Sil</span>
-              </button>
+            <div>
+              <h2 className="text-sm font-black text-gray-900 leading-tight">
+                {currentFamily?.name || 'Aile Sohbeti'}
+              </h2>
+              <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Canlı Aile Grubu</span>
+              </p>
             </div>
           </div>
-        ) : (
-          <div className="bg-white/95 backdrop-blur-md border-b border-gray-200/80 px-4 py-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-family-500 to-rose-500 text-white flex items-center justify-center shadow-xs">
-                <MessageCircle className="w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="text-sm font-black text-gray-900 leading-tight">
-                  {currentFamily?.name || 'Aile Sohbeti'}
-                </h2>
-                <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Canlı Aile Grubu</span>
-                </p>
-              </div>
-            </div>
 
-            {/* Settings Trigger */}
-            <button
-              type="button"
-              onClick={() => setShowSettingsModal(true)}
-              className="p-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 transition active:scale-95 cursor-pointer shadow-2xs"
-              title="Sohbet Ayarları"
-            >
-              <Sliders className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+          {/* Settings Trigger */}
+          <button
+            type="button"
+            onClick={() => setShowSettingsModal(true)}
+            className="p-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 transition active:scale-95 cursor-pointer shadow-2xs"
+            title="Sohbet Ayarları"
+          >
+            <Sliders className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {/* Delete Notice Toast (15-min limit) */}
+      {deleteNotice && (
+        <div className="fixed top-14 inset-x-4 sm:inset-x-auto sm:right-6 z-50 p-3 bg-amber-600 text-white text-xs font-bold rounded-2xl shadow-xl flex items-center justify-center gap-2 animate-in slide-in-from-top-2">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{deleteNotice}</span>
+        </div>
+      )}
 
       {/* MESSAGES SCROLL CONTAINER */}
       <div
@@ -816,7 +798,7 @@ export const ChatPage: React.FC = () => {
             </div>
             <h3 className="font-black text-gray-800 text-base">Sohbete İlk Mesajı Atın! ❤️</h3>
             <p className="text-xs text-gray-500 mt-1 max-w-xs leading-relaxed">
-              Ailenizle günaydınlaşın, fotoğraflar veya sıcacık bir GIF göndererek neşelendirin.
+              Ailenizle günaydınlaşın, fotoğraflar, anketler veya sıcacık bir GIF göndererek neşelendirin.
             </p>
           </div>
         )}
@@ -833,8 +815,6 @@ export const ChatPage: React.FC = () => {
           const showDateSeparator =
             !prevMsg || !isSameDay(new Date(msg.created_at), new Date(prevMsg.created_at));
 
-          const isSelected = selectedMessageIds.has(msg.id);
-
           return (
             <React.Fragment key={msg.id || msg.client_message_id}>
               {showDateSeparator && <DateSeparator date={msg.created_at} />}
@@ -844,16 +824,11 @@ export const ChatPage: React.FC = () => {
                 isFirstInGroup={isFirstInGroup}
                 isLastInGroup={isLastInGroup}
                 fontSize={fontSize}
-                isSelectionMode={isSelectionMode}
-                isSelected={isSelected}
-                onToggleSelect={handleToggleSelectMessage}
                 onLongPress={handleLongPressMessage}
                 onImageClick={(url) => setSelectedImage(url)}
                 onRetry={() => handleSendMessage(msg.content || '')}
                 onAvatarClick={(senderId, senderName, senderAvatar) => {
-                  if (!isSelectionMode) {
-                    setProfilePopup({ senderId, senderName, senderAvatar });
-                  }
+                  setProfilePopup({ senderId, senderName, senderAvatar });
                 }}
               />
             </React.Fragment>
@@ -879,6 +854,7 @@ export const ChatPage: React.FC = () => {
         onSendGif={handleSendGif}
         onSendAudio={handleSendAudio}
         onCameraClick={handleCameraClick}
+        onOpenPollModal={() => setShowPollModal(true)}
         onTyping={handleTyping}
         onStopTyping={handleStopTyping}
         isUploading={isUploading}
@@ -903,6 +879,62 @@ export const ChatPage: React.FC = () => {
         />
       )}
 
+      {/* Create Poll Modal */}
+      {showPollModal && (
+        <CreatePollModal
+          onClose={() => setShowPollModal(false)}
+          onSubmit={handleCreatePoll}
+        />
+      )}
+
+      {/* Single Message Delete Confirmation Modal */}
+      {messageToDelete && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 w-full max-w-sm shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-gray-900">Mesajı Sil</h3>
+                <p className="text-xs text-gray-500">Bu mesaj herkesten silinsin mi?</p>
+              </div>
+            </div>
+
+            <div className="bg-gray-50 rounded-2xl p-3 border border-gray-200/80 text-xs text-gray-700 italic line-clamp-3">
+              "{messageToDelete.content || (messageToDelete.media_type === 'audio' ? 'Sesli Mesaj' : 'Medya')}"
+            </div>
+
+            <p className="text-[11px] text-gray-500">
+              Mesaj tüm aile üyelerinin ekranında silinecektir.
+            </p>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setMessageToDelete(null)}
+                disabled={isDeletingSingle}
+                className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-2xl text-xs transition cursor-pointer"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteSingleMessage}
+                disabled={isDeletingSingle}
+                className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl text-xs shadow-md shadow-rose-300 transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {isDeletingSingle ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <span>Herkesten Sil</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Member Profile Popup (poke feature) */}
       {profilePopup && (
         <MemberProfilePopup
@@ -911,7 +943,6 @@ export const ChatPage: React.FC = () => {
           senderAvatar={profilePopup.senderAvatar}
           onClose={() => setProfilePopup(null)}
           onPokeSent={(name) => {
-            // Optionally show a toast message
             setProfilePopup(null);
           }}
         />
@@ -919,3 +950,4 @@ export const ChatPage: React.FC = () => {
     </div>
   );
 };
+

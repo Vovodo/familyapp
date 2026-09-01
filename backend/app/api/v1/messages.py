@@ -1,13 +1,15 @@
 import re
+import json
 import httpx
 import asyncio
-from typing import List, Optional
+from datetime import datetime, timezone, timedelta
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from loguru import logger
 from backend.app.db.session import get_db
-from backend.app.models.models import Message, FamilyMember, User, DeviceToken
+from backend.app.models.models import Message, FamilyMember, User, DeviceToken, Poll, PollVote
 from backend.app.schemas.schemas import (
     MessageCreate,
     MessageUpdate,
@@ -19,9 +21,15 @@ from backend.app.services.push_service import push_service
 router = APIRouter()
 
 
-class BatchDeleteRequest(BaseModel):
-    message_ids: List[str]
-    for_everyone: bool = True
+class PollCreateRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=300)
+    options: List[str] = Field(..., min_items=2, max_items=8)
+    duration_hours: int = Field(default=12, ge=1, le=72)
+    client_message_id: Optional[str] = None
+
+
+class PollVoteRequest(BaseModel):
+    option_index: int = Field(..., ge=0, le=10)
 
 
 class LinkPreviewResponse(BaseModel):
@@ -319,7 +327,7 @@ def delete_message(
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Deletes a single message. Users can ONLY delete their OWN messages.
+    Deletes a single message. Users can ONLY delete their OWN messages within 15 minutes of sending.
     """
     msg = (
         db.query(Message)
@@ -335,6 +343,18 @@ def delete_message(
             detail="Yalnızca kendi gönderdiğiniz mesajları silebilirsiniz."
         )
 
+    # 15-minute deletion window rule (WhatsApp style)
+    if msg.created_at and member.role != "admin":
+        msg_time = msg.created_at
+        if msg_time.tzinfo is None:
+            msg_time = msg_time.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - msg_time
+        if age > timedelta(minutes=15):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Mesajlar yalnızca gönderildikten sonraki ilk 15 dakika içinde silinebilir."
+            )
+
     if for_everyone:
         msg.content = "🚫 Bu mesaj silindi"
         msg.media_url = None
@@ -348,6 +368,195 @@ def delete_message(
         return {"status": "success", "message": "Mesaj tamamen silindi."}
 
 
+@router.post("/poll")
+async def create_poll(
+    payload: PollCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Creates a new poll in the family chat with specified duration.
+    """
+    import uuid as _uuid
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=payload.duration_hours)
+    poll_id = str(_uuid.uuid4())
+    message_id = str(_uuid.uuid4())
+
+    options_cleaned = [opt.strip() for opt in payload.options if opt.strip()]
+    if len(options_cleaned) < 2:
+        raise HTTPException(status_code=400, detail="Ankette en az 2 seçenek olmalıdır.")
+
+    # 1. Create chat message
+    msg = Message(
+        id=message_id,
+        client_message_id=payload.client_message_id,
+        family_id=member.family_id,
+        sender_id=current_user.id,
+        content=payload.question.strip(),
+        media_type="poll",
+        media_url=None,
+        is_edited=False
+    )
+    db.add(msg)
+
+    # 2. Create poll record
+    poll = Poll(
+        id=poll_id,
+        message_id=message_id,
+        family_id=member.family_id,
+        creator_id=current_user.id,
+        question=payload.question.strip(),
+        options=json.dumps(options_cleaned, ensure_ascii=False),
+        duration_hours=payload.duration_hours,
+        expires_at=expires_at,
+        is_closed=False
+    )
+    db.add(poll)
+    db.commit()
+    db.refresh(msg)
+    db.refresh(poll)
+
+    poll_data = {
+        "poll_id": poll.id,
+        "question": poll.question,
+        "options": options_cleaned,
+        "duration_hours": poll.duration_hours,
+        "expires_at": poll.expires_at.isoformat(),
+        "is_closed": False,
+        "votes": {},
+        "total_votes": 0,
+        "my_vote": None
+    }
+
+    resp = {
+        "id": msg.id,
+        "family_id": msg.family_id,
+        "sender_id": msg.sender_id,
+        "content": msg.content,
+        "media_type": "poll",
+        "media_url": None,
+        "media_thumbnail_url": None,
+        "is_edited": False,
+        "client_message_id": msg.client_message_id,
+        "created_at": msg.created_at.isoformat(),
+        "sender_name": current_user.full_name,
+        "sender_avatar": current_user.avatar_url,
+        "sender_nickname": member.nickname,
+        "poll": poll_data
+    }
+
+    return resp
+
+
+@router.post("/poll/{poll_id}/vote")
+async def vote_poll(
+    poll_id: str,
+    payload: PollVoteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Casts or updates a user's vote on an active poll.
+    """
+    poll = db.query(Poll).filter(Poll.id == poll_id, Poll.family_id == member.family_id).first()
+    if not poll:
+        raise HTTPException(status_code=404, detail="Anket bulunamadı.")
+
+    now = datetime.now(timezone.utc)
+    exp = poll.expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+
+    if poll.is_closed or now > exp:
+        raise HTTPException(status_code=400, detail="Bu anketin süresi dolmuştur.")
+
+    options_list = json.loads(poll.options)
+    if payload.option_index >= len(options_list):
+        raise HTTPException(status_code=400, detail="Geçersiz seçenek.")
+
+    # Upsert user's vote
+    existing_vote = db.query(PollVote).filter(
+        PollVote.poll_id == poll_id,
+        PollVote.user_id == current_user.id
+    ).first()
+
+    if existing_vote:
+        existing_vote.option_index = payload.option_index
+    else:
+        new_vote = PollVote(
+            poll_id=poll_id,
+            user_id=current_user.id,
+            option_index=payload.option_index
+        )
+        db.add(new_vote)
+
+    db.commit()
+
+    # Calculate tallies
+    all_votes = db.query(PollVote).filter(PollVote.poll_id == poll_id).all()
+    tallies: Dict[int, int] = {i: 0 for i in range(len(options_list))}
+    for v in all_votes:
+        if v.option_index in tallies:
+            tallies[v.option_index] += 1
+
+    return {
+        "status": "success",
+        "poll_id": poll_id,
+        "my_vote": payload.option_index,
+        "total_votes": len(all_votes),
+        "tallies": tallies,
+        "is_closed": False
+    }
+
+
+@router.get("/poll/{poll_id}")
+def get_poll_details(
+    poll_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Returns live tallies and status for a poll.
+    """
+    poll = db.query(Poll).filter(Poll.id == poll_id, Poll.family_id == member.family_id).first()
+    if not poll:
+        raise HTTPException(status_code=404, detail="Anket bulunamadı.")
+
+    now = datetime.now(timezone.utc)
+    exp = poll.expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    is_expired = poll.is_closed or now > exp
+
+    options_list = json.loads(poll.options)
+    all_votes = db.query(PollVote).filter(PollVote.poll_id == poll_id).all()
+    tallies: Dict[int, int] = {i: 0 for i in range(len(options_list))}
+    my_vote = None
+
+    for v in all_votes:
+        if v.option_index in tallies:
+            tallies[v.option_index] += 1
+        if v.user_id == current_user.id:
+            my_vote = v.option_index
+
+    return {
+        "poll_id": poll.id,
+        "message_id": poll.message_id,
+        "question": poll.question,
+        "options": options_list,
+        "duration_hours": poll.duration_hours,
+        "expires_at": poll.expires_at.isoformat(),
+        "is_closed": is_expired,
+        "total_votes": len(all_votes),
+        "tallies": tallies,
+        "my_vote": my_vote
+    }
+
+
 @router.post("/cleanup-old")
 def cleanup_old_messages(
     days: int = Query(14, ge=1, le=365, description="Kaç günden eski mesajların temizleneceği"),
@@ -358,7 +567,6 @@ def cleanup_old_messages(
     Purges text, audio notes, and GIF messages older than specified days (default: 14 days / 2 weeks).
     Preserves all photos and shared family media intact.
     """
-    from datetime import datetime, timezone, timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     old_messages = (
@@ -382,3 +590,4 @@ def cleanup_old_messages(
         "deleted_count": deleted_count,
         "message": f"{days} günden eski {deleted_count} adet sohbet ve ses kaydı temizlendi. Fotoğraflarınız korundu."
     }
+

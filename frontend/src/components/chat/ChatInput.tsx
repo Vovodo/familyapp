@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Camera, Image as ImageIcon, Smile, Loader2, Plus, Mic, Trash2, StopCircle } from 'lucide-react';
+import { Send, Camera, Image as ImageIcon, Smile, Loader2, Plus, Mic, Trash2, StopCircle, BarChart2 } from 'lucide-react';
 import { EmojiGifPicker } from './EmojiGifPicker';
 
 interface ChatInputProps {
@@ -7,6 +7,7 @@ interface ChatInputProps {
   onSendGif?: (gifUrl: string) => void;
   onSendAudio?: (audioBlob: Blob, durationSecs: number) => void;
   onCameraClick: (source: 'camera' | 'photos') => void;
+  onOpenPollModal?: () => void;
   onTyping: () => void;
   onStopTyping: () => void;
   isUploading?: boolean;
@@ -19,6 +20,7 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
     onSendGif,
     onSendAudio,
     onCameraClick,
+    onOpenPollModal,
     onTyping,
     onStopTyping,
     isUploading = false,
@@ -274,6 +276,18 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
             >
               <ImageIcon className="w-4 h-4" />
               <span>Galeri</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowAttachMenu(false);
+                onOpenPollModal?.();
+              }}
+              className="flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition active:scale-95 cursor-pointer"
+            >
+              <BarChart2 className="w-4 h-4" />
+              <span>Anket</span>
             </button>
           </div>
         )}

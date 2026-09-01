@@ -6,6 +6,8 @@ from backend.app.api.v1.media import router as media_router
 from backend.app.api.v1.shopping import router as shopping_router
 from backend.app.api.v1.notes import router as notes_router
 from backend.app.api.v1.reminders import router as reminders_router
+from backend.app.api.v1.tasks import router as tasks_router
+from backend.app.api.v1.budget import router as budget_router
 from backend.app.api.v1.health import router as health_router
 from backend.app.api.v1.admin import router as admin_router
 from backend.app.api.v1.downloads import router as downloads_router
@@ -21,6 +23,8 @@ api_router.include_router(families_router, prefix="/families", tags=["Aile"])
 api_router.include_router(messages_router, prefix="/messages", tags=["Mesajlar"])
 api_router.include_router(media_router, prefix="/media", tags=["Medya ve Fotoğraflar"])
 api_router.include_router(shopping_router, prefix="/shopping", tags=["Alışveriş"])
+api_router.include_router(tasks_router, prefix="/tasks", tags=["Yapılacaklar"])
+api_router.include_router(budget_router, prefix="/budget", tags=["Bütçe & Harcamalar"])
 api_router.include_router(notes_router, prefix="/notes", tags=["Notlar"])
 api_router.include_router(reminders_router, prefix="/reminders", tags=["Hatırlatıcılar"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["Bildirimler"])

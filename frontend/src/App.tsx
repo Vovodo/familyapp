@@ -13,6 +13,8 @@ import { GalleryPage } from './pages/gallery/GalleryPage';
 import { ShoppingPage } from './pages/shopping/ShoppingPage';
 import { NotesPage } from './pages/notes/NotesPage';
 import { RemindersPage } from './pages/reminders/RemindersPage';
+import { TasksPage } from './pages/tasks/TasksPage';
+import { BudgetPage } from './pages/budget/BudgetPage';
 import { FamilySettingsPage } from './pages/family/FamilySettingsPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { liveUpdateService } from './services/liveUpdate';
@@ -121,6 +123,8 @@ export const App: React.FC = () => {
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/gallery" element={<GalleryPage />} />
                 <Route path="/shopping" element={<ShoppingPage />} />
+                <Route path="/tasks" element={<TasksPage />} />
+                <Route path="/budget" element={<BudgetPage />} />
                 <Route path="/notes" element={<NotesPage />} />
                 <Route path="/reminders" element={<RemindersPage />} />
                 <Route path="/family" element={<FamilySettingsPage />} />

@@ -174,6 +174,142 @@ export const playHeartSound = (): void => {
   }
 };
 
+/**
+ * ☕ Çay Koydum Bildirim Sesi
+ * İnce belli cam bardağa çay kaşığının tıkır tıkır vurup karıştırma şıngırtısı
+ */
+export const playTeaSound = (): void => {
+  try {
+    const ctx = getCtx();
+    if (!ctx) return;
+
+    // Series of 5 rapid metallic clinks imitating stirring spoon
+    const clinkFreqs = [2800, 3200, 2600, 3100, 2900, 3400];
+    clinkFreqs.forEach((freq, i) => {
+      const startTime = ctx.currentTime + i * 0.07;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(0.16, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.06);
+
+      osc.start(startTime);
+      osc.stop(startTime + 0.065);
+    });
+  } catch (err) {
+    // Silently fail
+  }
+};
+
+/**
+ * 🚗 Eve Geliyorum Bildirim Sesi
+ * Sevimli araba çift kornası: "Düt Düt!"
+ */
+export const playCarHornSound = (): void => {
+  try {
+    const ctx = getCtx();
+    if (!ctx) return;
+
+    const playBeep = (startTime: number, duration: number) => {
+      // Classic dual frequency car horn chords (F4 and A4)
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc1.type = 'sawtooth';
+      osc2.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(420, startTime);
+      osc2.frequency.setValueAtTime(510, startTime);
+
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.18, startTime + 0.02);
+      gain.gain.setValueAtTime(0.18, startTime + duration - 0.02);
+      gain.gain.linearRampToValueAtTime(0, startTime + duration);
+
+      osc1.start(startTime);
+      osc2.start(startTime);
+      osc1.stop(startTime + duration + 0.01);
+      osc2.stop(startTime + duration + 0.01);
+    };
+
+    // Beep 1
+    playBeep(ctx.currentTime, 0.12);
+    // Beep 2 (short pause then second beep)
+    playBeep(ctx.currentTime + 0.17, 0.14);
+  } catch (err) {
+    // Silently fail
+  }
+};
+
+/**
+ * 🍲 Yemek Hazır / Sofra Bildirim Sesi
+ * Sıcak ve neşeli yemek zili / çan tınısı
+ */
+export const playMealSound = (): void => {
+  try {
+    const ctx = getCtx();
+    if (!ctx) return;
+
+    const freqs = [659.25, 880, 1318.5]; // E5, A5, E6
+    freqs.forEach((freq, idx) => {
+      const startTime = ctx.currentTime + idx * 0.1;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(0.2, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.45);
+
+      osc.start(startTime);
+      osc.stop(startTime + 0.46);
+    });
+  } catch (err) {
+    // Silently fail
+  }
+};
+
+/**
+ * Görev Tamamlandı Sesi
+ * Yumuşak, neşeli "tık" ve onay tınısı
+ */
+export const playTaskCompleteSound = (): void => {
+  try {
+    const ctx = getCtx();
+    if (!ctx) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(523, ctx.currentTime); // C5
+    osc.frequency.exponentialRampToValueAtTime(784, ctx.currentTime + 0.15); // G5
+
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.21);
+  } catch (err) {
+    // Silently fail
+  }
+};
+
 // Unlock audio context on first user interaction
 if (typeof document !== 'undefined') {
   const unlock = () => {

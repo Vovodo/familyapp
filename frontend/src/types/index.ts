@@ -28,6 +28,18 @@ export interface Family {
   members: FamilyMember[];
 }
 
+export interface PollData {
+  poll_id: string;
+  question: string;
+  options: string[];
+  duration_hours: number;
+  expires_at: string;
+  is_closed: boolean;
+  tallies?: Record<string | number, number>;
+  total_votes?: number;
+  my_vote?: number | null;
+}
+
 export interface Message {
   id: string;
   family_id: string;
@@ -43,12 +55,66 @@ export interface Message {
   sender_nickname?: string;
   client_message_id?: string;
   status?: 'sending' | 'sent' | 'failed';
+  poll?: PollData;
   retryPayload?: {
     content?: string;
     media_url?: string;
     media_thumbnail_url?: string;
     media_type?: string;
   };
+}
+
+export interface TaskItem {
+  id: string;
+  family_id: string;
+  created_by: string;
+  assigned_to?: string | null;
+  title: string;
+  description?: string | null;
+  priority: 'normal' | 'urgent';
+  is_completed: boolean;
+  completed_at?: string | null;
+  completed_by?: string | null;
+  due_date?: string | null;
+  created_at: string;
+  updated_at: string;
+  creator_name?: string | null;
+  assignee_name?: string | null;
+  completer_name?: string | null;
+}
+
+export interface BudgetItem {
+  id: string;
+  family_id: string;
+  created_by: string;
+  type: 'expense' | 'income';
+  amount: number;
+  category: string;
+  title: string;
+  description?: string | null;
+  transaction_date: string;
+  created_at: string;
+  creator_name?: string | null;
+}
+
+export interface CategoryBreakdown {
+  category: string;
+  amount: number;
+  percentage: number;
+  count: number;
+}
+
+export interface BudgetSummary {
+  month: number;
+  year: number;
+  month_name: string;
+  total_income: number;
+  total_expense: number;
+  net_balance: number;
+  transaction_count: number;
+  categories: CategoryBreakdown[];
+  prev_month_expense?: number | null;
+  expense_change_percent?: number | null;
 }
 
 export interface MediaItem {

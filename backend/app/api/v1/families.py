@@ -455,3 +455,123 @@ async def send_poke(
         "recipients_count": len(other_members),
         "push_sent_count": push_sent
     }
+
+
+class QuickActionRequest(BaseModel):
+    action_type: str = Field(..., pattern="^(heart|tea|coming_home|meal)$")
+    custom_message: Optional[str] = None
+
+
+@router.post("/quick-action")
+async def send_quick_action(
+    payload: QuickActionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Sends a rich family status action (tea, coming_home, meal, heart) with custom sounds and visual styles.
+    Rate limited with 2.5s cooldown per user.
+    """
+    now = time.time()
+    user_key = f"quick_{current_user.id}"
+    with _heart_lock:
+        last_time = _user_heart_timestamps.get(user_key, 0)
+        if now - last_time < 2.5:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Lütfen birkaç saniye bekleyin."
+            )
+        _user_heart_timestamps[user_key] = now
+
+    import uuid as _uuid
+    action_id = str(_uuid.uuid4())
+    family_id = str(current_member.family_id)
+    sender_id = str(current_user.id)
+    sender_name = current_member.nickname or current_user.full_name.split()[0]
+
+    action_configs = {
+        "tea": {
+            "title": "☕ Çay Koydum!",
+            "body": f"{sender_name} çay koydu, sizi bekliyor! ☕",
+            "sound": "tea"
+        },
+        "coming_home": {
+            "title": "🚗 Eve Geliyorum!",
+            "body": f"{sender_name} eve geliyor, yola çıktı! 🚗",
+            "sound": "car_horn"
+        },
+        "meal": {
+            "title": "🍲 Yemek Hazır!",
+            "body": f"{sender_name} sofrayı kurdu, yemek hazır! 🍲",
+            "sound": "meal"
+        },
+        "heart": {
+            "title": "❤️ Aileden Bir Kalp",
+            "body": f"{sender_name} size sevgi dolu bir kalp gönderdi! ❤️",
+            "sound": "heart"
+        }
+    }
+
+    cfg = action_configs.get(payload.action_type, action_configs["heart"])
+    title = cfg["title"]
+    body = payload.custom_message if payload.custom_message else cfg["body"]
+
+    # Get other family members
+    other_members = db.query(FamilyMember).filter(
+        FamilyMember.family_id == current_member.family_id,
+        FamilyMember.user_id != current_user.id
+    ).all()
+
+    recipient_ids = [str(m.user_id) for m in other_members]
+    push_sent = 0
+
+    if recipient_ids:
+        device_tokens = db.query(DeviceToken).filter(
+            DeviceToken.user_id.in_(recipient_ids),
+            DeviceToken.is_active == True
+        ).all()
+
+        if device_tokens:
+            push_sent = await push_service.send_status_action_push(
+                db=db,
+                device_tokens=device_tokens,
+                action_type=payload.action_type,
+                title=title,
+                body=body,
+                sender_name=sender_name,
+                sender_id=sender_id,
+                family_id=family_id,
+                action_id=action_id,
+                sender_avatar=current_user.avatar_url
+            )
+
+    # SSE Event
+    try:
+        from backend.app.api.v1.events import publish_to_family
+        sse_event = {
+            "type": payload.action_type,
+            "action_id": action_id,
+            "sender_id": sender_id,
+            "sender_name": sender_name,
+            "sender_avatar": current_user.avatar_url,
+            "family_id": family_id,
+            "title": title,
+            "message": body,
+            "sound": cfg["sound"]
+        }
+        asyncio.create_task(publish_to_family(family_id, sse_event))
+    except Exception as e:
+        logger.warning(f"SSE_ACTION_DISPATCH_ERROR: {e}")
+
+    return {
+        "status": "success",
+        "action_id": action_id,
+        "action_type": payload.action_type,
+        "sender_name": sender_name,
+        "title": title,
+        "message": body,
+        "recipients_count": len(recipient_ids),
+        "push_sent_count": push_sent
+    }
+
