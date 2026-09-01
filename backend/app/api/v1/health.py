@@ -8,9 +8,22 @@ router = APIRouter()
 
 
 @router.get("/")
-def health_check(db: Session = Depends(get_db)):
+@router.get("/live")
+def health_check():
     """
-    Returns API health and database connection status.
+    Returns API health status immediately for Docker/Coolify health checks.
+    """
+    return {
+        "status": "online",
+        "app_name": settings.PROJECT_NAME,
+        "environment": settings.ENVIRONMENT,
+    }
+
+
+@router.get("/ready")
+def readiness_check(db: Session = Depends(get_db)):
+    """
+    Checks database connection readiness.
     """
     db_status = "healthy"
     try:

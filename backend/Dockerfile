@@ -34,7 +34,7 @@ RUN mkdir -p /app/uploads /app/static && \
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
   CMD curl -f http://localhost:8000/api/v1/health/ || exit 1
 
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
