@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
 import { api, storage } from '../services/api';
+import { cacheService } from '../services/cacheService';
 import { notificationService } from '../services/notificationService';
 
 export interface VerifyAndRegisterPayload {
@@ -72,6 +73,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const verifyAndRegister = async (payload: VerifyAndRegisterPayload) => {
     setIsLoading(true);
     try {
+      cacheService.clear();
+      await storage.remove('active_family_id');
       const response = await api.post<{ access_token: string; user: User }>('/auth/verify-and-register', {
         ...payload,
         email: payload.email.trim().toLowerCase(),
@@ -98,6 +101,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, pass: string) => {
     setIsLoading(true);
     try {
+      cacheService.clear();
+      await storage.remove('active_family_id');
       const response = await api.post<{ access_token: string; user: User }>('/auth/login', {
         email_or_phone: email.trim().toLowerCase(),
         password: pass,
@@ -121,6 +126,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ) => {
     setIsLoading(true);
     try {
+      cacheService.clear();
+      await storage.remove('active_family_id');
       let deviceId = await storage.get('ailem_device_id');
       if (!deviceId) {
         deviceId = `dev-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -159,6 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await notificationService.unregisterToken().catch(() => {});
       }
     } finally {
+      cacheService.clear();
       await storage.remove('auth_token');
       await storage.remove('active_family_id');
       await storage.remove('device_registered');

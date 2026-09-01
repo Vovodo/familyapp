@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { permissionService, PermissionDetail } from '../../services/permissionService';
 import { App } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 
 interface PermissionAssistantModalProps {
   forceOpen?: boolean;
@@ -32,8 +33,13 @@ export const PermissionAssistantModal: React.FC<PermissionAssistantModalProps> =
     const list = await permissionService.getDetailedList();
     setDetails(list);
 
+    const isNative = Capacitor.isNativePlatform();
+    const isDismissed = sessionStorage.getItem('ailem_perm_modal_dismissed') === 'true';
     const hasMissingCritical = list.some((item) => item.critical && !item.granted);
-    if (forceOpen || hasMissingCritical) {
+
+    if (forceOpen) {
+      setIsOpen(true);
+    } else if (isNative && hasMissingCritical && !isDismissed) {
       setIsOpen(true);
     }
   };
@@ -109,6 +115,7 @@ export const PermissionAssistantModal: React.FC<PermissionAssistantModalProps> =
         {/* Close Button */}
         <button
           onClick={() => {
+            sessionStorage.setItem('ailem_perm_modal_dismissed', 'true');
             setIsOpen(false);
             onClose?.();
           }}

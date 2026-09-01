@@ -173,8 +173,23 @@ export const HomePage: React.FC = () => {
     }
   };
 
+  // Loading state while family information is being fetched
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[70vh] space-y-3">
+        <div className="w-16 h-16 rounded-3xl bg-family-50 flex items-center justify-center text-family-600 shadow-inner">
+          <Heart className="w-8 h-8 fill-family-500 text-family-500 animate-pulse" />
+        </div>
+        <div className="flex items-center gap-2 text-xs font-bold text-gray-500">
+          <Loader2 className="w-4 h-4 animate-spin text-family-600" />
+          <span>Aile bilgileri yükleniyor...</span>
+        </div>
+      </div>
+    );
+  }
+
   // If user has NO family group yet, display Join / Create onboarding
-  if (!isLoading && !currentFamily) {
+  if (!currentFamily) {
     return (
       <div className="p-4 flex flex-col justify-center min-h-[80vh] space-y-6 max-w-md mx-auto">
         <div className="text-center space-y-3">
@@ -182,7 +197,7 @@ export const HomePage: React.FC = () => {
             <Heart className="w-10 h-10 fill-family-500 text-family-500 animate-pulse" />
           </div>
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">
-            Hoş Geldiniz, {user?.full_name}!
+            Hoş Geldiniz, {user?.full_name || 'Aile Üyemiz'}!
           </h1>
           <p className="text-xs text-gray-500 max-w-xs mx-auto leading-relaxed">
             Ailem uygulamasına başlamak için bir aile grubu oluşturun veya ailenizin davet koduyla katılın.
@@ -299,7 +314,7 @@ export const HomePage: React.FC = () => {
                   type="text"
                   value={nickname}
                   onChange={(e) => setNickname(e.target.value)}
-                  placeholder="Hitabınız (Örn: Anne, Baba, Ege)"
+                  placeholder="Hitabınız (Örn: Anne, Baba, Kardeş)"
                   className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-2xl text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-family-500"
                 />
                 <div className="flex gap-2 pt-2">

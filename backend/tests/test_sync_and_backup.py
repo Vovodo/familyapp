@@ -235,8 +235,8 @@ def test_api_sync_endpoints():
         db.add(member)
         db.commit()
 
-        token = create_access_token(subject=user.id)
-        headers = {"Authorization": f"Bearer {token}"}
+        token = create_access_token(subject=user.id, claims={"email": user.email, "name": user.full_name, "family_id": family.id})
+        headers = {"Authorization": f"Bearer {token}", "x-family-id": family.id}
 
         # 1. GET /api/v1/sync/status
         resp = client.get("/api/v1/sync/status", headers=headers)

@@ -17,7 +17,7 @@ export const Header: React.FC = () => {
     return 'İyi geceler';
   };
 
-  const displayName = activeMember?.nickname || user?.full_name?.split(' ')[0] || 'Ailem';
+  const displayName = activeMember?.nickname || user?.full_name?.split(' ')[0] || 'Hoş Geldiniz';
   const isAdmin = user?.role === 'admin';
 
   return (
@@ -33,7 +33,7 @@ export const Header: React.FC = () => {
               <span>{displayName} ❤️</span>
             </div>
             <h1 className="text-base font-bold text-gray-900 truncate max-w-[170px]">
-              {currentFamily ? currentFamily.name : 'Ailem'}
+              {currentFamily ? currentFamily.name : 'Grup Kur / Katıl'}
             </h1>
           </div>
         </div>

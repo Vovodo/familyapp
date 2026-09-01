@@ -221,6 +221,47 @@ def verify_and_register(
     )
 
 
+@router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
+def register(
+    user_in: UserCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Registers a new user directly with email and password.
+    """
+    clean_email = user_in.email.strip().lower()
+    existing = db.query(User).filter(User.email == clean_email).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bu e-posta adresi zaten kayıtlı."
+        )
+
+    user = User(
+        id=str(uuid.uuid4()),
+        full_name=user_in.full_name.strip(),
+        email=clean_email,
+        phone=user_in.phone.strip() if user_in.phone else None,
+        hashed_password=get_password_hash(user_in.password),
+        role=getattr(user_in, "role", "member") or "member"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = create_access_token(
+        user.id,
+        claims={"email": user.email, "name": user.full_name},
+        expires_delta=timedelta(days=365)
+    )
+
+    return Token(
+        access_token=token,
+        token_type="bearer",
+        user=UserResponse.model_validate(user)
+    )
+
+
 @router.post("/login", response_model=Token)
 def login(login_data: UserLogin, db: Session = Depends(get_db)):
     """

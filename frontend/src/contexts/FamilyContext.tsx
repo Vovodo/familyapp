@@ -57,18 +57,22 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       setIsLoading(true);
       const res = await api.get<Family[]>('/families/my-families');
-      setMyFamilies(res.data);
+      const familiesList = Array.isArray(res.data) ? res.data : [];
+      setMyFamilies(familiesList);
 
-      if (res.data.length > 0) {
+      if (familiesList.length > 0) {
         const savedFamilyId = await storage.get('active_family_id');
-        const active = res.data.find((f) => f.id === savedFamilyId) || res.data[0];
+        const active = familiesList.find((f) => f.id === savedFamilyId) || familiesList[0];
         setCurrentFamily(active);
         await storage.set('active_family_id', active.id);
       } else {
         setCurrentFamily(null);
+        await storage.remove('active_family_id');
       }
     } catch (err) {
       console.error('Failed to load families:', err);
+      setCurrentFamily(null);
+      setMyFamilies([]);
     } finally {
       setIsLoading(false);
     }

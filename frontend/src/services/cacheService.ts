@@ -39,6 +39,18 @@ class FastCacheService {
     } catch {}
   }
 
+  public clear(): void {
+    this.memoryCache.clear();
+    try {
+      const keys = Object.keys(sessionStorage);
+      for (const k of keys) {
+        if (k.startsWith('ailem_cache_')) {
+          sessionStorage.removeItem(k);
+        }
+      }
+    } catch {}
+  }
+
   public clearFamily(familyId: string): void {
     for (const k of Array.from(this.memoryCache.keys())) {
       if (k.includes(familyId)) {

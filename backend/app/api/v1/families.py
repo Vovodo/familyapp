@@ -133,9 +133,6 @@ def get_my_families(
     memberships = db.query(FamilyMember).filter(FamilyMember.user_id == current_user.id).all()
     family_ids = [m.family_id for m in memberships]
 
-    if not family_ids and current_user.role == "admin":
-        return db.query(Family).all()
-
     if not family_ids:
         return []
 
