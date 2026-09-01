@@ -58,6 +58,10 @@ export const NotesPage: React.FC = () => {
   const [editIsPrivate, setEditIsPrivate] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
+  // Delete Confirmation Modal State
+  const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
+  const [isDeletingNote, setIsDeletingNote] = useState(false);
+
   // 1. Initial 0ms Load + Quiet Background Sync with Supabase Cloud
   useEffect(() => {
     if (!currentFamily) return;
@@ -242,10 +246,16 @@ export const NotesPage: React.FC = () => {
     }
   };
 
-  // 6. Delete Note (Local-First + Quiet Supabase Delete)
-  const handleDeleteNote = async (noteId: string, e?: React.MouseEvent) => {
+  // 6. Delete Note — shows confirmation modal
+  const requestDeleteNote = (noteId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!currentFamily) return;
+    setNoteToDelete(noteId);
+  };
+
+  const confirmDeleteNote = async () => {
+    if (!noteToDelete || !currentFamily) return;
+    setIsDeletingNote(true);
+    const noteId = noteToDelete;
 
     if (editingNote?.id === noteId) {
       setEditingNote(null);
@@ -256,6 +266,9 @@ export const NotesPage: React.FC = () => {
       localNotesStorage.saveNotes(currentFamily.id, next);
       return next;
     });
+
+    setNoteToDelete(null);
+    setIsDeletingNote(false);
 
     try {
       await api.delete(`/notes/${noteId}`);
@@ -562,25 +575,61 @@ export const NotesPage: React.FC = () => {
                 </button>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2">
+              {/* Action Buttons — delete is now intentionally far from close */}
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-100 mt-1">
                 <button
                   type="button"
-                  onClick={(e) => handleDeleteNote(editingNote.id, e)}
-                  className="p-2 text-gray-400 hover:text-red-600 rounded-xl transition cursor-pointer"
+                  onClick={(e) => requestDeleteNote(editingNote.id, e)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer text-xs font-bold"
                   title="Notu Sil"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Sil</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => handleUpdateNote()}
-                  className="px-4 py-2 bg-gray-900 hover:bg-black active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+                  className="px-5 py-2 bg-gray-900 hover:bg-black active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
                 >
-                  Kapat
+                  Kaydet & Kapat
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Confirmation Modal ── */}
+      {noteToDelete && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center">
+              <h3 className="text-base font-black text-gray-900">Notu Sil</h3>
+              <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                Bu notu kalıcı olarak silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setNoteToDelete(null)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-xs transition cursor-pointer"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingNote}
+                onClick={confirmDeleteNote}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Evet, Sil</span>
+              </button>
             </div>
           </div>
         </div>

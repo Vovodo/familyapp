@@ -10,7 +10,25 @@ interface AudioMessagePlayerProps {
 let activeAudio: HTMLAudioElement | null = null;
 let activeStopCallback: (() => void) | null = null;
 
+const resolveAudioUrl = (url: string): string => {
+  if (!url) return '';
+  if (
+    url.startsWith('blob:') ||
+    url.startsWith('http://') ||
+    url.startsWith('https://') ||
+    url.startsWith('data:')
+  ) {
+    return url;
+  }
+  const apiBase = (import.meta.env.VITE_API_URL || 'https://familyapi.rfqcollector.com/api/v1').replace(
+    /\/api\/v1\/?$/,
+    ''
+  );
+  return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
+};
+
 export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl, isMe }) => {
+  const resolvedUrl = resolveAudioUrl(audioUrl);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -121,6 +139,17 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
   };
 
   useEffect(() => {
+    // When the audio URL changes (e.g., blob -> real URL after upload), reset the player
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    audio.load(); // Force reload with new src
+  }, [resolvedUrl]);
+
+  useEffect(() => {
     return () => {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -144,13 +173,17 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
       {/* Hidden Native Audio Element */}
       <audio
         ref={audioRef}
-        src={audioUrl}
-        preload="metadata"
+        src={resolvedUrl}
+        preload="auto"
+        crossOrigin="anonymous"
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
         onPause={() => setIsPlaying(false)}
         onPlay={() => setIsPlaying(true)}
+        onError={(e) => {
+          console.warn('[AudioPlayer] Load error:', (e.target as HTMLAudioElement).error?.message, 'url:', resolvedUrl);
+        }}
       />
 
       {/* Play / Pause Action Button */}

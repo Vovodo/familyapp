@@ -15,6 +15,7 @@ except ImportError:
 HEART_CHANNEL_ID = "family_heart_channel"
 GENERAL_CHANNEL_ID = "family_general_channel"
 REMINDERS_CHANNEL_ID = "family_reminders_channel"
+POKE_CHANNEL_ID = "family_poke_channel"
 
 class PushNotificationService:
     def __init__(self):
@@ -101,6 +102,7 @@ class PushNotificationService:
                 sound="default",
                 priority="max",
                 visibility="public",
+                color="#E11D48",
                 default_vibrate_timings=False,
                 vibrate_timings_millis=vibrate_pattern,
                 tag=f"heart_{event_id}",
@@ -203,6 +205,7 @@ class PushNotificationService:
                 sound="default",
                 priority="high",
                 visibility="public",
+                color="#2563EB",
                 image=valid_avatar,
                 tag=f"chat_{family_id}"
             ),
@@ -293,6 +296,7 @@ class PushNotificationService:
                 sound="default",
                 priority="max",
                 visibility="public",
+                color="#F59E0B",
                 tag=f"reminder_{reminder_id}"
             ),
             data={
@@ -327,6 +331,101 @@ class PushNotificationService:
             return response.success_count
         except Exception as e:
             logger.error(f"FCM send_reminder_push failed: {e}")
+            return 0
+
+    async def send_poke_push(
+        self,
+        db: Session,
+        device_tokens: List[DeviceToken],
+        sender_name: str,
+        sender_id: str,
+        family_id: str,
+        poke_id: str,
+        sender_avatar: Optional[str] = None
+    ) -> int:
+        """
+        Sends a visually-distinct 'poke' push notification.
+        Uses orange color + rapid vibration pattern to stand out from chat messages.
+        """
+        if not device_tokens:
+            return 0
+
+        tokens = [dt.token for dt in device_tokens if dt.token]
+        if not tokens:
+            return 0
+
+        if not self.is_initialized:
+            self._initialize_firebase()
+        if not self.is_initialized:
+            return len(tokens)
+
+        title = "👉 Dürtme!"
+        body = f"{sender_name} sizi dürtüyor!"
+        valid_avatar = sender_avatar if sender_avatar and sender_avatar.startswith("http") else None
+
+        # Rapid triple vibration for poke — distinctly different from heart's long vibration
+        poke_vibrate = [0, 150, 80, 150, 80, 150]
+
+        android_config = messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                title=title,
+                body=body,
+                channel_id=POKE_CHANNEL_ID,
+                sound="default",
+                priority="high",
+                visibility="public",
+                color="#FF6B2B",   # Orange — visually distinct from heart (red) and chat (blue)
+                image=valid_avatar,
+                default_vibrate_timings=False,
+                vibrate_timings_millis=poke_vibrate,
+                tag=f"poke_{family_id}",  # Each family has one grouped poke notification
+                click_action="OPEN_CHAT"
+            ),
+            data={
+                "type": "poke",
+                "poke_id": poke_id,
+                "sender_name": sender_name,
+                "sender_id": sender_id,
+                "sender_avatar": valid_avatar or "",
+                "family_id": family_id,
+                "message": body
+            }
+        )
+
+        message = messaging.MulticastMessage(
+            tokens=tokens,
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+                image=valid_avatar
+            ),
+            data={
+                "type": "poke",
+                "poke_id": poke_id,
+                "sender_name": sender_name,
+                "sender_id": sender_id,
+                "sender_avatar": valid_avatar or "",
+                "family_id": family_id,
+                "message": body
+            },
+            android=android_config
+        )
+
+        try:
+            response = messaging.send_each_for_multicast(message)
+            logger.info(f"FCM Poke Multicast: {response.success_count} success, {response.failure_count} failure")
+            if response.failure_count > 0:
+                failed_indices = [idx for idx, resp in enumerate(response.responses) if not resp.success]
+                failed_tokens = [tokens[idx] for idx in failed_indices]
+                if failed_tokens:
+                    db.query(DeviceToken).filter(DeviceToken.token.in_(failed_tokens)).update(
+                        {"is_active": False}, synchronize_session=False
+                    )
+                    db.commit()
+            return response.success_count
+        except Exception as e:
+            logger.error(f"FCM send_poke_push failed: {e}")
             return 0
 
 push_service = PushNotificationService()

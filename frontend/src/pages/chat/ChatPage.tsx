@@ -15,6 +15,8 @@ import { ScrollToBottomButton } from '../../components/chat/ScrollToBottomButton
 import { TypingIndicator, TypingUser } from '../../components/chat/TypingIndicator';
 import { PinchZoomViewer } from '../../components/common/PinchZoomViewer';
 import { ChatSettingsModal, FontSizeOption, WallpaperOption, WALLPAPERS } from '../../components/chat/ChatSettingsModal';
+import { playMessageSent, playMessageReceived } from '../../services/soundService';
+import { MemberProfilePopup } from '../../components/chat/MemberProfilePopup';
 
 export const ChatPage: React.FC = () => {
   const { user } = useAuth();
@@ -35,6 +37,13 @@ export const ChatPage: React.FC = () => {
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
+
+  // Member Profile Popup (for poke feature)
+  const [profilePopup, setProfilePopup] = useState<{
+    senderId: string;
+    senderName: string;
+    senderAvatar?: string | null;
+  } | null>(null);
 
   // Settings State (Persisted in localStorage)
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -245,6 +254,9 @@ export const ChatPage: React.FC = () => {
           return merged;
         });
 
+        // Play receive sound for messages from others
+        playMessageReceived();
+
         if (isNearBottomRef.current) {
           setTimeout(() => scrollToBottom(true), 30);
         } else {
@@ -326,6 +338,7 @@ export const ChatPage: React.FC = () => {
       return next;
     });
     setTimeout(() => scrollToBottom(true), 20);
+    playMessageSent();
 
     try {
       const res = await api.post<Message>('/messages/', {
@@ -514,6 +527,7 @@ export const ChatPage: React.FC = () => {
       return next;
     });
     setTimeout(() => scrollToBottom(true), 20);
+    playMessageSent();
 
     try {
       const formData = new FormData();
@@ -836,6 +850,11 @@ export const ChatPage: React.FC = () => {
                 onLongPress={handleLongPressMessage}
                 onImageClick={(url) => setSelectedImage(url)}
                 onRetry={() => handleSendMessage(msg.content || '')}
+                onAvatarClick={(senderId, senderName, senderAvatar) => {
+                  if (!isSelectionMode) {
+                    setProfilePopup({ senderId, senderName, senderAvatar });
+                  }
+                }}
               />
             </React.Fragment>
           );
@@ -881,6 +900,20 @@ export const ChatPage: React.FC = () => {
           wallpaper={wallpaper}
           onChangeWallpaper={handleChangeWallpaper}
           onClose={() => setShowSettingsModal(false)}
+        />
+      )}
+
+      {/* Member Profile Popup (poke feature) */}
+      {profilePopup && (
+        <MemberProfilePopup
+          senderId={profilePopup.senderId}
+          senderName={profilePopup.senderName}
+          senderAvatar={profilePopup.senderAvatar}
+          onClose={() => setProfilePopup(null)}
+          onPokeSent={(name) => {
+            // Optionally show a toast message
+            setProfilePopup(null);
+          }}
         />
       )}
     </div>

@@ -20,6 +20,7 @@ interface MessageBubbleProps {
   onDelete?: (id: string) => void;
   onRetry?: (message: Message) => void;
   onImageClick?: (url: string) => void;
+  onAvatarClick?: (senderId: string, senderName: string, senderAvatar?: string | null) => void;
 }
 
 // Extracts first http/https link from content
@@ -43,6 +44,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     onDelete,
     onRetry,
     onImageClick,
+    onAvatarClick,
   }) => {
     const [imageLoaded, setImageLoaded] = useState(false);
     const longPressTimerRef = useRef<any>(null);
@@ -173,11 +175,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                 <img
                   src={message.sender_avatar}
                   alt={senderDisplayName}
-                  className="w-7 h-7 rounded-full object-cover shadow-2xs"
+                  className="w-7 h-7 rounded-full object-cover shadow-2xs cursor-pointer active:scale-90 transition"
                   loading="lazy"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAvatarClick?.(message.sender_id, senderDisplayName, message.sender_avatar);
+                  }}
                 />
               ) : (
-                <div className="w-7 h-7 rounded-full bg-family-100 text-family-700 flex items-center justify-center font-bold text-xs shadow-2xs">
+                <div
+                  className="w-7 h-7 rounded-full bg-family-100 text-family-700 flex items-center justify-center font-bold text-xs shadow-2xs cursor-pointer active:scale-90 transition"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAvatarClick?.(message.sender_id, senderDisplayName, null);
+                  }}
+                >
                   {senderDisplayName[0] || 'A'}
                 </div>
               )

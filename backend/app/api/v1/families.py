@@ -384,3 +384,74 @@ async def send_family_heart(
         push_sent_count=push_sent_count,
         created_at=now_dt
     )
+
+
+@router.post("/poke")
+async def send_poke(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_member: FamilyMember = Depends(get_current_family_member)
+):
+    """
+    Sends a 'poke' notification to all other family members.
+    Triggers a visually distinct push notification with rapid vibration pattern.
+    """
+    import uuid as _uuid
+    poke_id = str(_uuid.uuid4())
+    family_id = str(current_member.family_id)
+    sender_id = str(current_user.id)
+    sender_display_name = current_member.nickname or current_user.full_name.split()[0]
+
+    # Get all other family members' user IDs
+    other_members = db.query(FamilyMember).filter(
+        FamilyMember.family_id == current_member.family_id,
+        FamilyMember.user_id != current_user.id
+    ).all()
+
+    if not other_members:
+        return {"status": "no_recipients", "poke_id": poke_id}
+
+    other_user_ids = [str(m.user_id) for m in other_members]
+
+    # Collect device tokens
+    device_tokens = db.query(DeviceToken).filter(
+        DeviceToken.user_id.in_(other_user_ids),
+        DeviceToken.is_active == True
+    ).all()
+
+    push_sent = 0
+    if device_tokens:
+        push_sent = await push_service.send_poke_push(
+            db=db,
+            device_tokens=device_tokens,
+            sender_name=sender_display_name,
+            sender_id=sender_id,
+            family_id=family_id,
+            poke_id=poke_id,
+            sender_avatar=current_user.avatar_url
+        )
+        logger.info(f"POKE: {sender_display_name} → {len(other_members)} recipients, push_sent={push_sent}")
+
+    # Broadcast via SSE/Realtime so in-app banner shows
+    try:
+        from backend.app.api.v1.events import publish_to_family
+        sse_event = {
+            "type": "poke",
+            "poke_id": poke_id,
+            "sender_id": sender_id,
+            "sender_name": sender_display_name,
+            "sender_avatar": current_user.avatar_url,
+            "family_id": family_id,
+            "message": f"{sender_display_name} sizi dürtüyor! 👉",
+        }
+        asyncio.create_task(publish_to_family(family_id, sse_event))
+    except Exception as e:
+        logger.warning(f"SSE_POKE_DISPATCH_ERROR: {e}")
+
+    return {
+        "status": "success",
+        "poke_id": poke_id,
+        "sender_name": sender_display_name,
+        "recipients_count": len(other_members),
+        "push_sent_count": push_sent
+    }
