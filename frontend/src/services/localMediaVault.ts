@@ -5,8 +5,26 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
  * localMediaVault.ts
  * WhatsApp / Telegram style Local-First Media & Chat Vault.
  * Permanently stores all audio recordings, images, and chat data in a local "family/" directory on the device disk.
- * Supports silent background cloud synchronization and multi-device cloud restore.
+ * Provides storage breakdown, audio archive browsing, and storage cleanup.
  */
+
+export interface VaultFileInfo {
+  name: string;
+  path: string;
+  size: number;
+  mtime: number;
+  uri: string;
+  type: 'audio' | 'images';
+}
+
+export interface LocalVaultStorageStats {
+  audioBytes: number;
+  audioCount: number;
+  imageBytes: number;
+  imageCount: number;
+  totalBytes: number;
+  totalMb: number;
+}
 
 // Helper to convert Blob to base64
 const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -19,17 +37,6 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
-};
-
-// Helper to convert base64 to Blob
-const base64ToBlob = (base64: string, mimeType: string): Blob => {
-  const byteCharacters = atob(base64);
-  const byteNumbers = new Array(byteCharacters.length);
-  for (let i = 0; i < byteCharacters.length; i++) {
-    byteNumbers[i] = byteCharacters.charCodeAt(i);
-  }
-  const byteArray = new Uint8Array(byteNumbers);
-  return new Blob([byteArray], { type: mimeType });
 };
 
 // IndexedDB Helper for Web / PWA fallback
@@ -80,6 +87,34 @@ const idbSetBlob = async (key: string, blob: Blob): Promise<void> => {
     });
   } catch {
     // Ignore
+  }
+};
+
+const idbDeleteKey = async (key: string): Promise<void> => {
+  try {
+    const db = await getIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.delete(key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch {}
+};
+
+const idbGetAllKeys = async (): Promise<string[]> => {
+  try {
+    const db = await getIDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.getAllKeys();
+      req.onsuccess = () => resolve((req.result as string[]) || []);
+      req.onerror = () => resolve([]);
+    });
+  } catch {
+    return [];
   }
 };
 
@@ -172,7 +207,11 @@ class LocalMediaVault {
     if (!remoteUrlOrName) return '';
 
     // If already a local blob/file URL, return directly
-    if (remoteUrlOrName.startsWith('blob:') || remoteUrlOrName.startsWith('data:')) {
+    if (
+      remoteUrlOrName.startsWith('blob:') ||
+      remoteUrlOrName.startsWith('data:') ||
+      remoteUrlOrName.startsWith('capacitor://')
+    ) {
       return remoteUrlOrName;
     }
 
@@ -227,6 +266,128 @@ class LocalMediaVault {
 
     // Return the remote URL for immediate streaming while caching completes
     return fullRemoteUrl;
+  }
+
+  /**
+   * Lists all media files stored in the local vault (for audio & image archive viewer)
+   */
+  public async listMediaFiles(type: 'audio' | 'images'): Promise<VaultFileInfo[]> {
+    const list: VaultFileInfo[] = [];
+    const dirPath = `family/${type}`;
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const result = await Filesystem.readdir({
+          path: dirPath,
+          directory: Directory.Data,
+        });
+
+        for (const file of result.files) {
+          try {
+            const stat = await Filesystem.stat({
+              path: `${dirPath}/${file.name}`,
+              directory: Directory.Data,
+            });
+            list.push({
+              name: file.name,
+              path: `${dirPath}/${file.name}`,
+              size: stat.size || 0,
+              mtime: stat.mtime || Date.now(),
+              uri: Capacitor.convertFileSrc(stat.uri),
+              type,
+            });
+          } catch {}
+        }
+      } catch {
+        // Directory may be empty
+      }
+    } else {
+      // Web IndexedDB
+      const allKeys = await idbGetAllKeys();
+      for (const key of allKeys) {
+        if (key.startsWith(`family/${type}/`)) {
+          const blob = await idbGetBlob(key);
+          const name = key.split('/').pop() || key;
+          list.push({
+            name,
+            path: key,
+            size: blob?.size || 0,
+            mtime: Date.now(),
+            uri: blob ? URL.createObjectURL(blob) : '',
+            type,
+          });
+        }
+      }
+    }
+
+    // Sort newest first
+    return list.sort((a, b) => b.mtime - a.mtime);
+  }
+
+  /**
+   * Calculates total local device disk usage by media type
+   */
+  public async getStorageUsage(): Promise<LocalVaultStorageStats> {
+    const audioFiles = await this.listMediaFiles('audio');
+    const imageFiles = await this.listMediaFiles('images');
+
+    const audioBytes = audioFiles.reduce((acc, f) => acc + f.size, 0);
+    const imageBytes = imageFiles.reduce((acc, f) => acc + f.size, 0);
+    const totalBytes = audioBytes + imageBytes;
+
+    return {
+      audioBytes,
+      audioCount: audioFiles.length,
+      imageBytes,
+      imageCount: imageFiles.length,
+      totalBytes,
+      totalMb: Math.round((totalBytes / (1024 * 1024)) * 10) / 10,
+    };
+  }
+
+  /**
+   * Deletes a specific file from the local device vault to free storage
+   */
+  public async deleteMediaFile(filename: string, type: 'audio' | 'images'): Promise<void> {
+    const cleanName = filename.split('?')[0].split('/').pop() || filename;
+    const relativePath = `family/${type}/${cleanName}`;
+
+    this.urlCache.delete(cleanName);
+    this.urlCache.delete(relativePath);
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await Filesystem.deleteFile({
+          path: relativePath,
+          directory: Directory.Data,
+        });
+      } catch (err) {
+        console.warn('[LocalVault] Delete native file note:', err);
+      }
+    } else {
+      await idbDeleteKey(relativePath);
+    }
+  }
+
+  /**
+   * Clears entire local vault cache (to free up phone memory on user demand)
+   */
+  public async clearLocalVault(target: 'audio' | 'images' | 'all' = 'all'): Promise<void> {
+    this.urlCache.clear();
+
+    if (target === 'audio' || target === 'all') {
+      const audioFiles = await this.listMediaFiles('audio');
+      for (const f of audioFiles) {
+        await this.deleteMediaFile(f.name, 'audio');
+      }
+    }
+
+    if (target === 'images' || target === 'all') {
+      const imageFiles = await this.listMediaFiles('images');
+      for (const f of imageFiles) {
+        await this.deleteMediaFile(f.name, 'images');
+      }
+    }
   }
 
   private async downloadAndCacheInBackground(

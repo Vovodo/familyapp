@@ -91,6 +91,16 @@ export const ChatPage: React.FC = () => {
     localStorage.setItem('ailem_chat_wallpaper', wp);
   };
 
+  // Clear Chat History (Clears text messages, preserves local photos and audio in vault)
+  const handleClearChatHistory = async () => {
+    if (!currentFamily) return;
+    setMessages([]);
+    localChatStorage.saveMessages(currentFamily.id, []);
+    try {
+      await api.post('/messages/cleanup-old?days=1');
+    } catch {}
+  };
+
   // Scroll Helpers
   const scrollToBottom = useCallback((smooth = true) => {
     if (scrollContainerRef.current) {
@@ -906,6 +916,7 @@ export const ChatPage: React.FC = () => {
           onToggleNotifications={handleToggleNotifications}
           wallpaper={wallpaper}
           onChangeWallpaper={handleChangeWallpaper}
+          onClearChat={handleClearChatHistory}
           onClose={() => setShowSettingsModal(false)}
         />
       )}

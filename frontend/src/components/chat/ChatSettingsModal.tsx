@@ -1,5 +1,4 @@
-import React from 'react';
-import { X, Type, Bell, BellOff, Palette, Check, Sparkles } from 'lucide-react';
+import { X, Type, Bell, BellOff, Palette, Check, Sparkles, Trash2 } from 'lucide-react';
 
 export type FontSizeOption = 'sm' | 'md' | 'lg' | 'xl';
 export type WallpaperOption = 'classic' | 'warm' | 'mint' | 'dark';
@@ -11,6 +10,7 @@ interface ChatSettingsModalProps {
   onToggleNotifications: () => void;
   wallpaper: WallpaperOption;
   onChangeWallpaper: (wp: WallpaperOption) => void;
+  onClearChat: () => void;
   onClose: () => void;
 }
 
@@ -35,6 +35,7 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
   onToggleNotifications,
   wallpaper,
   onChangeWallpaper,
+  onClearChat,
   onClose,
 }) => {
   return (
@@ -164,6 +165,37 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* 4. Clear Chat History */}
+          <div className="space-y-2 pt-2 border-t border-gray-100">
+            <div className="p-3 bg-rose-50/60 rounded-2xl border border-rose-100 flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-bold text-rose-900 flex items-center gap-1.5">
+                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Sohbet Geçmişini Temizle</span>
+                </h4>
+                <p className="text-[10px] text-rose-700 leading-tight mt-0.5">
+                  Yazışmalar ekrandan temizlenir. Fotoğraflar ve sesler cihazınızda korunur.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'Sohbet ekranındaki tüm yazışmaları temizlemek istediğinize emin misiniz?\n\n(Fotoğraflar ve ses kayıtlarınız cihazınızda korunacaktır)'
+                    )
+                  ) {
+                    onClearChat();
+                    onClose();
+                  }
+                }}
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition active:scale-95 flex-shrink-0 cursor-pointer"
+              >
+                Temizle
+              </button>
             </div>
           </div>
         </div>
