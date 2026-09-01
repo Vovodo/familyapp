@@ -27,27 +27,33 @@ import {
   MessageSquare,
   Image as ImageIcon,
   Mic,
+  Palette,
+  ChevronRight,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { api } from '../../services/api';
 import { syncService } from '../../services/syncService';
 import { SyncStatus, StorageQuotaBreakdown } from '../../types';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 import { PermissionAssistantModal } from '../../components/common/PermissionAssistantModal';
 import { CloudRestorePromptModal } from '../../components/common/CloudRestorePromptModal';
+import { ThemeStoreModal } from '../../components/theme/ThemeStoreModal';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
 export const FamilySettingsPage: React.FC = () => {
   const { user, logout, updateProfile } = useAuth();
   const { currentFamily, deleteFamily, updateFamilySettings, removeMember, leaveFamily } = useFamily();
+  const { currentTheme } = useTheme();
   const navigate = useNavigate();
 
   const [copied, setCopied] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+  const [showThemeModal, setShowThemeModal] = useState(false);
 
   // Cloud Backup & Storage Quota State
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -567,6 +573,44 @@ export const FamilySettingsPage: React.FC = () => {
         )}
       </div>
 
+      {/* 🎨 Appearance & Theme Store Card */}
+      <div className="bg-white dark:bg-gray-900 rounded-3xl p-5 border border-gray-100 dark:border-gray-800 shadow-md space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 via-purple-500 to-indigo-600 text-white flex items-center justify-center shadow-sm">
+              <Palette className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-gray-900 dark:text-white">Görünüm & Tema Mağazası</h3>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-xs text-gray-500">Aktif Tema:</span>
+                <span className="text-xs font-bold text-family-600">{currentTheme.name}</span>
+                <div className="flex items-center -space-x-1 ml-1">
+                  {currentTheme.palette.map((c, idx) => (
+                    <div
+                      key={idx}
+                      className="w-2.5 h-2.5 rounded-full border border-white dark:border-gray-900 shadow-2xs"
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowThemeModal(true)}
+          className="w-full py-3 px-4 rounded-2xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-750 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white font-bold text-xs flex items-center justify-between transition cursor-pointer active:scale-[0.98]"
+        >
+          <div className="flex items-center gap-2">
+            <span>12 Özel Temayı İncele & Değiştir</span>
+          </div>
+          <ChevronRight className="w-4 h-4 text-gray-400" />
+        </button>
+      </div>
+
       {/* Group Actions: Creator Delete vs Member Leave */}
       {isCreator ? (
         /* Danger Zone: Only the CREATOR can delete the family */
@@ -1007,6 +1051,12 @@ export const FamilySettingsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Theme Store Modal */}
+      <ThemeStoreModal
+        isOpen={showThemeModal}
+        onClose={() => setShowThemeModal(false)}
+      />
 
       {/* Permission Assistant Modal */}
       {showPermissionsModal && (

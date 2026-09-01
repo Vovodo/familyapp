@@ -107,3 +107,69 @@
 .animate-slide-up {
   animation: slideUpFade 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* Dynamic Theme Utility Classes */
+.theme-bg {
+  background-color: var(--theme-bg, #fff5f6);
+}
+
+.theme-surface {
+  background-color: var(--theme-surface, #ffffff);
+  border-color: var(--theme-border, #fecdd3);
+  box-shadow: var(--theme-card-shadow, 0 4px 20px rgba(0, 0, 0, 0.05));
+}
+
+.theme-surface-secondary {
+  background-color: var(--theme-surface-secondary, #ffe4e8);
+}
+
+.theme-text-primary {
+  color: var(--theme-text-primary, #4c0519);
+}
+
+.theme-text-secondary {
+  color: var(--theme-text-secondary, #9f1239);
+}
+
+.theme-border {
+  border-color: var(--theme-border, #fecdd3);
+}
+
+.theme-header {
+  background-color: var(--theme-header-bg, #ffffff);
+  border-color: var(--theme-header-border, #ffe4e8);
+}
+
+.theme-nav {
+  background-color: var(--theme-nav-bg, #ffffff);
+  border-color: var(--theme-nav-border, #ffe4e8);
+}
+
+.theme-hero-card {
+  background: var(--theme-hero-gradient, linear-gradient(135deg, #e11d48 0%, #be123c 100%));
+}
+
+/* 🚀 FIXED QUICK ACTION BUTTONS - CONSTANT ACROSS ALL THEMES */
+.quick-action-heart {
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 50%, #be123c 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(225, 29, 72, 0.35) !important;
+}
+
+.quick-action-tea {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(217, 119, 6, 0.35) !important;
+}
+
+.quick-action-coming-home {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 50%, #075985 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35) !important;
+}
+
+.quick-action-meal {
+  background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35) !important;
+}

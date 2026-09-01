@@ -20,6 +20,8 @@ Gelecekte projeye dahil olacak tüm geliştiriciler ve yapay zeka asistanları, 
 | **[8. Bildirimler, İzinler & Ses Motoru (`NOTIFICATIONS_AND_PERMISSIONS.md`)](./NOTIFICATIONS_AND_PERMISSIONS.md)** | Capacitor Local Notifications, Push bildirimleri (FCM), özel ses efektleri ve izin asistanı. |
 | **[9. DevOps, Coolify & Android APK (`DEVOPS_AND_DEPLOYMENT.md`)](./DEVOPS_AND_DEPLOYMENT.md)** | Docker Compose, Coolify canlıya alma, SSL, Android Studio/Gradle APK üretimi ve Live Updates. |
 | **[10. Test & Kalite Güvencesi (`TESTING_GUIDE.md`)](./TESTING_GUIDE.md)** | Pytest test paketi, SQLite StaticPool, 13 senaryolu retention testleri ve regresyon rehberi. |
+| **[11. Tema Sistemi & Tema Mağazası (`THEME_SYSTEM.md`)](./THEME_SYSTEM.md)** | 12 özel renk teması, dinamik CSS değişkenleri mimarisi, değişmez sabit hızlı butonlar kuralı. |
+| **[12. Canlı Hava Durumu (`LIVE_WEATHER.md`)](./LIVE_WEATHER.md)** | Open-Meteo backend entegrasyonu, 15 dk önbellek, Türkiye il/ilçe seçicisi ve konum tespiti. |
 
 ---
 

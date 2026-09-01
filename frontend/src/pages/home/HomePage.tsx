@@ -21,6 +21,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
+import { WeatherWidget } from '../../components/home/WeatherWidget';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { playHeartVibration } from '../../services/notificationService';
@@ -425,26 +426,29 @@ export const HomePage: React.FC = () => {
 
   return (
     <div className="p-4 space-y-4 w-full max-w-full overflow-x-hidden box-border">
-      {/* Warm Greeting Card */}
-      <div className="bg-gradient-to-br from-family-600 to-family-800 rounded-3xl p-5 sm:p-6 text-white shadow-xl shadow-family-900/15 relative overflow-hidden">
+      {/* Warm Greeting Card (Aile Alanı Hero Card with Dynamic Theme Gradient) */}
+      <div className="theme-hero-card rounded-3xl p-5 sm:p-6 text-white shadow-xl relative overflow-hidden transition-all duration-300">
         <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 opacity-10 pointer-events-none">
           <Heart className="w-40 h-40 sm:w-48 sm:h-48 fill-white" />
         </div>
         <div className="relative z-10">
-          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-family-200">
+          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider opacity-90">
             <Sparkles className="w-4 h-4" />
             <span>Aile Alanı</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-black mt-1">
             {getGreeting()}, {displayName} ❤️
           </h2>
-          <p className="text-xs text-family-100 mt-1 leading-relaxed">
+          <p className="text-xs text-white/85 mt-1 leading-relaxed">
             {currentFamily?.name} grubundasınız. Ailenize anlık bir durum bildirin:
           </p>
         </div>
       </div>
 
-      {/* 🚀 Quick Family Status Buttons Panel (Kalp, Çay, Eve Geliyorum, Yemek Hazır) */}
+      {/* ☀️ Live Weather Widget (Open-Meteo Integration) */}
+      <WeatherWidget />
+
+      {/* 🚀 Quick Family Status Buttons Panel (Kalp, Çay, Eve Geliyorum, Yemek Hazır - 100% Constant Colors) */}
       <div className="relative w-full space-y-2">
         {burstEmoji && (
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-30">
@@ -458,14 +462,14 @@ export const HomePage: React.FC = () => {
             type="button"
             onClick={() => handleSendQuickAction('heart')}
             disabled={actionCooldown > 0 || !!activeAction}
-            className="p-3 bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-2xl shadow-md shadow-rose-300 active:scale-95 transition cursor-pointer flex items-center gap-2.5 disabled:opacity-75"
+            className="p-3 quick-action-heart rounded-2xl active:scale-95 transition cursor-pointer flex items-center gap-2.5 disabled:opacity-75"
           >
             <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
               <Heart className="w-5 h-5 fill-white" />
             </div>
             <div className="text-left min-w-0">
               <div className="text-xs font-black truncate">Kalp Gönder</div>
-              <div className="text-[10px] text-rose-100 truncate">Sevgi ilet</div>
+              <div className="text-[10px] text-white/90 truncate">Sevgi ilet</div>
             </div>
           </button>
 
@@ -474,14 +478,14 @@ export const HomePage: React.FC = () => {
             type="button"
             onClick={() => handleSendQuickAction('tea')}
             disabled={actionCooldown > 0 || !!activeAction}
-            className="p-3 bg-gradient-to-r from-amber-600 to-amber-700 text-white rounded-2xl shadow-md shadow-amber-300 active:scale-95 transition cursor-pointer flex items-center gap-2.5 disabled:opacity-75"
+            className="p-3 quick-action-tea rounded-2xl active:scale-95 transition cursor-pointer flex items-center gap-2.5 disabled:opacity-75"
           >
             <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
               <Coffee className="w-5 h-5" />
             </div>
             <div className="text-left min-w-0">
               <div className="text-xs font-black truncate">Çay Koydum</div>
-              <div className="text-[10px] text-amber-100 truncate">Sizi bekliyor</div>
+              <div className="text-[10px] text-white/90 truncate">Sizi bekliyor</div>
             </div>
           </button>
 
@@ -490,14 +494,14 @@ export const HomePage: React.FC = () => {
             type="button"
             onClick={() => handleSendQuickAction('coming_home')}
             disabled={actionCooldown > 0 || !!activeAction}
-            className="p-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl shadow-md shadow-blue-300 active:scale-95 transition cursor-pointer flex items-center gap-2.5 disabled:opacity-75"
+            className="p-3 quick-action-coming-home rounded-2xl active:scale-95 transition cursor-pointer flex items-center gap-2.5 disabled:opacity-75"
           >
             <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
               <Car className="w-5 h-5" />
             </div>
             <div className="text-left min-w-0">
               <div className="text-xs font-black truncate">Eve Geliyorum</div>
-              <div className="text-[10px] text-blue-100 truncate">Yola çıktım</div>
+              <div className="text-[10px] text-white/90 truncate">Yola çıktım</div>
             </div>
           </button>
 
@@ -506,20 +510,20 @@ export const HomePage: React.FC = () => {
             type="button"
             onClick={() => handleSendQuickAction('meal')}
             disabled={actionCooldown > 0 || !!activeAction}
-            className="p-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-2xl shadow-md shadow-emerald-300 active:scale-95 transition cursor-pointer flex items-center gap-2.5 disabled:opacity-75"
+            className="p-3 quick-action-meal rounded-2xl active:scale-95 transition cursor-pointer flex items-center gap-2.5 disabled:opacity-75"
           >
             <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
               <Utensils className="w-5 h-5" />
             </div>
             <div className="text-left min-w-0">
               <div className="text-xs font-black truncate">Yemek Hazır</div>
-              <div className="text-[10px] text-emerald-100 truncate">Sofraya buyrun</div>
+              <div className="text-[10px] text-white/90 truncate">Sofraya buyrun</div>
             </div>
           </button>
         </div>
 
         {actionSuccessMsg && (
-          <div className="text-center text-xs font-bold text-gray-700 bg-white border border-gray-200 py-1.5 px-3 rounded-xl shadow-xs animate-in fade-in">
+          <div className="text-center text-xs font-bold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 py-1.5 px-3 rounded-xl shadow-xs animate-in fade-in">
             {actionSuccessMsg}
           </div>
         )}
@@ -533,7 +537,7 @@ export const HomePage: React.FC = () => {
             <button
               key={card.to}
               onClick={() => navigate(card.to)}
-              className={`${card.bgColor} p-3.5 rounded-2xl border border-white/60 shadow-sm hover:shadow-md active:scale-95 transition-all text-left flex flex-col gap-3 relative overflow-hidden cursor-pointer min-h-[120px]`}
+              className="theme-surface p-3.5 rounded-2xl border shadow-xs hover:shadow-md active:scale-95 transition-all text-left flex flex-col gap-3 relative overflow-hidden cursor-pointer min-h-[120px]"
             >
               <div className="flex items-center justify-between w-full">
                 <div
@@ -541,16 +545,16 @@ export const HomePage: React.FC = () => {
                 >
                   <Icon className="w-5 h-5" />
                 </div>
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/80 text-gray-700 max-w-[75px] truncate">
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full theme-surface-secondary theme-text-secondary max-w-[75px] truncate">
                   {card.badge}
                 </span>
               </div>
 
               <div className="flex-1">
-                <h3 className={`text-sm font-bold ${card.textColor} leading-tight`}>
+                <h3 className="text-sm font-black theme-text-primary leading-tight">
                   {card.title}
                 </h3>
-                <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2 leading-snug">
+                <p className="text-[10px] theme-text-secondary mt-0.5 line-clamp-2 leading-snug">
                   {card.subtitle}
                 </p>
               </div>

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App as CapApp } from '@capacitor/app';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { FamilyProvider } from './contexts/FamilyContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { MobileLayout } from './components/layout/MobileLayout';
 import { LoginPage } from './pages/auth/LoginPage';
 import { RegisterPage } from './pages/auth/RegisterPage';
@@ -89,54 +90,56 @@ export const App: React.FC = () => {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <FamilyProvider>
-          <BrowserRouter>
-            <Routes>
-              {/* Public Routes */}
-              <Route
-                path="/login"
-                element={
-                  <PublicRoute>
-                    <LoginPage />
-                  </PublicRoute>
-                }
-              />
-              <Route
-                path="/register"
-                element={
-                  <PublicRoute>
-                    <RegisterPage />
-                  </PublicRoute>
-                }
-              />
+      <ThemeProvider>
+        <AuthProvider>
+          <FamilyProvider>
+            <BrowserRouter>
+              <Routes>
+                {/* Public Routes */}
+                <Route
+                  path="/login"
+                  element={
+                    <PublicRoute>
+                      <LoginPage />
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/register"
+                  element={
+                    <PublicRoute>
+                      <RegisterPage />
+                    </PublicRoute>
+                  }
+                />
 
-              {/* Protected App Routes with Shell */}
-              <Route
-                element={
-                  <ProtectedRoute>
-                    <MobileLayout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route path="/" element={<HomePage />} />
-                <Route path="/chat" element={<ChatPage />} />
-                <Route path="/gallery" element={<GalleryPage />} />
-                <Route path="/shopping" element={<ShoppingPage />} />
-                <Route path="/tasks" element={<TasksPage />} />
-                <Route path="/budget" element={<BudgetPage />} />
-                <Route path="/notes" element={<NotesPage />} />
-                <Route path="/reminders" element={<RemindersPage />} />
-                <Route path="/family" element={<FamilySettingsPage />} />
-                <Route path="/admin" element={<AdminDashboardPage />} />
-              </Route>
+                {/* Protected App Routes with Shell */}
+                <Route
+                  element={
+                    <ProtectedRoute>
+                      <MobileLayout />
+                    </ProtectedRoute>
+                  }
+                >
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/chat" element={<ChatPage />} />
+                  <Route path="/gallery" element={<GalleryPage />} />
+                  <Route path="/shopping" element={<ShoppingPage />} />
+                  <Route path="/tasks" element={<TasksPage />} />
+                  <Route path="/budget" element={<BudgetPage />} />
+                  <Route path="/notes" element={<NotesPage />} />
+                  <Route path="/reminders" element={<RemindersPage />} />
+                  <Route path="/family" element={<FamilySettingsPage />} />
+                  <Route path="/admin" element={<AdminDashboardPage />} />
+                </Route>
 
-              {/* Fallback */}
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </BrowserRouter>
-        </FamilyProvider>
-      </AuthProvider>
+                {/* Fallback */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </BrowserRouter>
+          </FamilyProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 };

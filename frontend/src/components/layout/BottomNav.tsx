@@ -12,7 +12,7 @@ export const BottomNav: React.FC = () => {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-200/90 z-40 safe-area-bottom shadow-lg select-none">
+    <nav className="fixed bottom-0 left-0 right-0 theme-nav backdrop-blur-md border-t z-40 safe-area-bottom shadow-lg select-none transition-colors duration-200">
       <div className="flex justify-around items-center max-w-lg mx-auto h-16 px-1">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -24,24 +24,30 @@ export const BottomNav: React.FC = () => {
               className={({ isActive }) =>
                 `flex flex-col items-center justify-center flex-1 h-full py-1 text-xs transition-all ${
                   isActive
-                    ? 'text-family-600 font-bold scale-105'
-                    : 'text-gray-400 hover:text-gray-700 font-medium'
+                    ? 'font-bold scale-105'
+                    : 'hover:opacity-80 font-medium'
                 }`
               }
+              style={({ isActive }) => ({
+                color: isActive ? 'var(--theme-nav-active)' : 'var(--theme-nav-inactive)',
+              })}
             >
               {({ isActive }) => (
                 <>
                   <div
-                    className={`p-1.5 rounded-2xl transition-colors ${
-                      isActive ? 'bg-family-50 text-family-600 shadow-2xs' : 'text-gray-400'
-                    }`}
+                    className="p-1.5 rounded-2xl transition-colors"
+                    style={{
+                      backgroundColor: isActive ? 'var(--theme-surface-secondary)' : 'transparent',
+                      color: isActive ? 'var(--theme-nav-active)' : 'var(--theme-nav-inactive)',
+                    }}
                   >
                     <Icon className="w-5 h-5" />
                   </div>
                   <span
-                    className={`mt-0.5 tracking-tight text-[11px] ${
-                      isActive ? 'text-family-700 font-black' : 'text-gray-500'
-                    }`}
+                    className="mt-0.5 tracking-tight text-[11px] font-bold"
+                    style={{
+                      color: isActive ? 'var(--theme-nav-active)' : 'var(--theme-nav-inactive)',
+                    }}
                   >
                     {item.label}
                   </span>

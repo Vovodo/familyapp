@@ -1,12 +1,6 @@
 import uuid
-import pytest
-from fastapi.testclient import TestClient
-from backend.app.main import app
 
-client = TestClient(app)
-
-
-def test_chat_idempotency_duplicate_prevention():
+def test_chat_idempotency_duplicate_prevention(client):
     """
     Test that sending the same client_message_id twice returns the same message
     without creating a duplicate database record.

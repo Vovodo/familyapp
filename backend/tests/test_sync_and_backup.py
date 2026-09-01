@@ -204,14 +204,12 @@ def test_backup_sync_service_unit():
         db.close()
 
 
-def test_api_sync_endpoints():
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
+def test_api_sync_endpoints(client, db):
     try:
         user = User(
             id=str(uuid.uuid4()),
             full_name="Admin Test",
-            email="admin_test@example.com",
+            email=f"admin_test_{uuid.uuid4().hex[:6]}@example.com",
             role="admin"
         )
         db.add(user)

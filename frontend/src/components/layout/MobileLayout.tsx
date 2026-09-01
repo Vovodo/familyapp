@@ -74,7 +74,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   const hasFamily = !!currentFamily;
 
   return (
-    <div className="flex flex-col h-screen w-full bg-warm-50 text-gray-900 relative shadow-2xl overflow-hidden">
+    <div className="flex flex-col h-screen w-full theme-bg theme-text-primary relative shadow-2xl overflow-hidden transition-colors duration-200">
       <InAppNotificationBanner />
       {hasFamily && <PermissionAssistantModal />}
       <HeartCelebrationOverlay />
