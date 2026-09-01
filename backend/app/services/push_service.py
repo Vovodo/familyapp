@@ -16,6 +16,9 @@ HEART_CHANNEL_ID = "family_heart_channel"
 GENERAL_CHANNEL_ID = "family_general_channel"
 REMINDERS_CHANNEL_ID = "family_reminders_channel"
 POKE_CHANNEL_ID = "family_poke_channel"
+TEA_CHANNEL_ID = "family_tea_channel"
+CAR_CHANNEL_ID = "family_car_channel"
+MEAL_CHANNEL_ID = "family_meal_channel"
 
 class PushNotificationService:
     def __init__(self):
@@ -99,7 +102,7 @@ class PushNotificationService:
                 title=title,
                 body=body,
                 channel_id=HEART_CHANNEL_ID,
-                sound="default",
+                sound="heart",
                 priority="max",
                 visibility="public",
                 color="#E11D48",
@@ -372,7 +375,7 @@ class PushNotificationService:
                 title=title,
                 body=body,
                 channel_id=POKE_CHANNEL_ID,
-                sound="default",
+                sound="poke",
                 priority="high",
                 visibility="public",
                 color="#FF6B2B",   # Orange — visually distinct from heart (red) and chat (blue)
@@ -456,14 +459,28 @@ class PushNotificationService:
         if not self.is_initialized:
             return len(tokens)
 
-        # Color and vibration customization based on action type
+        # Color, channel and sound customization based on action type
         color_map = {
             "tea": "#D97706",         # Amber/brown
             "coming_home": "#2563EB", # Vibrant blue/indigo
             "meal": "#059669",        # Emerald green
             "heart": "#E11D48"        # Rose red
         }
+        channel_map = {
+            "tea": TEA_CHANNEL_ID,
+            "coming_home": CAR_CHANNEL_ID,
+            "meal": MEAL_CHANNEL_ID,
+            "heart": HEART_CHANNEL_ID,
+        }
+        sound_map = {
+            "tea": "tea",
+            "coming_home": "car_horn",
+            "meal": "meal",
+            "heart": "heart",
+        }
         notif_color = color_map.get(action_type, "#4F46E5")
+        target_channel = channel_map.get(action_type, GENERAL_CHANNEL_ID)
+        target_sound = sound_map.get(action_type, "default")
 
         vibrate_pattern = [0, 200, 100, 200, 100, 200]
         valid_avatar = sender_avatar if sender_avatar and sender_avatar.startswith("http") else None
@@ -473,8 +490,8 @@ class PushNotificationService:
             notification=messaging.AndroidNotification(
                 title=title,
                 body=body,
-                channel_id=HEART_CHANNEL_ID if action_type == "heart" else GENERAL_CHANNEL_ID,
-                sound="default",
+                channel_id=target_channel,
+                sound=target_sound,
                 priority="high",
                 visibility="public",
                 color=notif_color,

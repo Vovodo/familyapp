@@ -6,6 +6,11 @@ import { api, storage } from './api';
 
 export const HEART_CHANNEL_ID = 'family_heart_channel';
 export const GENERAL_CHANNEL_ID = 'family_general_channel';
+export const TEA_CHANNEL_ID = 'family_tea_channel';
+export const CAR_CHANNEL_ID = 'family_car_channel';
+export const MEAL_CHANNEL_ID = 'family_meal_channel';
+export const POKE_CHANNEL_ID = 'family_poke_channel';
+export const REMINDERS_CHANNEL_ID = 'family_reminders_channel';
 
 // 3-4 Second Gentle Love Vibration Pattern
 export const playHeartVibration = async () => {
@@ -58,20 +63,80 @@ class NotificationService {
         id: HEART_CHANNEL_ID,
         name: 'Aile Kalp Bildirimleri ❤️',
         description: 'Aile bireylerinden gelen anlık sevgi, titreşim ve kalp bildirimleri',
-        importance: 5, // High / Max
-        visibility: 1, // Public on lockscreen
-        sound: 'beep.wav',
+        importance: 5,
+        visibility: 1,
+        sound: 'heart.wav',
         vibration: true,
         lights: true,
         lightColor: '#E11D48',
       }).catch(() => {});
 
       await LocalNotifications.createChannel({
+        id: TEA_CHANNEL_ID,
+        name: '☕ Çay Koydum Bildirimleri',
+        description: 'Çay kaşığı tınısı ile çay hazır bildirimleri',
+        importance: 5,
+        visibility: 1,
+        sound: 'tea.wav',
+        vibration: true,
+        lights: true,
+        lightColor: '#D97706',
+      }).catch(() => {});
+
+      await LocalNotifications.createChannel({
+        id: CAR_CHANNEL_ID,
+        name: '🚗 Eve Geliyorum Bildirimleri',
+        description: 'Korna sesi ile eve geliyorum bildirimleri',
+        importance: 5,
+        visibility: 1,
+        sound: 'car_horn.wav',
+        vibration: true,
+        lights: true,
+        lightColor: '#2563EB',
+      }).catch(() => {});
+
+      await LocalNotifications.createChannel({
+        id: MEAL_CHANNEL_ID,
+        name: '🍲 Yemek Hazır Bildirimleri',
+        description: 'Yemek zili tınısı ile sofra hazır bildirimleri',
+        importance: 5,
+        visibility: 1,
+        sound: 'meal.wav',
+        vibration: true,
+        lights: true,
+        lightColor: '#059669',
+      }).catch(() => {});
+
+      await LocalNotifications.createChannel({
+        id: POKE_CHANNEL_ID,
+        name: '👉 Dürtme Bildirimleri',
+        description: 'Aile bireylerinden gelen anlık dürtme uyarıları',
+        importance: 5,
+        visibility: 1,
+        sound: 'poke.wav',
+        vibration: true,
+        lights: true,
+        lightColor: '#F97316',
+      }).catch(() => {});
+
+      await LocalNotifications.createChannel({
+        id: REMINDERS_CHANNEL_ID,
+        name: '⏰ Hatırlatıcılar',
+        description: 'Önemli aile ve kişisel hatırlatma alarmları',
+        importance: 5,
+        visibility: 1,
+        sound: 'default',
+        vibration: true,
+        lights: true,
+        lightColor: '#F59E0B',
+      }).catch(() => {});
+
+      await LocalNotifications.createChannel({
         id: GENERAL_CHANNEL_ID,
         name: 'Aile Mesaj ve Bildirimleri 🔔',
-        description: 'Sohbet mesajları, alışveriş listesi ve hatırlatıcı bildirimleri',
-        importance: 5, // High / Heads-up Pop-up
-        visibility: 1, // Public on lockscreen
+        description: 'Sohbet mesajları, alışveriş listesi ve görev bildirimleri',
+        importance: 5,
+        visibility: 1,
         sound: 'default',
         vibration: true,
         lights: true,
