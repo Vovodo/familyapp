@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
 from backend.app.models.models import (

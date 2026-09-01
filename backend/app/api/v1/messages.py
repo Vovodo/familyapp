@@ -32,6 +32,11 @@ class PollVoteRequest(BaseModel):
     option_index: int = Field(..., ge=0, le=10)
 
 
+class BatchDeleteRequest(BaseModel):
+    message_ids: List[str]
+    for_everyone: bool = True
+
+
 class LinkPreviewResponse(BaseModel):
     url: str
     title: Optional[str] = None
