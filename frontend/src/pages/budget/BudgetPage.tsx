@@ -223,7 +223,7 @@ export const BudgetPage: React.FC = () => {
   };
 
   return (
-    <div className="p-3 sm:p-4 space-y-4 max-w-lg mx-auto pb-24 select-none">
+    <div className="p-3 sm:p-4 space-y-4 w-full max-w-lg mx-auto pb-24 select-none box-border">
       {/* Month Selector Bar */}
       <div className="bg-white rounded-2xl p-2.5 border border-gray-200/90 shadow-xs flex items-center justify-between">
         <button
@@ -343,35 +343,36 @@ export const BudgetPage: React.FC = () => {
       </div>
 
       {/* View Switcher: List vs Monthly Report */}
-      <div className="flex bg-gray-100 p-1 rounded-2xl">
+      <div className="flex bg-gray-100 p-1 rounded-2xl w-full">
         <button
           type="button"
           onClick={() => setViewMode('transactions')}
-          className={`flex-1 py-2 text-xs font-black rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 ${
+          className={`flex-1 py-2.5 px-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
             viewMode === 'transactions'
               ? 'bg-white text-indigo-900 shadow-sm'
               : 'text-gray-500 hover:text-gray-900'
           }`}
         >
-          <List className="w-4 h-4" />
-          <span>İşlem Listesi ({transactions.length})</span>
+          <List className="w-4 h-4 flex-shrink-0" />
+          <span className="truncate">İşlem Listesi ({transactions.length})</span>
         </button>
 
         <button
           type="button"
           onClick={() => setViewMode('report')}
-          className={`flex-1 py-2 text-xs font-black rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 ${
+          className={`flex-1 py-2.5 px-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
             viewMode === 'report'
               ? 'bg-white text-indigo-900 shadow-sm'
               : 'text-gray-500 hover:text-gray-900'
           }`}
         >
-          <PieChart className="w-4 h-4" />
-          <span>Aylık Rapor & Dağılım</span>
+          <PieChart className="w-4 h-4 flex-shrink-0" />
+          <span className="truncate">Aylık Rapor & Dağılım</span>
         </button>
       </div>
 
-      {/* Main Content */}
+      {/* Main Content Area with Fixed Min-Height to Prevent Layout Jumps */}
+      <div className="w-full min-h-[280px]">
       {isLoading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
@@ -500,6 +501,7 @@ export const BudgetPage: React.FC = () => {
           </div>
         )
       )}
+      </div>
 
       {/* Modal: Create Transaction */}
       {showAddModal && (

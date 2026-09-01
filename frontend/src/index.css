@@ -8,10 +8,16 @@
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  body {
+  html, body {
     -webkit-tap-highlight-color: transparent;
     user-select: none;
     -webkit-user-select: none;
+    scrollbar-gutter: stable;
+    overflow-x: hidden;
+  }
+
+  main {
+    scrollbar-gutter: stable;
   }
 
   /* Safe touch target size for accessible family members (minimum 48px) */
