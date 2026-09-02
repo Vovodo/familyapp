@@ -10,7 +10,8 @@ import { PermissionAssistantModal } from '../common/PermissionAssistantModal';
 import { RouteErrorBoundary } from '../common/RouteErrorBoundary';
 import { notificationService } from '../../services/notificationService';
 import { useFamily } from '../../contexts/FamilyContext';
-import { Loader2, Heart } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import { Loader2, Heart, WifiOff, RefreshCw } from 'lucide-react';
 
 interface MobileLayoutProps {
   showHeader?: boolean;
@@ -21,9 +22,11 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   showHeader = true,
   showBottomNav = true,
 }) => {
-  const { currentFamily, isLoading } = useFamily();
+  const { currentFamily, isLoading, familiesLoaded, loadError, retryLoadFamilies } = useFamily();
+  const { logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [isRetrying, setIsRetrying] = React.useState(false);
 
   // Initialize Standalone Notification Service & Channels
   useEffect(() => {
@@ -67,6 +70,56 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
           <Loader2 className="w-4 h-4 animate-spin text-family-600" />
           <span>Aile Verileri Yükleniyor...</span>
         </div>
+      </div>
+    );
+  }
+
+  // The membership list never arrived, so we cannot tell an empty account apart
+  // from a failed request. Offering create/join here would let an existing
+  // member start a second family, so ask for a retry instead.
+  if (!currentFamily && !familiesLoaded) {
+    const handleRetry = async () => {
+      setIsRetrying(true);
+      try {
+        await retryLoadFamilies();
+      } finally {
+        setIsRetrying(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-warm-50 flex flex-col items-center justify-center px-6 space-y-4 text-center">
+        <div className="w-16 h-16 rounded-3xl bg-amber-100 flex items-center justify-center text-amber-600 shadow-md">
+          <WifiOff className="w-8 h-8" />
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-lg font-black text-gray-900">Aile bilgileriniz alınamadı</h1>
+          <p className="text-xs font-medium text-gray-500 max-w-xs leading-relaxed">
+            {loadError || 'Bağlantı kurulamadı. Ailenize ait veriler korunuyor, lütfen tekrar deneyin.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleRetry}
+          disabled={isRetrying}
+          className="w-full max-w-xs py-3.5 bg-family-600 hover:bg-family-700 active:scale-98 text-white font-bold rounded-2xl shadow-lg shadow-family-600/25 flex items-center justify-center gap-2 text-sm transition disabled:opacity-50 cursor-pointer"
+        >
+          {isRetrying ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <>
+              <RefreshCw className="w-4 h-4" />
+              <span>Tekrar Dene</span>
+            </>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => logout()}
+          className="text-xs text-gray-400 hover:text-gray-600 font-semibold underline transition cursor-pointer"
+        >
+          Çıkış yap ve yeniden giriş yap
+        </button>
       </div>
     );
   }

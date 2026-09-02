@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import * as Sentry from '@sentry/react';
 import { User } from '../types';
-import { api, storage } from '../services/api';
+import { api, storage, setSessionExpiredHandler } from '../services/api';
 import { cacheService } from '../services/cacheService';
 import { notificationService } from '../services/notificationService';
 
@@ -41,6 +41,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  const clearSession = useCallback(async () => {
+    cacheService.clear();
+    await storage.remove('auth_token');
+    await storage.remove('active_family_id');
+    await storage.remove('device_registered');
+    setToken(null);
+    setUser(null);
+    Sentry.setUser(null);
+  }, []);
+
+  // Without this, an expired or revoked token leaves `user` in state forever:
+  // the route guard keeps the app mounted while every request 401s.
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      void clearSession();
+    });
+    return () => setSessionExpiredHandler(null);
+  }, [clearSession]);
 
   useEffect(() => {
     const initializeAuth = async () => {
@@ -172,13 +191,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await notificationService.unregisterToken().catch(() => {});
       }
     } finally {
-      cacheService.clear();
-      await storage.remove('auth_token');
-      await storage.remove('active_family_id');
-      await storage.remove('device_registered');
-      setToken(null);
-      setUser(null);
-      Sentry.setUser(null);
+      await clearSession();
     }
   };
 

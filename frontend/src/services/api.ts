@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Preferences } from '@capacitor/preferences';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://familyapi.rfqcollector.com/api/v1';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://familyapi.rfqcollector.com/api/v1';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -49,6 +49,23 @@ export const storage = {
       // Fallback
     }
   },
+};
+
+// A 401 from these endpoints means the submitted credentials were wrong,
+// not that an active session died, so it must not sign the user out.
+const CREDENTIAL_ENDPOINTS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/verify-and-register',
+  '/auth/send-verification-code',
+  '/auth/reset-password',
+  '/auth/quick-join',
+];
+
+let sessionExpiredHandler: (() => void) | null = null;
+
+export const setSessionExpiredHandler = (handler: (() => void) | null): void => {
+  sessionExpiredHandler = handler;
 };
 
 // Request Interceptor to add Bearer Token & Active Family ID
@@ -103,6 +120,20 @@ api.interceptors.response.use(
       message = 'Sunucuya ulaşılamıyor. Lütfen internet bağlantınızı kontrol edin.';
     }
 
-    return Promise.reject(new Error(message));
+    const requestUrl: string = error.config?.url || '';
+    const isCredentialCheck = CREDENTIAL_ENDPOINTS.some((path) => requestUrl.includes(path));
+    if (error.response?.status === 401 && !isCredentialCheck) {
+      sessionExpiredHandler?.();
+    }
+
+    // Reject the original axios error so callers can still read the status code,
+    // but expose the formatted Turkish text on both fields call sites read, so a
+    // structured FastAPI `detail` never reaches JSX as a raw object.
+    error.message = message;
+    if (error.response?.data && typeof error.response.data === 'object') {
+      error.response.data.detail = message;
+    }
+
+    return Promise.reject(error);
   }
 );

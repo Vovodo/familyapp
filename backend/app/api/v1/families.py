@@ -56,6 +56,20 @@ def create_family(
     """
     Creates a new family group and sets current user as creator and admin.
     """
+    # The client has no family switcher, so a second family would silently become
+    # the active one and hide the real family's data. Refuse instead of letting a
+    # stale onboarding screen strand the user in an empty group.
+    existing_membership = (
+        db.query(FamilyMember)
+        .filter(FamilyMember.user_id == current_user.id)
+        .first()
+    )
+    if existing_membership:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Zaten bir aile grubuna üyesiniz. Yeni aile kurmak için önce mevcut ailenizden ayrılmalısınız."
+        )
+
     invite_code = generate_invite_code()
     while db.query(Family).filter(Family.invite_code == invite_code).first():
         invite_code = generate_invite_code()

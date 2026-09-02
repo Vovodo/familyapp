@@ -10,7 +10,11 @@ interface FamilyContextType {
   currentFamily: Family | null;
   myFamilies: Family[];
   isLoading: boolean;
+  /** True only after the server has actually confirmed the membership list. */
+  familiesLoaded: boolean;
+  loadError: string | null;
   activeMember: FamilyMember | null;
+  retryLoadFamilies: () => Promise<void>;
   createFamily: (name: string) => Promise<Family>;
   joinFamily: (inviteCode: string, nickname?: string) => Promise<Family>;
   refreshFamily: () => Promise<void>;
@@ -28,6 +32,8 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
   const [myFamilies, setMyFamilies] = useState<Family[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [familiesLoaded, setFamiliesLoaded] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showRestorePrompt, setShowRestorePrompt] = useState<boolean>(false);
 
   // Trigger Mandatory Cloud Sync and Check Restore Need when Active Family Changes
@@ -57,15 +63,19 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (!user) {
       setCurrentFamily(null);
       setMyFamilies([]);
+      setFamiliesLoaded(false);
+      setLoadError(null);
       setIsLoading(false);
       return;
     }
 
     try {
       setIsLoading(true);
+      setLoadError(null);
       const res = await api.get<Family[]>('/families/my-families');
       const familiesList = Array.isArray(res.data) ? res.data : [];
       setMyFamilies(familiesList);
+      setFamiliesLoaded(true);
 
       if (familiesList.length > 0) {
         const savedFamilyId = await storage.get('active_family_id');
@@ -76,10 +86,12 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setCurrentFamily(null);
         await storage.remove('active_family_id');
       }
-    } catch (err) {
+    } catch (err: any) {
+      // A failed request is not proof that the user has no family. Clearing the
+      // state here would drop an existing member onto the create/join onboarding
+      // and let them start a second family over their real one.
       console.error('Failed to load families:', err);
-      setCurrentFamily(null);
-      setMyFamilies([]);
+      setLoadError(err?.message || 'Aile bilgileri yüklenemedi.');
     } finally {
       setIsLoading(false);
     }
@@ -190,7 +202,10 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         currentFamily,
         myFamilies,
         isLoading,
+        familiesLoaded,
+        loadError,
         activeMember,
+        retryLoadFamilies: fetchFamilies,
         createFamily,
         joinFamily,
         refreshFamily,

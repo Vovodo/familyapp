@@ -45,6 +45,9 @@ def run_safe_migrations():
                 "ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;",
                 "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(500);",
                 "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(30);",
+                "ALTER TABLE drawing_game_players ADD COLUMN IF NOT EXISTS is_present BOOLEAN DEFAULT TRUE;",
+                "ALTER TABLE drawing_game_players ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP WITH TIME ZONE;",
+                "UPDATE drawing_game_players SET last_seen_at = CURRENT_TIMESTAMP WHERE last_seen_at IS NULL AND is_present IS NOT FALSE;",
             ]
             for sql in migrations:
                 try:

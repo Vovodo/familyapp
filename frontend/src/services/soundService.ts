@@ -350,3 +350,78 @@ export const playTaskCompleteSound = (): void => {
     // Silently ignore
   }
 };
+
+/**
+ * Tahmin mesajı — kısa, yumuşak "blop"
+ */
+export const playGuessBlobSound = (): void => {
+  try {
+    const ctx = getCtx();
+    if (!ctx) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(220, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(640, ctx.currentTime + 0.06);
+    osc.frequency.exponentialRampToValueAtTime(380, ctx.currentTime + 0.14);
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.42, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.2);
+  } catch {
+    // Silently ignore
+  }
+};
+
+/**
+ * Doğru tahmin — kısa alkış / sevinç
+ */
+export const playApplauseSound = (): void => {
+  try {
+    const ctx = getCtx();
+    if (!ctx) return;
+
+    const duration = 1.35;
+    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / ctx.sampleRate;
+      const envelope = Math.min(1, t / 0.04) * Math.max(0, 1 - t / duration);
+      const burst = (Math.random() * 2 - 1) * (0.55 + 0.45 * Math.sin(2 * Math.PI * 9 * t));
+      data[i] = burst * envelope * 0.22;
+    }
+    const noise = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const noiseGain = ctx.createGain();
+    noise.buffer = buffer;
+    filter.type = 'bandpass';
+    filter.frequency.value = 1800;
+    filter.Q.value = 0.7;
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noiseGain.gain.setValueAtTime(1, ctx.currentTime);
+    noise.start(ctx.currentTime);
+    noise.stop(ctx.currentTime + duration);
+
+    [0, 0.11, 0.22, 0.36, 0.5, 0.66].forEach((offset, i) => {
+      const start = ctx.currentTime + offset;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(520 + (i % 3) * 180, start);
+      gain.gain.setValueAtTime(0.18, start);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.16);
+      osc.start(start);
+      osc.stop(start + 0.18);
+    });
+  } catch {
+    // Silently ignore
+  }
+};

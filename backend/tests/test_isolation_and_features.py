@@ -167,3 +167,34 @@ def test_family_permanent_deletion_and_isolation(client):
     assert len(shop_y) == 1
     assert shop_y[0]["title"] == "Y Sütü"
 
+
+def test_existing_member_cannot_create_a_second_family(client):
+    """A stale onboarding screen must not be able to strand a member in a new,
+    empty family that hides their real one."""
+    res = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Reis Z", "email": "userZ@test.com", "password": "passwordZ123"},
+    )
+    headers = {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+    first = client.post("/api/v1/families/", json={"name": "Z Ailesi"}, headers=headers)
+    assert first.status_code == 201
+    first_id = first.json()["id"]
+
+    # 1. Creating a second family is refused with a clear Turkish message
+    second = client.post("/api/v1/families/", json={"name": "Kazara Kurulan Aile"}, headers=headers)
+    assert second.status_code == 409
+    assert "zaten bir aile" in second.json()["detail"].lower()
+
+    # 2. The original family is still the one and only membership
+    my_fams = client.get("/api/v1/families/my-families", headers=headers).json()
+    assert len(my_fams) == 1
+    assert my_fams[0]["id"] == first_id
+    assert my_fams[0]["name"] == "Z Ailesi"
+
+    # 3. Once the family is gone, creating a new one is allowed again
+    assert client.delete(f"/api/v1/families/{first_id}", headers=headers).status_code == 200
+    again = client.post("/api/v1/families/", json={"name": "Yeni Z Ailesi"}, headers=headers)
+    assert again.status_code == 201
+    assert again.json()["id"] != first_id
+

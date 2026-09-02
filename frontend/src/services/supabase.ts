@@ -9,7 +9,9 @@ const supabaseAnonKey =
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   realtime: {
     params: {
-      eventsPerSecond: 10,
+      // Çizim oyunu saniyede ~22 toplu mesaj yollar; 10'luk varsayılan tavan
+      // bu mesajları kırpıp uzak tuvalde takılmaya yol açıyordu.
+      eventsPerSecond: 40,
     },
   },
 });

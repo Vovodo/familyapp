@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App as CapApp } from '@capacitor/app';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { FamilyProvider } from './contexts/FamilyContext';
+import { DrawingGameProvider } from './contexts/DrawingGameContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { MobileLayout } from './components/layout/MobileLayout';
 import { LoginPage } from './pages/auth/LoginPage';
@@ -17,6 +18,9 @@ import { RemindersPage } from './pages/reminders/RemindersPage';
 import { TasksPage } from './pages/tasks/TasksPage';
 import { BudgetPage } from './pages/budget/BudgetPage';
 import { FamilySettingsPage } from './pages/family/FamilySettingsPage';
+import { GamesPage } from './pages/games/GamesPage';
+import { DrawGuessPage } from './pages/games/DrawGuessPage';
+import { WatchPartyPage } from './pages/watchparty/WatchPartyPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { liveUpdateService } from './services/liveUpdate';
 import { Loader2, Heart } from 'lucide-react';
@@ -94,6 +98,7 @@ export const App: React.FC = () => {
         <AuthProvider>
           <FamilyProvider>
             <BrowserRouter>
+              <DrawingGameProvider>
               <Routes>
                 {/* Public Routes */}
                 <Route
@@ -129,6 +134,9 @@ export const App: React.FC = () => {
                   <Route path="/budget" element={<BudgetPage />} />
                   <Route path="/notes" element={<NotesPage />} />
                   <Route path="/reminders" element={<RemindersPage />} />
+                  <Route path="/games" element={<GamesPage />} />
+                  <Route path="/games/draw" element={<DrawGuessPage />} />
+                  <Route path="/watch-party" element={<WatchPartyPage />} />
                   <Route path="/family" element={<FamilySettingsPage />} />
                   <Route path="/admin" element={<AdminDashboardPage />} />
                 </Route>
@@ -136,6 +144,7 @@ export const App: React.FC = () => {
                 {/* Fallback */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </DrawingGameProvider>
             </BrowserRouter>
           </FamilyProvider>
         </AuthProvider>

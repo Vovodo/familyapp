@@ -412,3 +412,120 @@ class StorageCleanupJob(Base):
 
     family = relationship("Family", backref="cleanup_jobs")
 
+
+class DrawingGame(Base):
+    """Aile içi 'Çiz ve Tahmin Et' oyununun tur durumu."""
+    __tablename__ = "drawing_games"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(20), default="lobby", index=True)  # 'lobby', 'drawing', 'round_end', 'finished'
+    round_number = Column(Integer, default=0)
+    drawer_user_id = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+
+    # Aktif turun kelimesi. ASLA çizen dışındaki oyunculara serialize edilmez.
+    current_word = Column(String(80), nullable=True)
+    word_category = Column(String(40), nullable=True)
+
+    round_started_at = Column(DateTime(timezone=True), nullable=True)
+    round_ends_at = Column(DateTime(timezone=True), nullable=True)
+    solved_by_user_id = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    solved_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Çizim olaylarının sırası ve yeniden bağlanma sonrası fark alma için sayaç
+    stroke_seq = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_drawing_games_family_status", "family_id", "status"),
+    )
+
+    family = relationship("Family", backref="drawing_games")
+    drawer = relationship("User", foreign_keys=[drawer_user_id])
+    players = relationship("DrawingGamePlayer", back_populates="game", cascade="all, delete-orphan")
+
+
+class DrawingGamePlayer(Base):
+    __tablename__ = "drawing_game_players"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    game_id = Column(String(36), ForeignKey("drawing_games.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Integer, default=0)
+    rounds_drawn = Column(Integer, default=0)
+    is_present = Column(Boolean, default=True)
+    last_seen_at = Column(DateTime(timezone=True), default=get_utc_now)
+    joined_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("game_id", "user_id", name="uq_drawing_game_player"),
+        Index("idx_drawing_players_game", "game_id", "user_id"),
+    )
+
+    game = relationship("DrawingGame", back_populates="players")
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+
+
+class DrawingStroke(Base):
+    """
+    Tamamlanmış çizim olaylarının kalıcı kaydı. Canlı çizim Supabase broadcast
+    ile akar; bu tablo sonradan katılan oyuncu, sayfa yenileme ve kopan
+    bağlantı sonrası farkı almak (since_seq) için kullanılır.
+    """
+    __tablename__ = "drawing_strokes"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    game_id = Column(String(36), ForeignKey("drawing_games.id", ondelete="CASCADE"), nullable=False, index=True)
+    round_number = Column(Integer, nullable=False, default=0)
+    seq = Column(Integer, nullable=False, default=0)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(10), nullable=False, default="stroke")  # 'stroke', 'clear', 'undo'
+    payload = Column(Text, nullable=True)  # JSON: {"c": renk, "w": kalınlık, "p": [x,y,...]}
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_drawing_strokes_replay", "game_id", "round_number", "seq"),
+    )
+
+
+class DrawingGuess(Base):
+    __tablename__ = "drawing_guesses"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    game_id = Column(String(36), ForeignKey("drawing_games.id", ondelete="CASCADE"), nullable=False, index=True)
+    round_number = Column(Integer, nullable=False, default=0)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    text = Column(String(120), nullable=False)
+    is_correct = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_drawing_guesses_round", "game_id", "round_number", "created_at"),
+    )
+
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+
+
+class DrawingWordHistory(Base):
+    """
+    Oyuncuya gösterilmiş kelimeler. Yalnızca user_id ile ilişkilidir, böylece
+    bir oyuncunun geçmişi başka oyuncuların kelime dağılımını etkilemez.
+    `cycle`, havuz tükendiğinde artar; seçim yalnızca güncel döngüye bakar.
+    """
+    __tablename__ = "drawing_word_history"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="SET NULL"), nullable=True)
+    word = Column(String(80), nullable=False)
+    cycle = Column(Integer, nullable=False, default=1)
+    shown_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_drawing_word_history_user_cycle", "user_id", "cycle"),
+        Index("idx_drawing_word_history_user_word", "user_id", "word"),
+    )
+

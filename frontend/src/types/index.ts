@@ -269,6 +269,70 @@ export interface NotificationItem {
   created_at: string;
 }
 
+export interface DrawingPlayer {
+  user_id: string;
+  name: string;
+  score: number;
+  rounds_drawn: number;
+  is_drawer: boolean;
+  is_online?: boolean;
+}
+
+export interface DrawingGuessItem {
+  id: string;
+  user_id: string;
+  name: string;
+  text: string;
+  is_correct: boolean;
+  created_at: string;
+}
+
+export interface DrawingGameState {
+  game_id: string | null;
+  status: 'none' | 'lobby' | 'drawing' | 'round_end' | 'finished';
+  round_number: number;
+  drawer_user_id: string | null;
+  drawer_name: string | null;
+  is_drawer: boolean;
+  /** Yalnızca çizen oyuncuya gelir. */
+  word: string | null;
+  /** Tahmin edenlere gelen maske. */
+  word_masked: string | null;
+  word_length: number | null;
+  word_category: string | null;
+  /** Tur bittiğinde herkese açılan kelime. */
+  revealed_word: string | null;
+  round_started_at: string | null;
+  round_ends_at: string | null;
+  seconds_left: number | null;
+  solved_by_user_id: string | null;
+  solved_by_name: string | null;
+  stroke_seq: number;
+  players: DrawingPlayer[];
+  guesses: DrawingGuessItem[];
+  is_player: boolean;
+  min_players: number;
+  family_member_count: number;
+  pool_size: number;
+  my_words_seen: number;
+  online_count?: number;
+}
+
+export interface DrawingStrokeRecord {
+  seq: number;
+  round_number: number;
+  user_id: string;
+  kind: 'stroke' | 'clear' | 'undo';
+  payload: { c: string; w: number; p: number[] } | null;
+}
+
+export interface DrawingStrokesResponse {
+  game_id: string;
+  round_number: number;
+  stroke_seq: number;
+  strokes: DrawingStrokeRecord[];
+}
+
 export interface IntegrationItem {
   name: string;
   active: boolean;

@@ -10,7 +10,12 @@ from backend.app.models.models import (
     Reminder,
     Notification,
     DeviceToken,
-    VerificationCode
+    VerificationCode,
+    DrawingGame,
+    DrawingGamePlayer,
+    DrawingStroke,
+    DrawingGuess,
+    DrawingWordHistory
 )
 
 __all__ = [
@@ -25,5 +30,10 @@ __all__ = [
     "Reminder",
     "Notification",
     "DeviceToken",
-    "VerificationCode"
+    "VerificationCode",
+    "DrawingGame",
+    "DrawingGamePlayer",
+    "DrawingStroke",
+    "DrawingGuess",
+    "DrawingWordHistory"
 ]

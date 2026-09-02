@@ -17,6 +17,8 @@ import {
   Utensils,
   ListTodo,
   Wallet,
+  Gamepad2,
+  Clapperboard,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -36,7 +38,8 @@ type QuickActionType = 'heart' | 'tea' | 'coming_home' | 'meal';
 
 export const HomePage: React.FC = () => {
   const { user, logout } = useAuth();
-  const { currentFamily, activeMember, createFamily, joinFamily, isLoading } = useFamily();
+  const { currentFamily, activeMember, createFamily, joinFamily, isLoading, familiesLoaded } =
+    useFamily();
   const navigate = useNavigate();
 
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -174,8 +177,10 @@ export const HomePage: React.FC = () => {
     }
   };
 
-  // Loading state while family information is being fetched
-  if (isLoading) {
+  // Loading state while family information is being fetched. `familiesLoaded`
+  // keeps the create/join onboarding below unreachable until the server has
+  // confirmed the account really has no family.
+  if (isLoading || (!currentFamily && !familiesLoaded)) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[70vh] space-y-3">
         <div className="w-16 h-16 rounded-3xl bg-family-50 flex items-center justify-center text-family-600 shadow-inner">
@@ -401,6 +406,26 @@ export const HomePage: React.FC = () => {
       iconBg: 'bg-purple-500',
       textColor: 'text-purple-900',
       badge: 'Notlar',
+    },
+    {
+      title: 'Oyunlar',
+      subtitle: 'Çiz ve tahmin et, birlikte oynayın',
+      icon: Gamepad2,
+      to: '/games',
+      bgColor: 'bg-fuchsia-50/80',
+      iconBg: 'bg-fuchsia-600',
+      textColor: 'text-fuchsia-900',
+      badge: 'Canlı Oyun',
+    },
+    {
+      title: 'Seyir Partisi',
+      subtitle: 'Birlikte film ve dizi izleme',
+      icon: Clapperboard,
+      to: '/watch-party',
+      bgColor: 'bg-violet-50/80',
+      iconBg: 'bg-violet-600',
+      textColor: 'text-violet-900',
+      badge: 'Yakında',
     },
     {
       title: 'Fotoğraf & Anılar',
