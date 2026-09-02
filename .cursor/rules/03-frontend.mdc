@@ -1,0 +1,49 @@
+---
+description: React 19 + Vite + Capacitor istemci mimarisi, state ve servisler
+globs: frontend/src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Frontend
+
+Giriş: `frontend/src/main.tsx` → `App.tsx`. Mobil kabuk: `MobileLayout` (Header, BottomNav, OfflineBanner).
+
+## Rotalar (`App.tsx`)
+
+- Public: `/login`, `/register` (`PublicRoute`)
+- Protected: `/`, `/chat`, `/gallery`, `/shopping`, `/tasks`, `/budget`, `/notes`, `/reminders`, `/family`, `/admin`
+- Android geri tuşu `MobileLayout` içinde Capacitor `backButton`
+
+## State (gerçek kullanım)
+
+- `AuthContext`: JWT, `/auth/me`, login, OTP `verify-and-register` (istemcide `quickJoin` `/auth/quick-join` çağırır; yeni auth yolu eklemeden mevcut `/auth/*` router’ına bak)
+- `FamilyContext`: `my-families`, `active_family_id`, zorunlu sync, restore prompt
+- `ThemeContext`: CSS değişkenleri, `ailem_active_theme`
+- Sayfa state: `useState` + `cacheService` (bellek + `sessionStorage` `ailem_cache_*`)
+- `@tanstack/react-query` yalnızca `QueryClientProvider`; yeni veri için `useQuery` ekleme, mevcut SWR desenini sürdür
+
+```ts
+const cached = cacheService.get<Note[]>(`notes_${familyId}`);
+if (cached) setNotes(cached);
+const { data } = await api.get('/notes/');
+cacheService.set(`notes_${familyId}`, data);
+```
+
+## API
+
+`services/api.ts` Axios. Token: Capacitor Preferences + `localStorage` (`auth_token`). Her istekte `Authorization` ve `x-family-id`. Hata mesajı `detail` (string veya Pydantic listesi) → `Error`.
+
+Yerel depolar: `localNotesStorage`, `localShoppingStorage`, `localRemindersStorage`, `localChatStorage`, `localMediaVault`, `syncService`.
+
+## Realtime
+
+`supabase.channel('family-chat-'+id)` vb. broadcast. Backend SSE ayrı (`events.py`); EventSource ekleme zorunlu değil. Yorumlardaki "WebSocket" ifadesi kanal API’sidir.
+
+## Bileşenler
+
+- `pages/<özellik>/` sayfa
+- `components/chat|layout|common|home|theme/`
+- Tipler: `frontend/src/types/index.ts` (backend şemasıyla hizala)
+- İkon: `lucide-react`. Stil: Tailwind 3 + tema token’ları
+
+Yeni özellik: mevcut context/service’i genişlet; Redux/Zustand ekleme.

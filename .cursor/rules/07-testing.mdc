@@ -1,0 +1,50 @@
+---
+description: Pytest backend doğrulaması, izolasyon testleri ve frontend build kapısı
+alwaysApply: true
+---
+
+# Test ve kalite kapısı
+
+Kod yazılmış olması yetmez. Değişiklik çalışmadan ve ilgili testler geçmeden iş bitmez.
+
+## Backend (var olan tek otomatik suite)
+
+```bash
+python -m pytest backend/tests -v
+```
+
+- Framework: pytest, FastAPI `TestClient`
+- DB: `sqlite:///./test_family.db` (`conftest.py`); docs’taki in-memory StaticPool değil
+- `get_db` override + transaction rollback
+
+Dosyalar:
+
+- `test_auth.py` — kayıt, login, profil, quickJoin
+- `test_isolation_and_features.py` — çapraz aile 403, davet kodu
+- `test_quota_retention.py` — kota, fail-safe, checksum
+- `test_sync_and_backup.py` — mandatory sync, backup API
+- `test_chat_idempotency.py`, `test_heart_and_push.py`, `test_weather.py`
+
+Aile verisi değişince izolasyon senaryosu ekle veya mevcut testi genişlet (sahte `x-family-id` → 403).
+
+## Frontend test runner yok
+
+`package.json` içinde jest/vitest/playwright script’i yok. Yokken test framework ekleme (görev değilse).
+
+Frontend doğrulama:
+
+```bash
+cd frontend && npm run build
+```
+
+(`tsc -b && vite build && node scripts/build-ota.js`). Yalnızca tip için: `npm run build:clean`.
+
+## API
+
+- Auth’lu istekte Bearer. Aile işi için gerekirse `x-family-id`
+- Public: `/api/v1/health/`, login/register
+- Edge: boş aile, gizli not, kota aşımı, tekrar `client_message_id`
+
+## Döngü
+
+Başarısız test veya build → düzelt → aynı komutu tekrar çalıştır. Geçmeyen testi silerek yeşile çekme.

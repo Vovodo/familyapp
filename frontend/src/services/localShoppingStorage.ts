@@ -1,4 +1,5 @@
 import { ShoppingItem } from '../types';
+import { isTempId } from './listSync';
 
 const STORAGE_KEY = 'ailem_shopping_items_';
 
@@ -32,15 +33,15 @@ export const localShoppingStorage = {
   mergeItems(familyId: string, serverItems: ShoppingItem[]): ShoppingItem[] {
     const local = this.getItems(familyId);
     const itemMap = new Map<string, ShoppingItem>();
+    const localList = Array.isArray(local) ? local : [];
+    const serverList = Array.isArray(serverItems) ? serverItems : [];
 
-    // Index local items
-    for (const item of local) {
-      itemMap.set(item.id, item);
+    for (const item of localList) {
+      if (item?.id && !isTempId(item.id)) itemMap.set(item.id, item);
     }
 
-    // Overwrite with server items
-    for (const sItem of serverItems) {
-      itemMap.set(sItem.id, sItem);
+    for (const sItem of serverList) {
+      if (sItem?.id) itemMap.set(sItem.id, sItem);
     }
 
     const merged = Array.from(itemMap.values());

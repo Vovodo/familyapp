@@ -6,6 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from backend.app.core.config import settings
+from backend.app.core.sentry import init_sentry
+
+init_sentry()
+
 from backend.app.core.logging import setup_logging
 from backend.app.core.security import get_password_hash
 from backend.app.db.session import engine, SessionLocal
@@ -92,6 +96,7 @@ def init_db_sync():
     try:
         Base.metadata.create_all(bind=engine)
         run_safe_migrations()
+        settings.validate_quota_allocation()
         logger.info("Database tables and migrations initialized successfully.")
         seed_admin_user()
     except Exception as e:
@@ -144,6 +149,8 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 # Global Exception Handler for friendly error responses
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    import sentry_sdk
+    sentry_sdk.capture_exception(exc)
     logger.error(f"Unhandled exception on {request.url.path}: {exc}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

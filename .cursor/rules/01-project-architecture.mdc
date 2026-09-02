@@ -1,0 +1,50 @@
+---
+description: Ailem uygulamasının gerçek katmanlı mimarisi, dizin yapısı ve dokümantasyon-kod sapmaları
+alwaysApply: true
+---
+
+# Proje Mimarisi (Ailem)
+
+Kaynak gerçekliği koddur. `docs/` ile çelişirse koda uy. Yeni katman, framework veya ORM ekleme.
+
+## Yığın (tespit edilen)
+
+- Backend: Python 3.12, FastAPI, Uvicorn, Pydantic v2, SQLAlchemy 2.0
+- Frontend: React 19, TypeScript, Vite 6, Tailwind CSS 3.4, React Router 7, Axios, Capacitor 7
+- Veri: PostgreSQL (üretim / Supabase) veya SQLite (yerel / test). Alembic yok.
+- Auth: FastAPI JWT (`python-jose` HS256, bcrypt). Opsiyonel Supabase JWT doğrulama.
+- Depolama: Supabase Storage (`family-media`) + yerel `uploads/` yedeği
+- Realtime: backend SSE (`/api/v1/events`); istemci `supabase.channel(...)` broadcast. WebSocket yok.
+- Dağıtım: Docker Compose, Coolify, frontend Nginx, Android APK (Capacitor)
+
+## Dizinler
+
+```
+backend/app/main.py          # FastAPI giriş, CORS, create_all, lifespan
+backend/app/api/v1/          # REST router'lar
+backend/app/api/deps.py      # get_current_user / family_member / admin_member
+backend/app/models/models.py # Tek ORM dosyası
+backend/app/schemas/         # Pydantic
+backend/app/services/        # storage, image, backup, quota, push, email, weather, cleanup
+frontend/src/pages/         # Rota sayfaları
+frontend/src/contexts/      # Auth, Family, Theme
+frontend/src/services/      # api, cache, local*Storage, sync, supabase
+docs/                       # Referans; güncel olmayabilir
+```
+
+## Veri akışı
+
+1. Zorunlu bulut: notlar, görevler, bütçe, alışveriş, hatırlatıcılar → REST + `syncService.syncMandatoryData`
+2. Sohbet/medya: cihaz yerel depo (`localChatStorage`, `localMediaVault`); bulut yedek aile admin toggle ile
+3. İzolasyon: her aile kaydı `family_id` ile; yetki `get_current_family_member` + `x-family-id`
+
+## Bilinçli sapmalar (docs ≠ kod)
+
+- Not alanı `is_private` (docs’taki `is_secret` değil)
+- `User.role` varsayılan `"member"` (`"user"` değil)
+- Tailwind 3.4, v4 değil
+- İstemci önbelleği `cacheService` (SWR deseni); `@tanstack/react-query` kurulu ama `useQuery` kullanılmıyor
+- Repo içinde Postgres RLS policy yok; izolasyon uygulama katmanında
+- `slowapi` requirements’ta var, kodda kullanılmıyor (kalp spam limiti in-memory)
+
+Özellik eklerken mevcut router/service/context’i genişlet. Paralel mimari kurma.

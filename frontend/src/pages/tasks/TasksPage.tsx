@@ -20,6 +20,7 @@ import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { cacheService } from '../../services/cacheService';
 import { playTaskCompleteSound } from '../../services/soundService';
+import { dedupeById, prependUnique } from '../../services/listSync';
 
 export const TasksPage: React.FC = () => {
   const { user } = useAuth();
@@ -29,6 +30,8 @@ export const TasksPage: React.FC = () => {
   const [tasks, setTasks] = useState<TaskItem[]>(() =>
     cacheKey ? cacheService.get<TaskItem[]>(cacheKey) || [] : []
   );
+  const tasksRef = useRef<TaskItem[]>(tasks);
+  tasksRef.current = tasks;
   const [isLoading, setIsLoading] = useState(() => (cacheKey ? !cacheService.get(cacheKey) : true));
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
 
@@ -42,16 +45,31 @@ export const TasksPage: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Toggle cooldown ref
-  const cooldownMap = useRef<Record<string, number>>({});
+  const pendingCompletionRef = useRef<Map<string, boolean>>(new Map());
+  const isAddingRef = useRef(false);
 
-  // Fetch tasks
+  const mergeWithPending = (serverList: TaskItem[], prev: TaskItem[]): TaskItem[] => {
+    const pending = pendingCompletionRef.current;
+    if (pending.size === 0) return serverList;
+    return serverList.map((task) => {
+      const intended = pending.get(task.id);
+      if (intended === undefined) return task;
+      if (task.is_completed === intended) return task;
+      const local = prev.find((p) => p.id === task.id);
+      return local ?? { ...task, is_completed: intended };
+    });
+  };
+
   const fetchTasks = async () => {
     if (!currentFamily) return;
     try {
       const res = await api.get<TaskItem[]>('/tasks/');
-      setTasks(res.data);
-      if (cacheKey) cacheService.set(cacheKey, res.data);
+      const data = Array.isArray(res.data) ? res.data : [];
+      setTasks((prev) => {
+        const next = dedupeById(mergeWithPending(data, prev));
+        if (cacheKey) cacheService.set(cacheKey, next);
+        return next;
+      });
     } catch (err) {
       console.warn('Failed to fetch tasks:', err);
     } finally {
@@ -93,8 +111,9 @@ export const TasksPage: React.FC = () => {
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || isAdding) return;
+    if (!title.trim() || isAdding || isAddingRef.current) return;
 
+    isAddingRef.current = true;
     setIsAdding(true);
     setError(null);
 
@@ -107,7 +126,11 @@ export const TasksPage: React.FC = () => {
         due_date: dueDate ? new Date(dueDate).toISOString() : undefined,
       });
 
-      setTasks((prev) => [res.data, ...prev]);
+      setTasks((prev) => {
+        const next = prependUnique(prev, res.data);
+        if (cacheKey) cacheService.set(cacheKey, next);
+        return next;
+      });
       setTitle('');
       setDescription('');
       setPriority('normal');
@@ -117,46 +140,59 @@ export const TasksPage: React.FC = () => {
     } catch (err: any) {
       setError(err.message || 'Görev eklenemedi.');
     } finally {
+      isAddingRef.current = false;
       setIsAdding(false);
     }
   };
 
   const handleToggleTask = async (taskId: string) => {
-    // 2-second cooldown per task
-    const now = Date.now();
-    const lastToggle = cooldownMap.current[taskId] || 0;
-    if (now - lastToggle < 2000) return;
-    cooldownMap.current[taskId] = now;
+    if (pendingCompletionRef.current.has(taskId)) return;
 
-    // Optimistic toggle
-    const target = tasks.find((t) => t.id === taskId);
+    const target = tasksRef.current.find((t) => t.id === taskId);
     if (!target) return;
 
     const willBeCompleted = !target.is_completed;
+    pendingCompletionRef.current.set(taskId, willBeCompleted);
+
     if (willBeCompleted) {
       playTaskCompleteSound();
       if (navigator.vibrate) navigator.vibrate(50);
     }
 
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === taskId
-          ? {
-              ...t,
-              is_completed: willBeCompleted,
-              completed_at: willBeCompleted ? new Date().toISOString() : null,
-              completer_name: willBeCompleted ? user?.full_name?.split(' ')[0] : null,
-            }
-          : t
-      )
-    );
+    const optimistic: TaskItem = {
+      ...target,
+      is_completed: willBeCompleted,
+      completed_at: willBeCompleted ? new Date().toISOString() : null,
+      completer_name: willBeCompleted ? user?.full_name?.split(' ')[0] : null,
+    };
+
+    setTasks((prev) => {
+      const next = prev.map((t) => (t.id === taskId ? optimistic : t));
+      if (cacheKey) cacheService.set(cacheKey, next);
+      return next;
+    });
 
     try {
-      const res = await api.patch<TaskItem>(`/tasks/${taskId}/toggle`);
-      setTasks((prev) => prev.map((t) => (t.id === taskId ? res.data : t)));
+      const res = await api.put<TaskItem>(`/tasks/${taskId}`, { is_completed: willBeCompleted });
+      if (res.data?.is_completed === willBeCompleted) {
+        setTasks((prev) => {
+          const next = prev.map((t) => (t.id === taskId ? res.data : t));
+          if (cacheKey) cacheService.set(cacheKey, next);
+          return next;
+        });
+      }
     } catch (err) {
       console.warn('Toggle failed, reverting:', err);
-      fetchTasks();
+      pendingCompletionRef.current.delete(taskId);
+      setTasks((prev) => {
+        const next = prev.map((t) => (t.id === taskId ? target : t));
+        if (cacheKey) cacheService.set(cacheKey, next);
+        return next;
+      });
+    } finally {
+      window.setTimeout(() => {
+        pendingCompletionRef.current.delete(taskId);
+      }, 2000);
     }
   };
 
@@ -280,11 +316,7 @@ export const TasksPage: React.FC = () => {
                 {/* Big Checkbox */}
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggleTask(task.id);
-                  }}
-                  className={`mt-0.5 w-6 h-6 rounded-xl border-2 flex items-center justify-center transition-all flex-shrink-0 cursor-pointer ${
+                  className={`mt-0.5 w-6 h-6 rounded-xl border-2 flex items-center justify-center transition-all flex-shrink-0 pointer-events-none ${
                     task.is_completed
                       ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
                       : isUrgent

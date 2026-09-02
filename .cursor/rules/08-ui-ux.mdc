@@ -1,0 +1,45 @@
+---
+description: Mobil-öncelikli Tailwind UI, tema token’ları ve sabit hızlı eylem renkleri
+globs: frontend/src/**/*.{tsx,css}
+alwaysApply: false
+---
+
+# UI / UX
+
+Hedef: Türkçe, büyük dokunma alanı, aile içi sade mobil uygulama (web + Capacitor Android). `appId`: `com.aile.mobile`.
+
+## Kabuk
+
+- `MobileLayout`: sticky Header, sabit BottomNav (Ana Sayfa, Sohbet, Alışveriş, Notlar, Hatırlatıcı), `OfflineBanner`
+- `safe-area-top` / `safe-area-bottom` (`index.css` + `env(safe-area-inset-*)`)
+- Dokunma: `touch-action: manipulation`; aktif `scale(0.96)`. `user-select: none` gövde; sohbet metninde bilinçli istisna
+
+## Tema
+
+`ThemeContext` `document.documentElement` üzerine `--theme-*` basar. Yüzeyler:
+
+- `theme-header`, `theme-nav`, `theme-hero-card`
+- `var(--theme-bg)`, `--theme-surface`, `--theme-text-primary`, `--theme-accent`, `--theme-nav-active`
+
+12 tema (`midnight` … `coffee`). Kayıt: `localStorage` `ailem_active_theme`.
+
+Hızlı durum butonları temaya bağlanmaz (`index.css` `!important`):
+
+- `.quick-action-heart` (kalp)
+- `.quick-action-tea` (çay)
+- `.quick-action-coming-home` (eve geliyorum)
+- `.quick-action-meal` (yemek)
+
+## Tailwind
+
+v3.4 (`tailwind.config.js`): `family.*`, `warm.*`. `@tailwind` direktifleri; v4 `@theme` yok. Yeni renk için mümkünse CSS değişkeni.
+
+## İçerik ve erişim
+
+- Kullanıcıya görünen metin Türkçe
+- Hata: Axios interceptor mesajı; teknik stack trace gösterme
+- Yükleme: `Loader2` + mevcut kalp/iskelet deseni
+- Chat: `MessageBubble`, tarih ayırıcı, scroll-to-bottom, pinch-zoom
+- Form: yeterince büyük input/button (min ~44px dokunma)
+
+Masaüstü-only layout veya yeni design system ekleme.

@@ -1,4 +1,5 @@
 import { Reminder } from '../types';
+import { isTempId } from './listSync';
 
 const STORAGE_KEY = 'ailem_reminders_';
 
@@ -25,7 +26,7 @@ export const localRemindersStorage = {
     const map = new Map<string, Reminder>();
 
     for (const r of local) {
-      map.set(r.id, r);
+      if (r?.id && !isTempId(r.id)) map.set(r.id, r);
     }
 
     for (const sr of serverReminders) {

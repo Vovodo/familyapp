@@ -1,0 +1,70 @@
+---
+description: Yeni özellik geliştirme sırası, migrasyon, test, build ve tamamlanma kriteri
+alwaysApply: true
+---
+
+# Geliştirme iş akışı
+
+Uygulama kaynağını rastgele dosyadan değiştirme. Önce mevcut kodu oku. Fake/demo data, gereksiz dependency, mimari rewrite yok.
+
+## Sıra (zorunlu)
+
+1. **Analiz** — İlgili router, model, şema, page, context, `local*Storage`. `docs/` ile kod çelişirse koda uy.
+2. **Modeller ve servisler** — `models.py`, `deps.py`, `backend/app/services/`, `frontend/src/services/`.
+3. **DB gerekirse** — Kolon/tabloyu `models.py`’ye yaz; `run_safe_migrations()` içine `ADD COLUMN IF NOT EXISTS`; `db/base.py` export listesini güncelle. Alembic kullanma.
+4. **Backend** — Pydantic şema, router, `family_id == member.family_id`, Türkçe hata. Aile admin işi: `get_current_admin_member`. Sistem admin: `User.role == "admin"`.
+5. **API doğrula** — `python -m pytest backend/tests -v` (ilgili dosya veya tüm suite). İzolasyon + yetki senaryolarını kırdıysan testi güncelle.
+6. **Frontend** — `types/index.ts`, `api.ts` yolu, page/component, cacheService anahtarı, gerekirse Family/Auth context. `useQuery` ile yeni paralel veri katmanı açma.
+7. **UI** — Tema token, safe-area, Türkçe kopya, hızlı eylem renklerini bozma. Capacitor yüzeyiyse Preferences/Filesystem/Camera mevcut servislerden.
+8. **Testleri çalıştır** — Backend pytest. Frontend runner yok; davranış + `npm run build`.
+9. **Build** — `cd frontend && npm run build` (tsc + vite + OTA script). Backend: `uvicorn backend.app.main:app`.
+10. **Hata varsa düzelt** — Tip, import, 403 izolasyon, boş state.
+11. **Tekrar test et** — Aynı pytest ve build komutları yeşil olmalı.
+12. **Tamamlandı sayma** — Özellik gerçekten çalışmadan (izolasyon, gizli not, kota, offline cache) işi kapatma.
+
+## Komutlar
+
+```bash
+# backend
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+python -m pytest backend/tests -v
+
+# frontend
+cd frontend && npm run dev
+cd frontend && npm run build
+```
+
+Docker: kök `docker-compose.yml` (backend 8000, frontend 3000→80).
+
+## Android APK → web indirme (zorunlu)
+
+Web’deki **APK İndir** (`DownloadApkButton` → `GET /api/v1/downloads/apk`) her zaman **en son derlenen** paketi vermeli. Eski `ailem.apk` bırakılmaz.
+
+Tek kanonik dosya: `backend/app/static/ailem.apk`
+
+```bash
+cd frontend
+npm run build
+npx cap sync android
+cd android
+.\gradlew.bat assembleDebug
+cd ..
+npm run apk:publish
+```
+
+`apk:publish` (`scripts/publish-apk.js`):
+
+1. Kaynak: `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
+2. Eski kopyaları sil (`backend/app/static/ailem.apk`, `public/downloads/ailem.apk`, kök `ailem.apk` vb.)
+3. Yeni dosyayı `backend/app/static/ailem.apk` olarak yaz
+
+Canlı sitede butonun yeni APK’yı vermesi için bu dosyanın sunucuya gitmesi gerekir (commit/deploy veya Coolify volume). Gradle çıktısı tek başına web indirmeyi güncellemez.
+
+Yapma: eski APK’nın üzerine ek kopya yığmak; birden fazla `ailem.apk` bırakmak; indirme URL’sini cache’lenebilir bırakmak.
+
+## Bitirme kontrolü
+
+- [ ] Yanlış aile `x-family-id` ile 403
+- [ ] Secret `.env` / APK içine girmedi
+- [ ] pytest geçti
+- [ ] `npm run build` geçti

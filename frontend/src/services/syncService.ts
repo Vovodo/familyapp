@@ -101,39 +101,80 @@ class SyncService {
 
   /**
    * Enqueues a message for batch incremental backup if cloud backup is enabled.
+   * Only durable (http) media URLs are queued — blob URLs cannot be restored.
    */
   public queueMessageForBackup(familyId: string, message: Message, isBackupEnabled: boolean): void {
     if (!familyId || !isBackupEnabled) return;
+    if (message.id?.startsWith('temp-')) return;
 
     try {
       const key = `ailem_pending_backup_${familyId}`;
       const existingStr = localStorage.getItem(key);
       const queue: any[] = existingStr ? JSON.parse(existingStr) : [];
 
-      // Avoid duplicates in queue
       if (!queue.some((m) => m.id === message.id || (message.client_message_id && m.client_message_id === message.client_message_id))) {
         queue.push({
           id: message.id,
           client_message_id: message.client_message_id,
           sender_id: message.sender_id,
           content: message.content,
-          media_url: message.media_url,
+          media_url: message.media_url?.startsWith('http') ? message.media_url : undefined,
           media_type: message.media_type,
           created_at: message.created_at || new Date().toISOString(),
         });
         localStorage.setItem(key, JSON.stringify(queue));
       }
 
-      // Schedule batch flush
       if (queue.length >= 8) {
         this.flushBackupQueue(familyId);
       } else {
         if (this.flushTimeout) clearTimeout(this.flushTimeout);
-        this.flushTimeout = setTimeout(() => this.flushBackupQueue(familyId), 20000); // 20s batch window
+        this.flushTimeout = setTimeout(() => this.flushBackupQueue(familyId), 20000);
       }
     } catch (err) {
       console.warn('[SYNC] Queue message error:', err);
     }
+  }
+
+  /**
+   * Pushes the local chat snapshot to cloud backup (idempotent by client_message_id).
+   * Used by "Şimdi Yedekle" — the live send path already writes to /messages/.
+   */
+  public async backupLocalChatNow(familyId: string): Promise<{ saved_count: number; status: string }> {
+    if (!familyId) return { saved_count: 0, status: 'skipped' };
+
+    await this.flushBackupQueue(familyId);
+
+    const local = await localChatStorage.getMessages(familyId);
+    const payload = local
+      .filter((m) => m.id && !m.id.startsWith('temp-') && m.status !== 'failed')
+      .map((m) => ({
+        id: m.id,
+        client_message_id: m.client_message_id,
+        sender_id: m.sender_id,
+        content: m.content,
+        media_url: m.media_url?.startsWith('http') ? m.media_url : undefined,
+        media_type: m.media_type,
+        created_at: m.created_at,
+      }));
+
+    if (payload.length === 0) {
+      return { saved_count: 0, status: 'empty' };
+    }
+
+    const chunkSize = 80;
+    let saved = 0;
+    let lastStatus = 'success';
+    for (let i = 0; i < payload.length; i += chunkSize) {
+      const chunk = payload.slice(i, i + chunkSize);
+      const res = await api.post('/sync/chat-backup', { messages: chunk });
+      lastStatus = res.data.status;
+      saved += res.data.saved_count || 0;
+      if (lastStatus === 'backup_disabled' || lastStatus === 'failed_storage_quota') {
+        break;
+      }
+    }
+    return { saved_count: saved, status: lastStatus };
   }
 
   /**
@@ -191,83 +232,96 @@ class SyncService {
         totalMedia: 0,
       });
 
-      const res = await api.get<any>('/sync/chat-restore', {
-        params: { limit: 1000, offset: 0 },
-      });
+      const allMapped: Message[] = [];
+      let offset = 0;
+      const pageSize = 300;
+      let totalMessages = 0;
+      let totalMediaFiles = 0;
+      let hasMore = true;
 
-      const { messages = [], total_messages = 0, total_media_files = 0 } = res.data;
+      while (hasMore) {
+        const res = await api.get<any>('/sync/chat-restore', {
+          params: { limit: pageSize, offset },
+        });
 
-      // Step 2: Save Messages to Local Storage
-      onProgress({
-        step: 'saving_messages',
-        percent: 30,
-        completedMessages: messages.length,
-        totalMessages: total_messages,
-        completedMedia: 0,
-        totalMedia: total_media_files,
-      });
+        const { messages = [], total_messages = 0, total_media_files = 0, has_more = false } = res.data;
+        totalMessages = total_messages;
+        totalMediaFiles = total_media_files;
 
-      const mappedMessages: Message[] = messages.map((m: any) => ({
-        id: m.id,
-        client_message_id: m.client_message_id,
-        family_id: familyId,
-        sender_id: m.sender_id,
-        sender_name: m.sender_name,
-        sender_avatar: m.sender_avatar,
-        sender_nickname: m.sender_nickname,
-        content: m.content,
-        media_url: m.media_url,
-        media_thumbnail_url: m.media_thumbnail_url,
-        media_type: m.media_type,
-        is_edited: false,
-        created_at: m.created_at,
-      }));
+        const mappedMessages: Message[] = messages.map((m: any) => ({
+          id: m.id,
+          client_message_id: m.client_message_id,
+          family_id: familyId,
+          sender_id: m.sender_id,
+          sender_name: m.sender_name,
+          sender_avatar: m.sender_avatar,
+          sender_nickname: m.sender_nickname,
+          content: m.content,
+          media_url: m.media_url,
+          media_thumbnail_url: m.media_thumbnail_url,
+          media_type: m.media_type,
+          is_edited: false,
+          created_at: m.created_at,
+        }));
+        allMapped.push(...mappedMessages);
+
+        onProgress({
+          step: 'saving_messages',
+          percent: Math.min(40, 10 + Math.round((allMapped.length / Math.max(1, totalMessages)) * 30)),
+          completedMessages: allMapped.length,
+          totalMessages: totalMessages,
+          completedMedia: 0,
+          totalMedia: totalMediaFiles,
+        });
+
+        hasMore = Boolean(has_more) && messages.length >= pageSize;
+        offset += pageSize;
+        if (offset > 20000) break;
+      }
 
       const currentLocal = await localChatStorage.getMessages(familyId);
-      const merged = reconcileMessages(currentLocal, mappedMessages);
+      const merged = reconcileMessages(currentLocal, allMapped);
       await localChatStorage.saveMessages(familyId, merged);
 
-      // Step 3: Progressive Media Download (Photos & Voice notes into family/ vault)
+      const mediaMessages = merged.filter((m) => m.media_url && !m.media_url.startsWith('blob:'));
+      let downloadedMediaCount = 0;
+
       onProgress({
         step: 'downloading_media',
-        percent: 60,
-        completedMessages: messages.length,
-        totalMessages: total_messages,
+        percent: 45,
+        completedMessages: merged.length,
+        totalMessages: totalMessages,
         completedMedia: 0,
-        totalMedia: total_media_files,
+        totalMedia: mediaMessages.length,
       });
-
-      const mediaMessages = mappedMessages.filter((m) => m.media_url);
-      let downloadedMediaCount = 0;
 
       for (let i = 0; i < mediaMessages.length; i++) {
         const msg = mediaMessages[i];
         if (msg.media_url) {
-          const type = msg.media_type === 'audio' ? 'audio' : 'images';
+          const type = msg.media_type === 'audio' || msg.media_type?.startsWith('audio/') ? 'audio' : 'images';
           try {
-            await localMediaVault.getMediaUrl(msg.media_url, type);
+            await localMediaVault.ensureCached(msg.media_url, type);
           } catch {}
           downloadedMediaCount++;
 
-          const mediaPercent = 60 + Math.round((downloadedMediaCount / Math.max(1, mediaMessages.length)) * 38);
+          const mediaPercent = 45 + Math.round((downloadedMediaCount / Math.max(1, mediaMessages.length)) * 50);
           onProgress({
             step: 'downloading_media',
             percent: Math.min(98, mediaPercent),
-            completedMessages: messages.length,
-            totalMessages: total_messages,
+            completedMessages: merged.length,
+            totalMessages: totalMessages,
             completedMedia: downloadedMediaCount,
             totalMedia: mediaMessages.length,
           });
         }
       }
 
-      // Step 4: Completed
       localStorage.setItem(`ailem_chat_restored_${familyId}`, 'true');
       onProgress({
         step: 'completed',
         percent: 100,
-        completedMessages: messages.length,
-        totalMessages: total_messages,
+        completedMessages: merged.length,
+        totalMessages: totalMessages,
         completedMedia: downloadedMediaCount,
         totalMedia: mediaMessages.length,
       });

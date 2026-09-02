@@ -13,6 +13,7 @@ import { ShoppingItem } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { localShoppingStorage } from '../../services/localShoppingStorage';
+import { commitTempItem, dedupeById, isTempId, reconcileRemoteInsert } from '../../services/listSync';
 
 const CATEGORY_STYLES: Record<string, { bg: string; text: string; border: string; activeBg: string }> = {
   Market: { bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-200', activeBg: 'bg-emerald-600' },
@@ -25,6 +26,13 @@ const CATEGORY_STYLES: Record<string, { bg: string; text: string; border: string
 
 const CATEGORIES = Object.keys(CATEGORY_STYLES);
 
+function asCompletedFlag(value: unknown): boolean | undefined {
+  if (value === true || value === false) return value;
+  if (value === 'true' || value === 't' || value === 1 || value === '1') return true;
+  if (value === 'false' || value === 'f' || value === 0 || value === '0') return false;
+  return undefined;
+}
+
 export const ShoppingPage: React.FC = () => {
   const { user } = useAuth();
   const { currentFamily } = useFamily();
@@ -35,9 +43,63 @@ export const ShoppingPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
 
-  // Locking and debounce ref to prevent rapid double-click race conditions
   const pendingActionIds = useRef<Set<string>>(new Set());
+  const pendingCompletionRef = useRef<Map<string, boolean>>(new Map());
+  const isAddingRef = useRef(false);
   const channelRef = useRef<any>(null);
+
+  const persistItems = (familyId: string, next: ShoppingItem[]) => {
+    const deduped = dedupeById(next.filter(Boolean));
+    localShoppingStorage.saveItems(familyId, deduped);
+    return deduped;
+  };
+
+  const applyDelta = useCallback((action: 'INSERT' | 'UPDATE' | 'DELETE', item?: ShoppingItem | null) => {
+    if (!currentFamily || !item || !item.id) return;
+
+    const incomingCompleted = asCompletedFlag(item.is_completed);
+    const intended = pendingCompletionRef.current.get(item.id);
+    if (
+      intended !== undefined &&
+      (action === 'UPDATE' || action === 'INSERT') &&
+      incomingCompleted !== undefined &&
+      incomingCompleted !== intended
+    ) {
+      return;
+    }
+
+    setItems((prev) => {
+      const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
+      let next: ShoppingItem[] = safePrev;
+      if (action === 'INSERT') {
+        next = reconcileRemoteInsert(safePrev, item, (local, incoming) =>
+          local.title === incoming.title &&
+          local.quantity === incoming.quantity &&
+          local.category === incoming.category &&
+          !local.is_completed
+        );
+      } else if (action === 'UPDATE') {
+        next = safePrev.map((i) => {
+          if (i.id !== item.id) return i;
+          const completed =
+            incomingCompleted !== undefined ? incomingCompleted : i.is_completed;
+          return {
+            ...i,
+            ...item,
+            is_completed: completed,
+            creator_name: item.creator_name || i.creator_name,
+            completed_by_name: completed
+              ? item.completed_by_name || i.completed_by_name || user?.full_name || 'Alındı'
+              : undefined,
+          };
+        });
+      } else if (action === 'DELETE') {
+        next = safePrev.filter((i) => i.id !== item.id);
+      }
+
+      return persistItems(currentFamily.id, next);
+    });
+  }, [currentFamily, user?.full_name]);
 
   // 1. Initial 0ms Instant Load + Background Fetch
   useEffect(() => {
@@ -45,16 +107,49 @@ export const ShoppingPage: React.FC = () => {
 
     // A. 0ms Instant Local Cache
     const cached = localShoppingStorage.getItems(currentFamily.id);
-    if (cached && cached.length > 0) {
-      setItems(cached);
+    if (Array.isArray(cached) && cached.length > 0) {
+      const real = cached.filter((item) => item && !isTempId(item.id));
+      const temps = cached.filter((item) =>
+        item &&
+        isTempId(item.id) &&
+        !real.some(
+          (serverItem) =>
+            serverItem.title === item.title &&
+            serverItem.quantity === item.quantity &&
+            serverItem.category === item.category
+        )
+      );
+      setItems(persistItems(currentFamily.id, [...temps, ...real]));
       setIsLoading(false);
     }
 
-    // B. Background Sync
     api.get<ShoppingItem[]>('/shopping/')
       .then((res) => {
-        const merged = localShoppingStorage.mergeItems(currentFamily.id, res.data);
-        setItems(merged);
+        const data = Array.isArray(res.data) ? res.data : [];
+        const merged = localShoppingStorage.mergeItems(currentFamily.id, data);
+        setItems((prev) => {
+          const pending = pendingCompletionRef.current;
+          const mergedList = Array.isArray(merged) ? merged.filter(Boolean) : [];
+          const pendingTemps = prev.filter((item) =>
+            isTempId(item.id) &&
+            !mergedList.some(
+              (serverItem) =>
+                serverItem.title === item.title &&
+                serverItem.quantity === item.quantity &&
+                serverItem.category === item.category
+            )
+          );
+          const next = dedupeById([...pendingTemps, ...mergedList]).map((item) => {
+            const intended = pending.get(item.id);
+            if (intended === undefined) return item;
+            const local = prev.find((p) => p.id === item.id);
+            if (item.is_completed === intended) return item;
+            return local
+              ? { ...item, is_completed: intended, completed_by_name: local.completed_by_name }
+              : { ...item, is_completed: intended };
+          });
+          return persistItems(currentFamily.id, next);
+        });
       })
       .catch((err) => {
         console.error('Shopping background sync failed:', err);
@@ -68,107 +163,65 @@ export const ShoppingPage: React.FC = () => {
   useEffect(() => {
     if (!currentFamily || !supabase) return;
 
-    const channel = supabase.channel(`family-shopping-${currentFamily.id}`, {
-      config: { broadcast: { ack: false, self: false } },
-    });
+    try {
+      const channel = supabase.channel(`family-shopping-${currentFamily.id}`, {
+        config: { broadcast: { ack: false, self: false } },
+      });
 
-    // Realtime Broadcast for sub-30ms instant peer updates
-    channel.on('broadcast', { event: 'shopping_delta' }, (payload) => {
-      const data = payload.payload;
-      if (!data) return;
-      applyDelta(data.action, data.item);
-    });
+      channel.on('broadcast', { event: 'shopping_delta' }, (payload) => {
+        const data = payload.payload;
+        if (!data?.item) return;
+        applyDelta(data.action, data.item);
+      });
 
-    // Postgres Changes Granular Delta Handler
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'shopping_items',
-        filter: `family_id=eq.${currentFamily.id}`,
-      },
-      (payload) => {
-        applyDelta('INSERT', payload.new as ShoppingItem);
-      }
-    );
+      channel.on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'shopping_items',
+          filter: `family_id=eq.${currentFamily.id}`,
+        },
+        (payload) => applyDelta('INSERT', payload.new as ShoppingItem)
+      );
 
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'shopping_items',
-        filter: `family_id=eq.${currentFamily.id}`,
-      },
-      (payload) => {
-        applyDelta('UPDATE', payload.new as ShoppingItem);
-      }
-    );
+      channel.on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'shopping_items',
+          filter: `family_id=eq.${currentFamily.id}`,
+        },
+        (payload) => applyDelta('UPDATE', payload.new as ShoppingItem)
+      );
 
-    channel.on(
-      'postgres_changes',
-      {
-        event: 'DELETE',
-        schema: 'public',
-        table: 'shopping_items',
-        filter: `family_id=eq.${currentFamily.id}`,
-      },
-      (payload) => {
-        applyDelta('DELETE', payload.old as ShoppingItem);
-      }
-    );
+      channel.on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'shopping_items',
+          filter: `family_id=eq.${currentFamily.id}`,
+        },
+        (payload) => applyDelta('DELETE', payload.old as ShoppingItem)
+      );
 
-    channel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        channelRef.current = channel;
-      }
-    });
-
-    return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-        channelRef.current = null;
-      }
-    };
-  }, [currentFamily?.id]);
-
-  // Granular Delta Applier (Preserves cached metadata & eliminates flickering)
-  const applyDelta = useCallback((action: 'INSERT' | 'UPDATE' | 'DELETE', item: ShoppingItem) => {
-    if (!currentFamily) return;
-
-    setItems((prev) => {
-      let next: ShoppingItem[] = [];
-      if (action === 'INSERT') {
-        const exists = prev.some((i) => i.id === item.id || (i.title === item.title && i.category === item.category && i.is_completed === item.is_completed));
-        if (exists) {
-          next = prev.map((i) => (i.title === item.title && i.category === item.category ? { ...i, ...item } : i));
-        } else {
-          next = [item, ...prev];
+      channel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          channelRef.current = channel;
         }
-      } else if (action === 'UPDATE') {
-        next = prev.map((i) => {
-          if (i.id === item.id) {
-            return {
-              ...i,
-              ...item,
-              // Preserve creator name and completed by name
-              creator_name: item.creator_name || i.creator_name,
-              completed_by_name: item.completed_by_name || i.completed_by_name || (item.is_completed ? (user?.full_name || 'Alındı') : undefined),
-            };
-          }
-          return i;
-        });
-      } else if (action === 'DELETE') {
-        next = prev.filter((i) => i.id !== item.id);
-      } else {
-        next = prev;
-      }
+      });
 
-      localShoppingStorage.saveItems(currentFamily.id, next);
-      return next;
-    });
-  }, [currentFamily, user?.full_name]);
+      return () => {
+        supabase.removeChannel(channel);
+        channelRef.current = null;
+      };
+    } catch (err) {
+      console.warn('Shopping realtime channel failed:', err);
+      return undefined;
+    }
+  }, [currentFamily?.id, applyDelta]);
 
   const broadcastDelta = (action: 'INSERT' | 'UPDATE' | 'DELETE', item: ShoppingItem) => {
     if (channelRef.current) {
@@ -180,14 +233,14 @@ export const ShoppingPage: React.FC = () => {
     }
   };
 
-  // 3. Add Item (Optimistic + Lock Protected)
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     const itemTitle = title.trim();
-    if (!itemTitle || isAdding || !user || !currentFamily) return;
+    if (!itemTitle || isAdding || isAddingRef.current || !user || !currentFamily) return;
 
     const itemQty = quantity.trim() || '1 adet';
     setTitle('');
+    isAddingRef.current = true;
     setIsAdding(true);
 
     try {
@@ -207,13 +260,7 @@ export const ShoppingPage: React.FC = () => {
       creator_name: user.full_name,
     };
 
-    setItems((prev) => {
-      const next = [optimisticItem, ...prev];
-      localShoppingStorage.saveItems(currentFamily.id, next);
-      return next;
-    });
-
-    broadcastDelta('INSERT', optimisticItem);
+    setItems((prev) => persistItems(currentFamily.id, [optimisticItem, ...prev]));
 
     try {
       const res = await api.post<ShoppingItem>('/shopping/', {
@@ -222,48 +269,24 @@ export const ShoppingPage: React.FC = () => {
         category,
       });
 
-      setItems((prev) => {
-        const next = prev.map((i) => (i.id === tempId ? { ...res.data, creator_name: user.full_name } : i));
-        localShoppingStorage.saveItems(currentFamily.id, next);
-        return next;
-      });
+      setItems((prev) =>
+        persistItems(currentFamily.id, commitTempItem(prev, tempId, {
+          ...res.data,
+          creator_name: res.data.creator_name || user.full_name,
+        }))
+      );
     } catch (err: any) {
       alert('Ürün eklenemedi: ' + err.message);
-      setItems((prev) => {
-        const next = prev.filter((i) => i.id !== tempId);
-        localShoppingStorage.saveItems(currentFamily.id, next);
-        return next;
-      });
+      setItems((prev) => persistItems(currentFamily.id, prev.filter((i) => i.id !== tempId)));
     } finally {
+      isAddingRef.current = false;
       setIsAdding(false);
     }
   };
 
-  const [toggleCooldownRemaining, setToggleCooldownRemaining] = useState<number>(0);
-  const lastToggleTimeRef = useRef<number>(0);
-
-  // 4. Toggle Item with 2-Second Cooldown & Per-Item Mutex Locking
   const handleToggle = async (item: ShoppingItem) => {
-    const now = Date.now();
-    const elapsed = now - lastToggleTimeRef.current;
-    if (elapsed < 2000) {
-      // Cooldown is active, ignore tap
-      return;
-    }
-
-    lastToggleTimeRef.current = now;
-    setToggleCooldownRemaining(2);
-
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((2000 - (Date.now() - now)) / 1000));
-      setToggleCooldownRemaining(remaining);
-      if (remaining <= 0) {
-        clearInterval(interval);
-      }
-    }, 250);
-
-    // Prevent duplicate multi-taps on the same item while network request is in flight
-    if (pendingActionIds.current.has(item.id)) return;
+    if (!currentFamily) return;
+    if (pendingActionIds.current.has(item.id) || pendingCompletionRef.current.has(item.id)) return;
     pendingActionIds.current.add(item.id);
 
     try {
@@ -271,41 +294,33 @@ export const ShoppingPage: React.FC = () => {
     } catch {}
 
     const nextState = !item.is_completed;
+    pendingCompletionRef.current.set(item.id, nextState);
     const updatedItem: ShoppingItem = {
       ...item,
       is_completed: nextState,
       completed_by_name: nextState ? (user?.full_name || 'Alındı') : undefined,
     };
 
-    // 1. Instantly update UI without waiting
-    setItems((prev) => {
-      const next = prev.map((i) => (i.id === item.id ? updatedItem : i));
-      if (currentFamily) localShoppingStorage.saveItems(currentFamily.id, next);
-      return next;
-    });
+    setItems((prev) => persistItems(currentFamily.id, prev.map((i) => (i.id === item.id ? updatedItem : i))));
 
-    // 2. Broadcast immediately
     broadcastDelta('UPDATE', updatedItem);
 
-    // 3. Send API patch
     try {
       await api.patch(`/shopping/${item.id}`, { is_completed: nextState });
     } catch (err) {
-      // Revert only if network call completely failed
-      setItems((prev) => {
-        const next = prev.map((i) => (i.id === item.id ? item : i));
-        if (currentFamily) localShoppingStorage.saveItems(currentFamily.id, next);
-        return next;
-      });
+      pendingCompletionRef.current.delete(item.id);
+      setItems((prev) => persistItems(currentFamily.id, prev.map((i) => (i.id === item.id ? item : i))));
     } finally {
-      setTimeout(() => {
-        pendingActionIds.current.delete(item.id);
-      }, 300);
+      pendingActionIds.current.delete(item.id);
+      window.setTimeout(() => {
+        pendingCompletionRef.current.delete(item.id);
+      }, 2000);
     }
   };
 
   // 5. Delete Item (Instant Delta)
   const handleDelete = async (itemId: string) => {
+    if (!currentFamily) return;
     if (pendingActionIds.current.has(itemId)) return;
     pendingActionIds.current.add(itemId);
 
@@ -316,11 +331,7 @@ export const ShoppingPage: React.FC = () => {
       Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
     } catch {}
 
-    setItems((prev) => {
-      const next = prev.filter((i) => i.id !== itemId);
-      if (currentFamily) localShoppingStorage.saveItems(currentFamily.id, next);
-      return next;
-    });
+    setItems((prev) => persistItems(currentFamily.id, prev.filter((i) => i.id !== itemId)));
 
     broadcastDelta('DELETE', itemToDelete);
 
@@ -328,7 +339,7 @@ export const ShoppingPage: React.FC = () => {
       await api.delete(`/shopping/${itemId}`);
     } catch (err) {
       if (itemToDelete) {
-        setItems((prev) => [itemToDelete, ...prev]);
+        setItems((prev) => persistItems(currentFamily.id, [itemToDelete, ...prev]));
       }
     } finally {
       setTimeout(() => {
@@ -338,14 +349,11 @@ export const ShoppingPage: React.FC = () => {
   };
 
   const handleClearCompleted = async () => {
+    if (!currentFamily) return;
     const completedItems = items.filter((i) => i.is_completed);
     if (completedItems.length === 0) return;
 
-    setItems((prev) => {
-      const next = prev.filter((i) => !i.is_completed);
-      if (currentFamily) localShoppingStorage.saveItems(currentFamily.id, next);
-      return next;
-    });
+    setItems((prev) => persistItems(currentFamily.id, prev.filter((i) => !i.is_completed)));
 
     try {
       await Promise.all(completedItems.map((i) => api.delete(`/shopping/${i.id}`)));
@@ -367,11 +375,6 @@ export const ShoppingPage: React.FC = () => {
               <span>Alışveriş Listesi</span>
               <span className="text-emerald-600">🛒</span>
             </h2>
-            {toggleCooldownRemaining > 0 && (
-              <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg animate-pulse">
-                ⏳ {toggleCooldownRemaining}s
-              </span>
-            )}
           </div>
           <p className="text-xs text-gray-500 truncate">
             {activeItems.length > 0

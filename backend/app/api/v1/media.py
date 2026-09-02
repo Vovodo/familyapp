@@ -314,27 +314,25 @@ def get_storage_stats(
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
-    Returns current family and global storage quota metrics (Supabase 1 GB free tier).
+    Returns current family image-partition quota (40% of the 2 GB cloud budget).
     """
-    total_bytes = 0
-    photo_count = db.query(Media).filter(Media.family_id == member.family_id).count()
-    all_media = db.query(Media.file_size).filter(Media.family_id == member.family_id).all()
-    for m in all_media:
-        if m.file_size:
-            total_bytes += m.file_size
+    from backend.app.services.quota_retention_service import quota_retention_service
 
-    used_mb = round(total_bytes / (1024 * 1024), 2)
-    quota_mb = 1000.0  # 1 GB
-    usage_percent = round((used_mb / quota_mb) * 100, 2)
+    breakdown = quota_retention_service.get_storage_usage_breakdown(db, member.family_id)
+    used_bytes = breakdown.image.used_bytes
+    quota_bytes = breakdown.image.quota_bytes
+    used_mb = round(used_bytes / (1024 * 1024), 2)
+    quota_mb = round(quota_bytes / (1024 * 1024), 2)
+    usage_percent = breakdown.image.usage_percent
 
     return {
-        "used_bytes": total_bytes,
+        "used_bytes": used_bytes,
         "used_mb": used_mb,
         "quota_mb": quota_mb,
         "usage_percent": usage_percent,
-        "photo_count": photo_count,
+        "photo_count": breakdown.image.item_count,
         "status": "warning" if usage_percent > 80 else "normal",
-        "provider": "Supabase Cloud Storage (1 GB Ücretsiz)" if settings.SUPABASE_URL else "Yerel Sunucu Depolaması"
+        "provider": "Supabase Cloud Storage (2 GB: sohbet %50, görsel %40, ses %10)" if settings.SUPABASE_URL else "Yerel Sunucu Depolaması"
     }
 
 

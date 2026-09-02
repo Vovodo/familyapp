@@ -1,0 +1,46 @@
+---
+description: SQLAlchemy 2 modelleri, family_id izolasyonu ve create_all + güvenli ALTER migrasyonu
+globs: backend/app/models/**/*.py,backend/app/db/**/*.py,backend/app/main.py
+alwaysApply: false
+---
+
+# Veritabanı
+
+Motor: `DATABASE_URL`. Postgres (`psycopg2`, `connect_timeout=5`) veya SQLite (`check_same_thread=False`). `pool_pre_ping=True`. Alembic / prisma yok.
+
+## Migrasyon (bu projedeki yöntem)
+
+1. Kolonu `models.py` içine ekle (tüm tablolar bu dosyada; modül import edilince `create_all` görür)
+2. `main.py` → `run_safe_migrations()` listesine `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` ekle (Postgres sözdizimi; hata `try/except` ile yutulur — SQLite’de sessizce atlanabilir)
+3. `Base.metadata.create_all` yeni tabloları oluşturur
+4. `db/base.py` export listesini güncel tut (hijyen)
+
+```python
+# ✅
+"ALTER TABLE notes ADD COLUMN IF NOT EXISTS color VARCHAR(20);"
+
+# ❌ alembic revision / DROP TABLE / mevcut satırı silen ALTER
+```
+
+## Kimlikler ve tablolar
+
+- PK: `String(36)` UUID. `User` tablosu adı: `profiles`
+- Çok kiracılı kolon: `family_id` → `families.id` `ON DELETE CASCADE`
+- `family_members`: `UniqueConstraint(family_id, user_id)`
+- Davet kodu: `AILE-` + 6 hane, unique
+
+Tablolar: `profiles`, `families`, `family_members`, `messages`, `media`, `shopping_items`, `notes`, `reminders`, `notifications`, `device_tokens`, `verification_codes`, `task_items`, `budget_items`, `polls`, `poll_votes`, `storage_objects`, `storage_cleanup_jobs`
+
+## Sorgular
+
+- Her aile sorgusu `member.family_id` ile filtrelenir
+- Gizli not: `(Note.is_private == False) | (Note.author_id == current_user.id)` — alan adı `is_private`
+- Mesaj listesi: `family_id` + `created_at` index (`idx_messages_family_created`)
+- Kota: `storage_objects.category` ∈ `CHAT|IMAGE|AUDIO`, `checksum` SHA-256 tekilleştirme
+
+`deleted_at` yalnızca `storage_objects` modelinde var. `messages.deleted_at` ALTER ile eklenebilir ama Message modelinde yok; mesaj silmede modeli uydurma.
+
+## Yapma
+
+- RLS SQL’si yazma (repoda policy yok; yetki FastAPI’de)
+- Test DB’sini üretim `DATABASE_URL` yapma; testler `sqlite:///./test_family.db`

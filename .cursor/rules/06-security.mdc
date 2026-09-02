@@ -1,0 +1,54 @@
+---
+description: Aile izolasyonu, roller, JWT, yükleme ve secret yönetimi
+alwaysApply: true
+---
+
+# Güvenlik
+
+En kritik kural: bir aile diğerinin verisine erişemez. Kontrol yalnızca backend’de.
+
+## IDOR / privilege
+
+```python
+# ✅
+member = Depends(get_current_family_member)
+db.query(ShoppingItem).filter(ShoppingItem.family_id == member.family_id, ShoppingItem.id == item_id)
+
+# ❌
+db.query(ShoppingItem).filter(ShoppingItem.id == item_id)  # çapraz aile
+```
+
+`x-family-id` spoof: üye değilse 403 (`test_isolation_and_features.py`). Path’teki `family_id` için ayrıca üyelik kontrolü (SSE `events.py` gibi).
+
+İki rol katmanı karıştırma:
+
+- `User.role`: sistem `admin` | `member` — `/admin/*`
+- `FamilyMember.role`: aile `admin` | `member` — yedek toggle, üye atma, aile silme
+
+Aile admin endpoint’lerinde `get_current_admin_member`. Gizli notları başkasına açma.
+
+## Auth
+
+- Şifre: bcrypt, 72 byte. JWT HS256. Login/register/verify-and-register `expires_delta=timedelta(days=365)` verir; aksi halde `ACCESS_TOKEN_EXPIRE_MINUTES` (config 30 gün)
+- `decode_token`: önce `SUPABASE_JWT_SECRET`, sonra `SECRET_KEY`
+- OTP: `verification_codes`, 10 dk, Resend. Production’da varsayılan `ADMIN_PASSWORD` bırakma
+- Token’ı URL/query’de taşıma
+
+## Girdi ve enjeksiyon
+
+- SQLAlchemy parametreli sorgu; `text()` yalnızca sabit migrasyon/health
+- XSS: kullanıcı içeriğini `dangerouslySetInnerHTML` ile basma
+- CSRF: Bearer header (cookie oturumu yok). CORS: `settings.cors_origins_list` + Capacitor origin regex
+
+## Yükleme
+
+- Boyut: `MAX_UPLOAD_SIZE` (15MB)
+- Görsel MIME allowlist + Pillow JPEG dönüşümü (`image_service`)
+- Ses MIME allowlist. Kota: `quota_retention_service.preflight_and_prepare_space`
+- `SUPABASE_SERVICE_ROLE_KEY` yalnızca backend. Frontend: `VITE_SUPABASE_ANON_KEY`
+
+## Secret
+
+`.env` commit etme (gitignore). `firebase_service_account.json` git’te yok. Frontend’e service role / `SECRET_KEY` / `RESEND_API_KEY` koyma.
+
+Mevcut riskleri genişletme: `messages.py` link-preview `verify=False`; yeni SSRF yüzeyi ekleme. `config.py` varsayılan `SECRET_KEY` üretimde zorunlu override.

@@ -1,12 +1,13 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Clock, Check, CheckCheck, AlertCircle, RotateCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { Message } from '../../types';
+import { Message, PollData } from '../../types';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { AudioMessagePlayer } from './AudioMessagePlayer';
 import { PollMessageCard } from './PollMessageCard';
 import { FontSizeOption } from './ChatSettingsModal';
+import { localMediaVault } from '../../services/localMediaVault';
 
 interface MessageBubbleProps {
   message: Message;
@@ -19,6 +20,7 @@ interface MessageBubbleProps {
   onRetry?: (message: Message) => void;
   onImageClick?: (url: string) => void;
   onAvatarClick?: (senderId: string, senderName: string, senderAvatar?: string | null) => void;
+  onPollChange?: (messageId: string, poll: PollData) => void;
 }
 
 // Extracts first http/https link from content
@@ -40,8 +42,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     onRetry,
     onImageClick,
     onAvatarClick,
+    onPollChange,
   }) => {
-    const [imageLoaded, setImageLoaded] = useState(false);
     const longPressTimerRef = useRef<any>(null);
     const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -185,7 +187,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
 
           {/* Interactive Poll Card */}
           {isPoll && !isDeleted ? (
-            <PollMessageCard message={message} isMe={isMe} />
+            <PollMessageCard
+              message={message}
+              isMe={isMe}
+              onPollChange={(poll) => onPollChange?.(message.id, poll)}
+            />
           ) : (
             <>
               {/* Audio Voice Note Attachment */}
@@ -194,27 +200,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                   <AudioMessagePlayer audioUrl={message.media_url} isMe={isMe} />
                 </div>
               ) : message.media_url && !isDeleted ? (
-                /* Media Attachment (Photo / GIF) */
-                <div className="mb-2 -mx-1.5 -mt-1.5 rounded-2xl overflow-hidden bg-black/5 relative">
-                  {!imageLoaded && (
-                    <div className="w-full h-44 sm:h-52 bg-black/10 animate-pulse flex items-center justify-center text-xs text-gray-400">
-                      Yükleniyor...
-                    </div>
-                  )}
-                  <img
-                    src={message.media_url}
-                    alt="Medya"
-                    onLoad={() => setImageLoaded(true)}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onImageClick?.(message.media_url!);
-                    }}
-                    className={`w-full max-h-80 object-cover cursor-pointer transition-transform duration-200 hover:scale-[1.01] ${
-                      imageLoaded ? 'block' : 'hidden'
-                    }`}
-                    loading="lazy"
-                  />
-                </div>
+                <VaultChatImage
+                  remoteUrl={message.media_url}
+                  localPath={message.local_media_path}
+                  onImageClick={onImageClick}
+                />
               ) : null}
 
               {/* Text Message Content */}
@@ -260,3 +250,46 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     );
   }
 );
+
+const VaultChatImage: React.FC<{
+  remoteUrl: string;
+  localPath?: string;
+  onImageClick?: (url: string) => void;
+}> = ({ remoteUrl, localPath, onImageClick }) => {
+  const [src, setSrc] = useState(remoteUrl);
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const key = localPath || remoteUrl;
+    localMediaVault.getMediaUrl(key, 'images').then((resolved) => {
+      if (!cancelled && resolved) setSrc(resolved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [remoteUrl, localPath]);
+
+  return (
+    <div className="mb-2 -mx-1.5 -mt-1.5 rounded-2xl overflow-hidden bg-black/5 relative">
+      {!imageLoaded && (
+        <div className="w-full h-44 sm:h-52 bg-black/10 animate-pulse flex items-center justify-center text-xs text-gray-400">
+          Yükleniyor...
+        </div>
+      )}
+      <img
+        src={src}
+        alt="Medya"
+        onLoad={() => setImageLoaded(true)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onImageClick?.(src || remoteUrl);
+        }}
+        className={`w-full max-h-80 object-cover cursor-pointer transition-transform duration-200 hover:scale-[1.01] ${
+          imageLoaded ? 'block' : 'hidden'
+        }`}
+        loading="lazy"
+      />
+    </div>
+  );
+};

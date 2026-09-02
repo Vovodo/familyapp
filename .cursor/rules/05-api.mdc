@@ -1,0 +1,51 @@
+---
+description: /api/v1 REST sözleşmesi, auth başlıkları ve gerçek endpoint önekleri
+globs: backend/app/api/**/*.py,frontend/src/services/api.ts
+alwaysApply: false
+---
+
+# API
+
+Tüm iş endpoint’leri `/api/v1`. Kaynak: `backend/app/api/v1/api.py`. `docs/API_REFERENCE.md` yolları güncel olmayabilir.
+
+## Başlıklar
+
+- `Authorization: Bearer <jwt>` — aile verisi için zorunlu
+- Şu an Bearer’sız: `/health`, `/auth/login|register|send-verification-code|verify-and-register|reset-password`, `/weather`, `/downloads`, `/messages/link-preview`
+- `x-family-id: <uuid>` — aktif aile; üyelik yoksa 403
+- JSON `Content-Type: application/json`; yükleme `multipart/form-data`
+
+## Router önekleri
+
+| Önek | Dosya |
+|---|---|
+| `/health` | health.py (`/`, `/live`, `/ready`) |
+| `/auth` | login, register, send-verification-code, verify-and-register, reset-password, `/me` GET+PATCH, logout |
+| `/families` | `POST /`, `POST /join`, `GET /my-families`, `GET /me`, `PATCH /settings`, üye çıkarma, heart/poke/quick-action |
+| `/messages` | liste (cursor `before`), gönder, sil, poll, link-preview |
+| `/media` | upload, upload-audio, upload-avatar, albüm |
+| `/shopping` `/tasks` `/budget` `/notes` `/reminders` | CRUD + toggle |
+| `/notifications` | cihaz token, liste |
+| `/events` | `GET /family/{family_id}/stream` SSE |
+| `/sync` | mandatory-data, chat-backup, chat-restore, kota, reconcile |
+| `/weather` | Open-Meteo proxy |
+| `/admin` | sistem admin; `User.role == "admin"` |
+| `/downloads` | APK — kanonik dosya `backend/app/static/ailem.apk`; en yeni mtime. Eski kopya bırakma. |
+
+## Sözleşme
+
+- Başarı: Pydantic `response_model`. Hata: `{ "detail": "Türkçe mesaj" }`
+- Liste: query `limit` (mesaj 1–100). Offset yerine mesajlarda `before`
+- Yazma: `family_id` body’den değil `member.family_id`
+- İdempotent sohbet: `client_message_id`
+- Sync: `GET /sync/mandatory-data`; sohbet yedek toggle yalnızca `get_current_admin_member`
+
+## İstemci
+
+```ts
+await api.get('/families/my-families');
+await api.patch('/auth/me', { full_name });
+await api.post('/notes/', { title, content, is_private, color });
+```
+
+Yeni endpoint: `api.py`’ye `include_router`, deps, şema, izolasyon testi.

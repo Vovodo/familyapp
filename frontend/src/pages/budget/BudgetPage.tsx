@@ -23,6 +23,7 @@ import { BudgetItem, BudgetSummary } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { cacheService } from '../../services/cacheService';
+import { dedupeById, prependUnique } from '../../services/listSync';
 
 const CATEGORIES_EXPENSE = [
   'Market & Gıda',
@@ -74,6 +75,7 @@ export const BudgetPage: React.FC = () => {
   // 3-second action cooldown ref
   const lastActionTimestampRef = useRef<number>(0);
   const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
+  const isSubmittingRef = useRef(false);
 
   // Fetch data
   const fetchBudgetData = async () => {
@@ -83,9 +85,10 @@ export const BudgetPage: React.FC = () => {
         api.get<BudgetItem[]>(`/budget/?month=${selectedMonth}&year=${selectedYear}`),
         api.get<BudgetSummary>(`/budget/summary?month=${selectedMonth}&year=${selectedYear}`),
       ]);
-      setTransactions(txRes.data);
+      const transactionsList = dedupeById(Array.isArray(txRes.data) ? txRes.data : []);
+      setTransactions(transactionsList);
       setSummary(sumRes.data);
-      if (cacheKey) cacheService.set(cacheKey, { tx: txRes.data, sum: sumRes.data });
+      if (cacheKey) cacheService.set(cacheKey, { tx: transactionsList, sum: sumRes.data });
     } catch (err) {
       console.warn('Failed to fetch budget:', err);
     } finally {
@@ -157,7 +160,7 @@ export const BudgetPage: React.FC = () => {
 
   const handleCreateTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting || !amount || !title.trim()) return;
+    if (isSubmitting || isSubmittingRef.current || !amount || !title.trim()) return;
 
     // 3s cooldown check
     const now = Date.now();
@@ -175,13 +178,14 @@ export const BudgetPage: React.FC = () => {
       return;
     }
 
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     setError(null);
     lastActionTimestampRef.current = now;
     setCooldownRemaining(3);
 
     try {
-      await api.post('/budget/', {
+      const res = await api.post<BudgetItem>('/budget/', {
         type: txType,
         amount: numAmount,
         category,
@@ -190,6 +194,11 @@ export const BudgetPage: React.FC = () => {
         transaction_date: currentDate.toISOString(),
       });
 
+      setTransactions((prev) => {
+        const next = prependUnique(prev, res.data);
+        if (cacheKey) cacheService.set(cacheKey, { tx: next, sum: summary as BudgetSummary });
+        return next;
+      });
       setShowAddModal(false);
       setTitle('');
       setAmount('');
@@ -198,6 +207,7 @@ export const BudgetPage: React.FC = () => {
     } catch (err: any) {
       setError(err.message || 'İşlem eklenemedi.');
     } finally {
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -510,7 +520,7 @@ export const BudgetPage: React.FC = () => {
       {/* Modal: Create Transaction */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-sm rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="theme-surface w-full max-w-sm rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-black text-gray-900">
                 {txType === 'expense' ? 'Gider (Harcama) Ekle' : 'Gelir (Kasa) Ekle'}
@@ -574,7 +584,7 @@ export const BudgetPage: React.FC = () => {
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.00"
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl text-base font-black focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl text-base font-black text-gray-900 caret-indigo-600 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   autoFocus
                 />
               </div>
@@ -589,7 +599,7 @@ export const BudgetPage: React.FC = () => {
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Örn: Haftalık Pazar Alışverişi"
-                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl text-xs focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-2xl text-xs text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                 />
               </div>
 
@@ -601,7 +611,7 @@ export const BudgetPage: React.FC = () => {
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-gray-50 border border-gray-200 rounded-2xl text-xs font-semibold focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  className="w-full px-3.5 py-2 bg-gray-50 border border-gray-200 rounded-2xl text-xs font-semibold text-gray-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                 >
                   {(txType === 'expense' ? CATEGORIES_EXPENSE : CATEGORIES_INCOME).map((c) => (
                     <option key={c} value={c}>

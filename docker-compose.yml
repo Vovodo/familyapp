@@ -19,6 +19,8 @@ services:
       - SUPABASE_URL=${SUPABASE_URL:-}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
       - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-production}
     volumes:
       - uploads_data:/app/uploads
       - db_data:/app/backend

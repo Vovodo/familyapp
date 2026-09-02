@@ -177,7 +177,7 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                   <span>Sohbet Geçmişini Temizle</span>
                 </h4>
                 <p className="text-[10px] text-rose-700 leading-tight mt-0.5">
-                  Yazışmalar ekrandan temizlenir. Fotoğraflar ve sesler cihazınızda korunur.
+                  Yazışmalar yalnızca bu cihazdan silinir. Aile üyelerinin sohbeti ve cihazınızdaki fotoğraf/ses kasası durur.
                 </p>
               </div>
               <button
@@ -185,7 +185,7 @@ export const ChatSettingsModal: React.FC<ChatSettingsModalProps> = ({
                 onClick={() => {
                   if (
                     window.confirm(
-                      'Sohbet ekranındaki tüm yazışmaları temizlemek istediğinize emin misiniz?\n\n(Fotoğraflar ve ses kayıtlarınız cihazınızda korunacaktır)'
+                      'Sohbet yalnızca bu telefonda temizlenecek. Diğer aile üyelerinin geçmişi silinmez.\n\nFotoğraflar ve sesler cihaz kasasında kalır.'
                     )
                   ) {
                     onClearChat();

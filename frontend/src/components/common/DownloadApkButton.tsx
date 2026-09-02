@@ -16,12 +16,12 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
     return null;
   }
 
-  const apkDownloadUrl = 'https://familyapi.rfqcollector.com/api/v1/downloads/apk';
+  const apiBase = import.meta.env.VITE_API_URL || 'https://familyapi.rfqcollector.com/api/v1';
+  const apkDownloadUrl = `${apiBase.replace(/\/$/, '')}/downloads/apk`;
 
   const handleDownload = (e: React.MouseEvent) => {
     e.preventDefault();
-    // Direct window location navigation guarantees mobile Chrome/Safari triggers native download manager
-    window.location.href = apkDownloadUrl;
+    window.location.href = `${apkDownloadUrl}?t=${Date.now()}`;
   };
 
   if (variant === 'button') {
@@ -51,7 +51,7 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
           </div>
           <div className="text-left">
             <p className="text-xs font-bold text-emerald-950">Android APK İndir</p>
-            <p className="text-[10px] text-emerald-700">Doğrudan telefona kurun • 8.98 MB (FCM Canlı Bildirim)</p>
+            <p className="text-[10px] text-emerald-700">Doğrudan telefona kurun • Güncel APK</p>
           </div>
         </div>
         <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-xs">
@@ -77,7 +77,7 @@ export const DownloadApkButton: React.FC<DownloadApkProps> = ({
             <span>Mobil Deneyim</span>
           </div>
           <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-200 border border-emerald-500/30">
-            Android APK (8.98 MB)
+            Android APK
           </span>
         </div>
 

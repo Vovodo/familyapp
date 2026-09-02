@@ -14,6 +14,8 @@
     -webkit-user-select: none;
     scrollbar-gutter: stable;
     overflow-x: hidden;
+    background-color: var(--theme-bg, #fff5f6);
+    color: var(--theme-text-primary, #4c0519);
   }
 
   main {
@@ -149,7 +151,113 @@
   background: var(--theme-hero-gradient, linear-gradient(135deg, #e11d48 0%, #be123c 100%));
 }
 
-/* 🚀 FIXED QUICK ACTION BUTTONS - CONSTANT ACROSS ALL THEMES */
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: var(--theme-border, #30363d);
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-text-secondary, #8b949e);
+}
+
+/* Pages still use light Tailwind fills (bg-white, text-gray-900). Map them onto theme tokens. */
+html.dark .bg-white,
+html.dark .bg-white\/95,
+html.dark .bg-white\/90,
+html.dark .bg-warm-50,
+html.dark .bg-warm-100 {
+  background-color: var(--theme-surface, #161b22) !important;
+  color: var(--theme-text-primary, #f0f6fc);
+}
+
+html.dark .bg-gray-50,
+html.dark .bg-gray-50\/80,
+html.dark .bg-gray-50\/50,
+html.dark .bg-gray-100,
+html.dark .bg-gray-50\/70 {
+  background-color: var(--theme-surface-secondary, #21262d) !important;
+}
+
+html.dark .text-gray-900,
+html.dark .text-gray-800,
+html.dark .text-gray-700,
+html.dark .text-indigo-900,
+html.dark .text-indigo-700,
+html.dark .text-indigo-950 {
+  color: var(--theme-text-primary, #f0f6fc) !important;
+}
+
+html.dark .text-gray-600,
+html.dark .text-gray-500,
+html.dark .text-gray-400 {
+  color: var(--theme-text-secondary, #8b949e) !important;
+}
+
+html.dark .border-gray-100,
+html.dark .border-gray-200,
+html.dark .border-gray-200\/90,
+html.dark .border-gray-200\/80,
+html.dark .border-gray-200\/70 {
+  border-color: var(--theme-border, #30363d) !important;
+}
+
+html.dark input:not([type='checkbox']):not([type='radio']):not([type='range']),
+html.dark textarea,
+html.dark select {
+  background-color: var(--theme-surface-secondary, #21262d) !important;
+  color: var(--theme-text-primary, #f0f6fc) !important;
+  -webkit-text-fill-color: var(--theme-text-primary, #f0f6fc) !important;
+  border-color: var(--theme-border, #30363d) !important;
+  caret-color: var(--theme-accent, #38bdf8);
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: var(--theme-text-secondary, #8b949e) !important;
+  opacity: 0.9;
+}
+
+html.dark option {
+  background-color: var(--theme-surface, #161b22);
+  color: var(--theme-text-primary, #f0f6fc);
+}
+
+html.dark .keep-note-paper {
+  background-color: var(--keep-bg, #ffffff) !important;
+  color: #1c1917 !important;
+}
+
+html.dark .keep-note-paper .text-gray-900,
+html.dark .keep-note-paper .text-gray-800,
+html.dark .keep-note-paper .text-gray-700,
+html.dark .keep-note-paper .text-gray-600,
+html.dark .keep-note-paper .text-gray-500,
+html.dark .keep-note-paper .text-gray-400,
+html.dark .keep-note-paper .text-amber-950,
+html.dark .keep-note-paper .text-emerald-950,
+html.dark .keep-note-paper .text-sky-950,
+html.dark .keep-note-paper .text-rose-950,
+html.dark .keep-note-paper .text-purple-950,
+html.dark .keep-note-paper .text-orange-950 {
+  color: #1c1917 !important;
+}
+
+html.dark .keep-note-paper input:not([type='checkbox']):not([type='radio']),
+html.dark .keep-note-paper textarea {
+  background-color: transparent !important;
+  color: #1c1917 !important;
+  -webkit-text-fill-color: #1c1917 !important;
+  caret-color: #1c1917 !important;
+  border-color: rgba(28, 25, 23, 0.18) !important;
+}
+
+html.dark .keep-note-paper input::placeholder,
+html.dark .keep-note-paper textarea::placeholder {
+  color: rgba(28, 25, 23, 0.45) !important;
+}
 .quick-action-heart {
   background: linear-gradient(135deg, #f43f5e 0%, #e11d48 50%, #be123c 100%) !important;
   color: #ffffff !important;

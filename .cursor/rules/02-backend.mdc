@@ -1,0 +1,50 @@
+---
+description: FastAPI backend yapısı, servisler, doğrulama, hata ve loglama
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Backend (FastAPI)
+
+Giriş: `backend.app.main:app`. API öneki `settings.API_V1_STR` = `/api/v1`. Router kaydı yalnızca `backend/app/api/v1/api.py`.
+
+## Katmanlar
+
+- Router (`api/v1/*.py`): HTTP, `Depends`, HTTPException. İş kuralını şişirme.
+- Pydantic (`schemas/schemas.py`): istek/yanıt. `response_model` kullan.
+- ORM (`models/models.py`): tüm tablolar tek dosyada. Yeni sınıfı buraya ekle; `db/base.py` export listesini güncelle.
+- Servis: dosya, kota, yedek, FCM, Resend, Open-Meteo, Pillow. Repository katmanı yok; sorgular router veya ilgili serviste.
+
+Mevcut servisler: `storage_service`, `image_service`, `backup_service`, `quota_retention_service`, `push_service`, `email_service`, `weather_service`, `cleanup_service`.
+
+## Auth bağımlılıkları (`api/deps.py`)
+
+```python
+# ✅ aile verisi
+member: FamilyMember = Depends(get_current_family_member)
+query = db.query(Note).filter(Note.family_id == member.family_id)
+
+# ❌ istemci family_id'sine güvenme
+family_id = payload.family_id
+```
+
+- `get_current_user`: Bearer JWT (`sub` = user id)
+- `get_current_family_member`: üyelik; `x-family-id` varsa o aile, yoksa ilk üyelik
+- `get_current_admin_member`: `FamilyMember.role == "admin"`
+- Sistem paneli: `User.role == "admin"` (`api/v1/admin.py` `require_admin`)
+
+## Doğrulama ve hatalar
+
+- Pydantic v2 + `field_validator`. Kullanıcıya Türkçe `detail`.
+- `HTTPException` ile 401/403/404/400. Global handler 500 için: `"Bir sorun oluştu. Lütfen tekrar deneyin."`
+- Log: Loguru (`core/logging.py`). DEBUG yalnızca `settings.DEBUG`.
+
+## Session
+
+`get_db` yield eder, `finally: db.close()`. Yazmalarda `commit`/`refresh`. Testler `dependency_overrides[get_db]`.
+
+## Yapma
+
+- Yeni web framework, Alembic veya ayrı repository katmanı ekleme
+- `slowapi` bağlama (kullanılmıyor); kalp limiti `families.py` içindeki in-memory lock
+- Servis rolü / FCM JSON’u frontend’e taşıma

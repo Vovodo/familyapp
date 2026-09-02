@@ -7,6 +7,7 @@ import { OfflineBanner } from './OfflineBanner';
 import { HeartCelebrationOverlay } from '../common/HeartCelebrationOverlay';
 import { InAppNotificationBanner } from '../common/InAppNotificationBanner';
 import { PermissionAssistantModal } from '../common/PermissionAssistantModal';
+import { RouteErrorBoundary } from '../common/RouteErrorBoundary';
 import { notificationService } from '../../services/notificationService';
 import { useFamily } from '../../contexts/FamilyContext';
 import { Loader2, Heart } from 'lucide-react';
@@ -85,7 +86,9 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         {!hasFamily && location.pathname !== '/' ? (
           <Navigate to="/" replace />
         ) : (
-          <Outlet />
+          <RouteErrorBoundary>
+            <Outlet />
+          </RouteErrorBoundary>
         )}
       </main>
 

@@ -14,6 +14,7 @@ from backend.app.models.models import (
     Family,
     FamilyMember,
     Message,
+    Media,
     StorageObject,
     StorageCleanupJob,
 )
@@ -510,3 +511,161 @@ def test_11_12_storage_reconciliation_and_orphan_detection(db_session, test_setu
     assert report.status == "success"
     assert report.db_total_bytes == 1024
     assert isinstance(report.discrepancy_bytes, int)
+
+
+def test_quota_allocation_is_exactly_100_percent():
+    assert settings.CHAT_QUOTA_PERCENT == 50
+    assert settings.IMAGE_QUOTA_PERCENT == 40
+    assert settings.AUDIO_QUOTA_PERCENT == 10
+    assert settings.validate_quota_allocation() is True
+    assert settings.chat_quota_bytes + settings.image_quota_bytes + settings.audio_quota_bytes == settings.TOTAL_STORAGE_CAPACITY_BYTES
+
+
+def test_family_isolation_retention_does_not_touch_other_family(db_session, test_setup):
+    fam_a = test_setup["family"]
+    usr_a = test_setup["user"]
+    now = datetime.now(timezone.utc)
+
+    other_user = User(
+        id=str(uuid.uuid4()),
+        email="other_quota@aile.com",
+        full_name="Other Family",
+        hashed_password="hash",
+        role="member",
+    )
+    other_family = Family(
+        id=str(uuid.uuid4()),
+        name="Other Retention Family",
+        invite_code="AILE-QUOTA2",
+        cloud_chat_backup_enabled=True,
+    )
+    db_session.add_all([other_user, other_family])
+    db_session.flush()
+    db_session.add(
+        FamilyMember(
+            id=str(uuid.uuid4()),
+            family_id=other_family.id,
+            user_id=other_user.id,
+            role="admin",
+        )
+    )
+
+    other_img = StorageObject(
+        id=str(uuid.uuid4()),
+        family_id=other_family.id,
+        user_id=other_user.id,
+        storage_path=f"{other_family.id}/keep.jpg",
+        public_url="https://mock/keep.jpg",
+        category="IMAGE",
+        file_size=100 * 1024 * 1024,
+        status="backed_up",
+        created_at=now - timedelta(days=20),
+        backed_up_at=now - timedelta(days=20),
+    )
+    own_img = StorageObject(
+        id=str(uuid.uuid4()),
+        family_id=fam_a.id,
+        user_id=usr_a.id,
+        storage_path=f"{fam_a.id}/old.jpg",
+        public_url="https://mock/old.jpg",
+        category="IMAGE",
+        file_size=850 * 1024 * 1024,
+        status="backed_up",
+        created_at=now - timedelta(days=5),
+        backed_up_at=now - timedelta(days=5),
+    )
+    db_session.add_all([other_img, own_img])
+    db_session.commit()
+
+    quota_retention_service.preflight_and_prepare_space(
+        db=db_session,
+        family_id=fam_a.id,
+        incoming_bytes_by_category={"IMAGE": 50 * 1024 * 1024},
+    )
+
+    db_session.refresh(other_img)
+    db_session.refresh(own_img)
+    assert own_img.status == "deleted"
+    assert other_img.status == "backed_up"
+
+
+def test_chat_usage_does_not_count_other_family_objects(db_session, test_setup):
+    fam = test_setup["family"]
+    now = datetime.now(timezone.utc)
+
+    other_family = Family(
+        id=str(uuid.uuid4()),
+        name="Chat Isolation Family",
+        invite_code="AILE-QUOTA3",
+    )
+    other_user = User(
+        id=str(uuid.uuid4()),
+        email="chatiso@aile.com",
+        full_name="Chat Iso",
+        hashed_password="hash",
+        role="member",
+    )
+    db_session.add_all([other_family, other_user])
+    db_session.flush()
+    db_session.add(
+        StorageObject(
+            id=str(uuid.uuid4()),
+            family_id=other_family.id,
+            user_id=other_user.id,
+            storage_path=f"{other_family.id}/archive.json",
+            public_url="https://mock/archive.json",
+            category="CHAT",
+            file_size=1500 * 1024 * 1024,
+            status="backed_up",
+            created_at=now,
+            backed_up_at=now,
+        )
+    )
+    db_session.commit()
+
+    breakdown = quota_retention_service.get_storage_usage_breakdown(db_session, fam.id)
+    assert breakdown.chat.used_bytes < 1024 * 1024
+    jobs = quota_retention_service.preflight_and_prepare_space(
+        db=db_session,
+        family_id=fam.id,
+        incoming_bytes_by_category={"CHAT": 200},
+    )
+    assert jobs == []
+
+
+def test_legacy_gallery_media_is_evicted_when_image_quota_fills(db_session, test_setup):
+    fam = test_setup["family"]
+    usr = test_setup["user"]
+    now = datetime.now(timezone.utc)
+
+    old_photo = Media(
+        id=str(uuid.uuid4()),
+        family_id=fam.id,
+        uploader_id=usr.id,
+        storage_path=f"{fam.id}/legacy.jpg",
+        public_url="https://mock/legacy.jpg",
+        file_size=850 * 1024 * 1024,
+        created_at=now - timedelta(days=8),
+        taken_at=now - timedelta(days=8),
+    )
+    db_session.add(old_photo)
+    db_session.commit()
+
+    quota_retention_service.preflight_and_prepare_space(
+        db=db_session,
+        family_id=fam.id,
+        incoming_bytes_by_category={"IMAGE": 50 * 1024 * 1024},
+    )
+
+    leftover = db_session.query(Media).filter(Media.id == old_photo.id).first()
+    assert leftover is None
+
+
+def test_incoming_file_larger_than_partition_is_rejected(db_session, test_setup):
+    fam = test_setup["family"]
+    with pytest.raises(QuotaExceededException):
+        quota_retention_service.preflight_and_prepare_space(
+            db=db_session,
+            family_id=fam.id,
+            incoming_bytes_by_category={"AUDIO": settings.audio_quota_bytes + 1},
+        )

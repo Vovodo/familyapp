@@ -23,8 +23,22 @@ public class MainActivity extends BridgeActivity {
 
             AudioAttributes audioAttributes = new AudioAttributes.Builder()
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
+                    .setUsage(AudioAttributes.USAGE_ALARM)
                     .build();
+
+            String[] legacyIds = {
+                    "family_heart_channel",
+                    "family_tea_channel",
+                    "family_car_channel",
+                    "family_meal_channel",
+                    "family_poke_channel"
+            };
+            for (String legacyId : legacyIds) {
+                try {
+                    notificationManager.deleteNotificationChannel(legacyId);
+                } catch (Exception ignored) {
+                }
+            }
 
             // 1. General & Chat Messages Channel
             NotificationChannel generalChannel = new NotificationChannel(
@@ -38,20 +52,11 @@ public class MainActivity extends BridgeActivity {
             generalChannel.setShowBadge(true);
             notificationManager.createNotificationChannel(generalChannel);
 
-            // 2. Heart Love Channel
-            createCustomChannel(notificationManager, "family_heart_channel", "Kalp & Sevgi Bildirimleri", "heart", audioAttributes);
-
-            // 3. Tea Channel
-            createCustomChannel(notificationManager, "family_tea_channel", "Çay Koydum Bildirimleri", "tea", audioAttributes);
-
-            // 4. Car Horn Channel
-            createCustomChannel(notificationManager, "family_car_channel", "Eve Geliyorum Bildirimleri", "car_horn", audioAttributes);
-
-            // 5. Meal Channel
-            createCustomChannel(notificationManager, "family_meal_channel", "Yemek Hazır Bildirimleri", "meal", audioAttributes);
-
-            // 6. Poke Channel
-            createCustomChannel(notificationManager, "family_poke_channel", "Dürtme Bildirimleri", "poke", audioAttributes);
+            createCustomChannel(notificationManager, "family_heart_channel_v2", "Kalp & Sevgi Bildirimleri", "heart", audioAttributes);
+            createCustomChannel(notificationManager, "family_tea_channel_v2", "Çay Koydum Bildirimleri", "tea", audioAttributes);
+            createCustomChannel(notificationManager, "family_car_channel_v2", "Eve Geliyorum Bildirimleri", "car_horn", audioAttributes);
+            createCustomChannel(notificationManager, "family_meal_channel_v2", "Yemek Hazır Bildirimleri", "meal", audioAttributes);
+            createCustomChannel(notificationManager, "family_poke_channel_v2", "Dürtme Bildirimleri", "poke", audioAttributes);
 
             // 7. Reminders Channel
             NotificationChannel remindersChannel = new NotificationChannel(
@@ -74,9 +79,11 @@ public class MainActivity extends BridgeActivity {
                     name,
                     NotificationManager.IMPORTANCE_HIGH
             );
+            channel.setDescription(name);
             channel.enableVibration(true);
             channel.enableLights(true);
             channel.setShowBadge(true);
+            channel.setBypassDnd(true);
 
             try {
                 Uri soundUri = Uri.parse(ContentResolver.SCHEME_ANDROID_RESOURCE + "://" + getPackageName() + "/raw/" + rawSoundName);

@@ -210,7 +210,9 @@ class LocalMediaVault {
     if (
       remoteUrlOrName.startsWith('blob:') ||
       remoteUrlOrName.startsWith('data:') ||
-      remoteUrlOrName.startsWith('capacitor://')
+      remoteUrlOrName.startsWith('capacitor://') ||
+      remoteUrlOrName.startsWith('file://') ||
+      remoteUrlOrName.includes('/_capacitor_file_')
     ) {
       return remoteUrlOrName;
     }
@@ -266,6 +268,91 @@ class LocalMediaVault {
 
     // Return the remote URL for immediate streaming while caching completes
     return fullRemoteUrl;
+  }
+
+  /**
+   * Downloads remote media into the vault and waits until the file is on disk.
+   * Used by new-device restore so progress is real, not fire-and-forget.
+   */
+  public async ensureCached(remoteUrl: string, type: 'audio' | 'images'): Promise<string> {
+    if (!remoteUrl) return '';
+
+    const cleanName = remoteUrl.split('?')[0].split('/').pop() || '';
+    const relativePath = `family/${type}/${cleanName}`;
+
+    if (this.urlCache.has(cleanName)) {
+      return this.urlCache.get(cleanName)!;
+    }
+
+    if (Capacitor.isNativePlatform() && cleanName) {
+      try {
+        const stat = await Filesystem.stat({
+          path: relativePath,
+          directory: Directory.Data,
+        });
+        if (stat?.uri) {
+          const localSrc = Capacitor.convertFileSrc(stat.uri);
+          this.urlCache.set(cleanName, localSrc);
+          return localSrc;
+        }
+      } catch {
+        // not cached yet
+      }
+    } else if (cleanName) {
+      const cachedBlob = await idbGetBlob(relativePath);
+      if (cachedBlob) {
+        const blobUrl = URL.createObjectURL(cachedBlob);
+        this.urlCache.set(cleanName, blobUrl);
+        return blobUrl;
+      }
+    }
+
+    let fullRemoteUrl = remoteUrl;
+    if (!remoteUrl.startsWith('http://') && !remoteUrl.startsWith('https://')) {
+      const apiBase = (import.meta.env.VITE_API_URL || 'https://familyapi.rfqcollector.com/api/v1').replace(
+        /\/api\/v1\/?$/,
+        ''
+      );
+      fullRemoteUrl = `${apiBase}${remoteUrl.startsWith('/') ? '' : '/'}${remoteUrl}`;
+    }
+
+    try {
+      const resp = await fetch(fullRemoteUrl);
+      if (!resp.ok) return fullRemoteUrl;
+      const blob = await resp.blob();
+      return await this.saveMedia(cleanName || `file_${Date.now()}`, blob, type);
+    } catch {
+      return fullRemoteUrl;
+    }
+  }
+
+  /**
+   * Reads a vault file back as a Blob (retry of a failed upload).
+   */
+  public async readMediaBlob(filename: string, type: 'audio' | 'images'): Promise<Blob | null> {
+    const cleanName = filename.split('?')[0].split('/').pop() || filename;
+    const relativePath = `family/${type}/${cleanName}`;
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const result = await Filesystem.readFile({
+          path: relativePath,
+          directory: Directory.Data,
+        });
+        const data = result.data;
+        if (typeof data === 'string') {
+          const binary = atob(data);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          return new Blob([bytes]);
+        }
+        if (data instanceof Blob) return data;
+      } catch {
+        return null;
+      }
+    }
+
+    return idbGetBlob(relativePath);
   }
 
   /**

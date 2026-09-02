@@ -136,6 +136,7 @@ export interface Message {
   sender_nickname?: string;
   client_message_id?: string;
   status?: 'sending' | 'sent' | 'failed';
+  local_media_path?: string;
   poll?: PollData;
   retryPayload?: {
     content?: string;

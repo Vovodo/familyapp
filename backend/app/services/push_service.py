@@ -13,13 +13,13 @@ try:
 except ImportError:
     HAS_FIREBASE_ADMIN = False
 
-HEART_CHANNEL_ID = "family_heart_channel"
+HEART_CHANNEL_ID = "family_heart_channel_v2"
 GENERAL_CHANNEL_ID = "family_general_channel"
 REMINDERS_CHANNEL_ID = "family_reminders_channel"
-POKE_CHANNEL_ID = "family_poke_channel"
-TEA_CHANNEL_ID = "family_tea_channel"
-CAR_CHANNEL_ID = "family_car_channel"
-MEAL_CHANNEL_ID = "family_meal_channel"
+POKE_CHANNEL_ID = "family_poke_channel_v2"
+TEA_CHANNEL_ID = "family_tea_channel_v2"
+CAR_CHANNEL_ID = "family_car_channel_v2"
+MEAL_CHANNEL_ID = "family_meal_channel_v2"
 
 class PushNotificationService:
     def __init__(self):

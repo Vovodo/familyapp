@@ -1,5 +1,12 @@
+from pathlib import Path
 from typing import List, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_REPO_DIR = Path(__file__).resolve().parents[3]
+_ENV_FILES = tuple(
+    str(path) for path in (_BACKEND_DIR / ".env", _REPO_DIR / ".env") if path.exists()
+) or (str(_BACKEND_DIR / ".env"),)
 
 
 class Settings(BaseSettings):
@@ -34,6 +41,8 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
 
+    SENTRY_DSN: str = ""
+
     SECRET_KEY: str = "supersecretfamilyappjwtkeychangeinproduction"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 days
@@ -51,15 +60,15 @@ class Settings(BaseSettings):
 
     @property
     def chat_quota_bytes(self) -> int:
-        return int(self.TOTAL_STORAGE_CAPACITY_BYTES * (self.CHAT_QUOTA_PERCENT / 100.0))
+        return (self.TOTAL_STORAGE_CAPACITY_BYTES * self.CHAT_QUOTA_PERCENT) // 100
 
     @property
     def image_quota_bytes(self) -> int:
-        return int(self.TOTAL_STORAGE_CAPACITY_BYTES * (self.IMAGE_QUOTA_PERCENT / 100.0))
+        return (self.TOTAL_STORAGE_CAPACITY_BYTES * self.IMAGE_QUOTA_PERCENT) // 100
 
     @property
     def audio_quota_bytes(self) -> int:
-        return int(self.TOTAL_STORAGE_CAPACITY_BYTES * (self.AUDIO_QUOTA_PERCENT / 100.0))
+        return self.TOTAL_STORAGE_CAPACITY_BYTES - self.chat_quota_bytes - self.image_quota_bytes
 
     def validate_quota_allocation(self) -> bool:
         total_percent = self.CHAT_QUOTA_PERCENT + self.IMAGE_QUOTA_PERCENT + self.AUDIO_QUOTA_PERCENT
@@ -77,7 +86,7 @@ class Settings(BaseSettings):
     ADMIN_NAME: str = "Sistem Yöneticisi (Ege)"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILES,
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore"

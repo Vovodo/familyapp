@@ -31,10 +31,19 @@ def download_android_apk():
     ]
 
     apk_file = None
+    newest_mtime = -1.0
     for p in candidate_paths:
-        if os.path.exists(p) and os.path.getsize(p) > 1000000:
+        if not os.path.exists(p):
+            continue
+        try:
+            stat = os.stat(p)
+        except OSError:
+            continue
+        if stat.st_size <= 1000000:
+            continue
+        if stat.st_mtime >= newest_mtime:
+            newest_mtime = stat.st_mtime
             apk_file = p
-            break
 
     if not apk_file:
         logger.error(f"APK file not found in any candidate path: {candidate_paths}")

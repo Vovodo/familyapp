@@ -181,12 +181,18 @@ export const FamilySettingsPage: React.FC = () => {
     if (!currentFamily || isManualBackupRunning) return;
     setIsManualBackupRunning(true);
     try {
-      await syncService.flushBackupQueue(currentFamily.id);
+      const result = await syncService.backupLocalChatNow(currentFamily.id);
       const updated = await syncService.getSyncStatus();
       if (updated) setSyncStatus(updated);
       const b = await syncService.getStorageBreakdown();
       if (b) setStorageBreakdown(b);
-      alert('Sohbet verileri buluta başarıyla yedeklendi!');
+      if (result.status === 'backup_disabled') {
+        alert('Bulut sohbet yedeklemesi kapalı.');
+      } else if (result.status === 'failed_storage_quota') {
+        alert('Depolama kotası dolduğu için yedekleme tamamlanamadı.');
+      } else {
+        alert('Sohbet verileri buluta başarıyla yedeklendi!');
+      }
     } catch (err: any) {
       alert('Yedekleme sırasında hata: ' + (err.message || 'Lütfen tekrar deneyin.'));
     } finally {

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { Family, FamilyMember } from '../types';
 import { api, storage } from '../services/api';
 import { syncService } from '../services/syncService';
+import { localChatStorage } from '../services/localChatStorage';
 import { CloudRestorePromptModal } from '../components/common/CloudRestorePromptModal';
 import { useAuth } from './AuthContext';
 
@@ -40,7 +41,13 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const restoredKey = `ailem_chat_restored_${currentFamily.id}`;
         const hasPrompted = localStorage.getItem(restoredKey);
         if (!hasPrompted) {
-          setShowRestorePrompt(true);
+          localChatStorage.getMessages(currentFamily.id).then((localMsgs) => {
+            if (localMsgs.length > 0) {
+              localStorage.setItem(restoredKey, 'true');
+              return;
+            }
+            setShowRestorePrompt(true);
+          });
         }
       }
     }

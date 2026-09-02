@@ -1,4 +1,5 @@
 import { Note } from '../types';
+import { isTempId } from './listSync';
 
 const STORAGE_KEY = 'ailem_notes_';
 
@@ -25,7 +26,7 @@ export const localNotesStorage = {
     const map = new Map<string, Note>();
 
     for (const n of local) {
-      map.set(n.id, n);
+      if (n?.id && !isTempId(n.id)) map.set(n.id, n);
     }
 
     for (const sn of serverNotes) {

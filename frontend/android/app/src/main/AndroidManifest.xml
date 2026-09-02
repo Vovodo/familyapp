@@ -35,7 +35,7 @@
         <!-- FCM Default Notification Channel -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="family_heart_channel" />
+            android:value="family_heart_channel_v2" />
 
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"

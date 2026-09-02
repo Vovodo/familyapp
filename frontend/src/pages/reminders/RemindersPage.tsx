@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Bell,
   Plus,
@@ -22,6 +22,7 @@ import { useFamily } from '../../contexts/FamilyContext';
 import { Reminder } from '../../types';
 import { api } from '../../services/api';
 import { localRemindersStorage } from '../../services/localRemindersStorage';
+import { dedupeById, prependUnique } from '../../services/listSync';
 import { format, parseISO, isPast, differenceInMinutes, addHours, addDays, setHours, setMinutes } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
@@ -42,6 +43,7 @@ export const RemindersPage: React.FC = () => {
   const [repeatInterval, setRepeatInterval] = useState('none');
   const [notifyBefore, setNotifyBefore] = useState(15);
   const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
   const [snoozingId, setSnoozingId] = useState<string | null>(null);
 
   // 1. Instant Cache + Background Sync
@@ -57,7 +59,7 @@ export const RemindersPage: React.FC = () => {
     api.get<Reminder[]>('/reminders/', { params: { include_completed: true } })
       .then((res) => {
         const merged = localRemindersStorage.mergeReminders(currentFamily.id, res.data);
-        setReminders(merged);
+        setReminders(dedupeById(merged));
       })
       .catch((err) => {
         console.error('Reminders sync error:', err);
@@ -159,8 +161,9 @@ export const RemindersPage: React.FC = () => {
 
   const handleCreateReminder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !date || isSaving || !currentFamily) return;
+    if (!title.trim() || !date || isSaving || isSavingRef.current || !currentFamily) return;
 
+    isSavingRef.current = true;
     setIsSaving(true);
     try {
       Haptics.impact({ style: ImpactStyle.Medium }).catch(() => {});
@@ -174,7 +177,7 @@ export const RemindersPage: React.FC = () => {
       });
 
       setReminders((prev) => {
-        const next = [...prev, res.data];
+        const next = prependUnique(prev, res.data);
         localRemindersStorage.saveReminders(currentFamily.id, next);
         return next;
       });
@@ -187,6 +190,7 @@ export const RemindersPage: React.FC = () => {
     } catch (err: any) {
       alert('Hatırlatıcı oluşturulamadı: ' + err.message);
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
   };

@@ -16,6 +16,7 @@ import { Note } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { localNotesStorage } from '../../services/localNotesStorage';
+import { commitTempItem, dedupeById, isTempId, reconcileRemoteInsert } from '../../services/listSync';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
@@ -48,6 +49,7 @@ export const NotesPage: React.FC = () => {
   const [quickColor, setQuickColor] = useState('white');
   const [quickIsPrivate, setQuickIsPrivate] = useState(false);
   const [isSavingQuick, setIsSavingQuick] = useState(false);
+  const isSavingQuickRef = useRef(false);
   const quickBoxRef = useRef<HTMLDivElement>(null);
 
   // Keep Full Note Edit Modal State
@@ -69,7 +71,16 @@ export const NotesPage: React.FC = () => {
     // A. 0ms Instant Local Cache
     const cached = localNotesStorage.getNotes(currentFamily.id);
     if (cached && cached.length > 0) {
-      setNotes(cached);
+      const real = cached.filter((note) => note && !isTempId(note.id));
+      const temps = cached.filter(
+        (note) =>
+          note &&
+          isTempId(note.id) &&
+          !real.some((serverNote) => serverNote.title === note.title && serverNote.content === note.content)
+      );
+      const cleaned = dedupeById([...temps, ...real]);
+      localNotesStorage.saveNotes(currentFamily.id, cleaned);
+      setNotes(cleaned);
       setIsLoading(false);
     }
 
@@ -77,7 +88,16 @@ export const NotesPage: React.FC = () => {
     api.get<Note[]>('/notes/')
       .then((res) => {
         const merged = localNotesStorage.mergeNotes(currentFamily.id, res.data);
-        setNotes(merged);
+        setNotes((prev) => {
+          const pendingTemps = prev.filter(
+            (note) =>
+              isTempId(note.id) &&
+              !merged.some((serverNote) => serverNote.title === note.title && serverNote.content === note.content)
+          );
+          const next = dedupeById([...pendingTemps, ...merged]);
+          localNotesStorage.saveNotes(currentFamily.id, next);
+          return next;
+        });
       })
       .catch((err) => {
         console.warn('[Notes] Quiet sync warning:', err);
@@ -105,7 +125,11 @@ export const NotesPage: React.FC = () => {
           if (payload.eventType === 'INSERT') {
             const newNote = payload.new as Note;
             setNotes((prev) => {
-              const next = [newNote, ...prev.filter((n) => n.id !== newNote.id)];
+              const next = reconcileRemoteInsert(
+                prev,
+                newNote,
+                (local, incoming) => local.title === incoming.title && local.content === incoming.content
+              );
               localNotesStorage.saveNotes(currentFamily.id, next);
               return next;
             });
@@ -139,14 +163,14 @@ export const NotesPage: React.FC = () => {
       setIsQuickExpanded(false);
       return;
     }
-    if (!currentFamily || !user) return;
+    if (!currentFamily || !user || isSavingQuickRef.current) return;
 
     const finalTitle = quickTitle.trim() || 'Başlıksız Not';
     const finalContent = quickContent.trim();
     const finalColor = quickColor;
     const finalPrivate = quickIsPrivate;
 
-    // Reset quick input
+    isSavingQuickRef.current = true;
     setQuickTitle('');
     setQuickContent('');
     setQuickColor('white');
@@ -174,7 +198,6 @@ export const NotesPage: React.FC = () => {
       return next;
     });
 
-    // B. Quiet Supabase Cloud Persistence
     try {
       setIsSavingQuick(true);
       const res = await api.post<Note>('/notes/', {
@@ -185,13 +208,17 @@ export const NotesPage: React.FC = () => {
       });
 
       setNotes((prev) => {
-        const next = prev.map((n) => (n.id === tempId ? { ...res.data, author_name: user.full_name } : n));
+        const next = commitTempItem(prev, tempId, {
+          ...res.data,
+          author_name: res.data.author_name || user.full_name,
+        });
         localNotesStorage.saveNotes(currentFamily.id, next);
         return next;
       });
     } catch (err: any) {
       console.error('Quick note cloud save failed:', err);
     } finally {
+      isSavingQuickRef.current = false;
       setIsSavingQuick(false);
     }
   };
@@ -279,9 +306,8 @@ export const NotesPage: React.FC = () => {
 
   // Filter notes
   const filteredNotes = notes.filter((note) => {
-    const matchesSearch =
-      note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      note.content.toLowerCase().includes(searchQuery.toLowerCase());
+    const haystack = `${note.title || ''} ${note.content || ''}`.toLowerCase();
+    const matchesSearch = haystack.includes(searchQuery.toLowerCase());
 
     if (!matchesSearch) return false;
     if (filterType === 'public') return !note.is_private;
@@ -347,9 +373,10 @@ export const NotesPage: React.FC = () => {
       {/* 2. Google Keep "Not alın..." Quick Expanding Creator Card */}
       <div
         ref={quickBoxRef}
-        className={`rounded-2xl border shadow-sm transition-all duration-200 overflow-hidden ${
+        className={`keep-note-paper rounded-2xl border shadow-sm transition-all duration-200 overflow-hidden ${
           KEEP_COLORS[quickColor]?.bg || 'bg-white'
         } ${KEEP_COLORS[quickColor]?.border || 'border-gray-200'}`}
+        style={{ ['--keep-bg' as string]: KEEP_COLORS[quickColor]?.hex || '#ffffff' } as React.CSSProperties}
       >
         {!isQuickExpanded ? (
           <div
@@ -464,9 +491,10 @@ export const NotesPage: React.FC = () => {
               <div
                 key={note.id}
                 onClick={() => openEditModal(note)}
-                className={`break-inside-avoid rounded-2xl p-3 border shadow-2xs hover:shadow-md transition-all duration-150 cursor-pointer space-y-1.5 active:scale-[0.99] select-none ${
+                className={`keep-note-paper break-inside-avoid rounded-2xl p-3 border shadow-2xs hover:shadow-md transition-all duration-150 cursor-pointer space-y-1.5 active:scale-[0.99] select-none ${
                   colorConfig.bg
                 } ${colorConfig.border}`}
+                style={{ ['--keep-bg' as string]: colorConfig.hex } as React.CSSProperties}
               >
                 {/* Note Title & Header */}
                 <div className="flex items-start justify-between gap-1.5">
@@ -483,13 +511,13 @@ export const NotesPage: React.FC = () => {
 
                 {/* Note Body Text */}
                 {note.content && (
-                  <p className="text-[11px] sm:text-xs text-gray-800 whitespace-pre-wrap line-clamp-6 leading-relaxed font-normal break-words">
+                  <p className={`text-[11px] sm:text-xs ${colorConfig.text} whitespace-pre-wrap line-clamp-6 leading-relaxed font-normal break-words`}>
                     {note.content}
                   </p>
                 )}
 
                 {/* Card Footer: Author & Date */}
-                <div className="flex items-center justify-between pt-1.5 text-[9px] sm:text-[10px] text-gray-500/80 border-t border-black/5">
+                <div className={`flex items-center justify-between pt-1.5 text-[9px] sm:text-[10px] ${colorConfig.text} opacity-70 border-t border-black/5`}>
                   <span className="truncate max-w-[65px] font-medium">
                     {note.author_name?.split(' ')[0] || 'Aile'}
                   </span>
@@ -509,9 +537,10 @@ export const NotesPage: React.FC = () => {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className={`rounded-3xl w-full max-w-md p-4 sm:p-5 space-y-3 shadow-2xl border transition-all animate-in fade-in zoom-in-95 duration-150 ${
+            className={`keep-note-paper rounded-3xl w-full max-w-md p-4 sm:p-5 space-y-3 shadow-2xl border transition-all animate-in fade-in zoom-in-95 duration-150 ${
               KEEP_COLORS[editColor]?.bg || 'bg-white'
             } ${KEEP_COLORS[editColor]?.border || 'border-gray-200'}`}
+            style={{ ['--keep-bg' as string]: KEEP_COLORS[editColor]?.hex || '#ffffff' } as React.CSSProperties}
           >
             {/* Title Input */}
             <div className="flex items-center justify-between gap-2">

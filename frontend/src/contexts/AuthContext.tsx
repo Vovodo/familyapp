@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import * as Sentry from '@sentry/react';
 import { User } from '../types';
 import { api, storage } from '../services/api';
 import { cacheService } from '../services/cacheService';
@@ -49,10 +50,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setToken(savedToken);
           const response = await api.get<User>('/auth/me');
           setUser(response.data);
+          Sentry.setUser({ id: response.data.id });
         }
       } catch (error) {
         console.error('Session validation error:', error);
         await storage.remove('auth_token');
+        Sentry.setUser(null);
         setUser(null);
         setToken(null);
       } finally {
@@ -85,6 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await storage.set('auth_token', access_token);
       setToken(access_token);
       setUser(registeredUser);
+      Sentry.setUser({ id: registeredUser.id });
     } finally {
       setIsLoading(false);
     }
@@ -112,6 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await storage.set('auth_token', access_token);
       setToken(access_token);
       setUser(loggedUser);
+      Sentry.setUser({ id: loggedUser.id });
     } finally {
       setIsLoading(false);
     }
@@ -154,6 +159,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await storage.set('device_registered', 'true');
       setToken(access_token);
       setUser(loggedUser);
+      Sentry.setUser({ id: loggedUser.id });
     } finally {
       setIsLoading(false);
     }
@@ -172,12 +178,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await storage.remove('device_registered');
       setToken(null);
       setUser(null);
+      Sentry.setUser(null);
     }
   };
 
   const updateProfile = async (data: Partial<User>) => {
     const response = await api.patch<User>('/auth/me', data);
     setUser(response.data);
+    Sentry.setUser({ id: response.data.id });
   };
 
   return (

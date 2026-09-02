@@ -4,12 +4,12 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { api, storage } from './api';
 
-export const HEART_CHANNEL_ID = 'family_heart_channel';
+export const HEART_CHANNEL_ID = 'family_heart_channel_v2';
 export const GENERAL_CHANNEL_ID = 'family_general_channel';
-export const TEA_CHANNEL_ID = 'family_tea_channel';
-export const CAR_CHANNEL_ID = 'family_car_channel';
-export const MEAL_CHANNEL_ID = 'family_meal_channel';
-export const POKE_CHANNEL_ID = 'family_poke_channel';
+export const TEA_CHANNEL_ID = 'family_tea_channel_v2';
+export const CAR_CHANNEL_ID = 'family_car_channel_v2';
+export const MEAL_CHANNEL_ID = 'family_meal_channel_v2';
+export const POKE_CHANNEL_ID = 'family_poke_channel_v2';
 export const REMINDERS_CHANNEL_ID = 'family_reminders_channel';
 
 // 3-4 Second Gentle Love Vibration Pattern
@@ -74,7 +74,7 @@ class NotificationService {
       await LocalNotifications.createChannel({
         id: TEA_CHANNEL_ID,
         name: '☕ Çay Koydum Bildirimleri',
-        description: 'Çay kaşığı tınısı ile çay hazır bildirimleri',
+        description: 'Çay karıştırma sesi ile çay hazır bildirimleri',
         importance: 5,
         visibility: 1,
         sound: 'tea.wav',
@@ -98,7 +98,7 @@ class NotificationService {
       await LocalNotifications.createChannel({
         id: MEAL_CHANNEL_ID,
         name: '🍲 Yemek Hazır Bildirimleri',
-        description: 'Yemek zili tınısı ile sofra hazır bildirimleri',
+        description: 'Çan sesi ile sofra hazır bildirimleri',
         importance: 5,
         visibility: 1,
         sound: 'meal.wav',

@@ -40,6 +40,74 @@ class QuotaRetentionService:
                 self._family_locks[family_id] = threading.Lock()
             return self._family_locks[family_id]
 
+    def _storage_bytes(self, db: Session, category: str, family_id: Optional[str] = None) -> int:
+        query = db.query(func.sum(StorageObject.file_size)).filter(
+            StorageObject.status != "deleted",
+            StorageObject.category == category,
+        )
+        if family_id:
+            query = query.filter(StorageObject.family_id == family_id)
+        return int(query.scalar() or 0)
+
+    def _active_storage_paths(self, db: Session, family_id: str, category: str) -> set:
+        rows = (
+            db.query(StorageObject.storage_path)
+            .filter(
+                StorageObject.family_id == family_id,
+                StorageObject.category == category,
+                StorageObject.status != "deleted",
+            )
+            .all()
+        )
+        return {row[0] for row in rows if row[0]}
+
+    def _legacy_media_not_in_storage_objects(self, db: Session, family_id: str) -> List[Media]:
+        so_paths = self._active_storage_paths(db, family_id, "IMAGE")
+        media_rows = (
+            db.query(Media)
+            .filter(Media.family_id == family_id)
+            .order_by(Media.created_at.asc())
+            .all()
+        )
+        return [row for row in media_rows if row.storage_path and row.storage_path not in so_paths]
+
+    def _thumbnail_sibling(self, storage_path: Optional[str]) -> Optional[str]:
+        if not storage_path or "_thumb." in storage_path:
+            return None
+        root, ext = os.path.splitext(storage_path)
+        if not ext:
+            return None
+        return f"{root}_thumb{ext}"
+
+    def _is_thumbnail_path(self, storage_path: Optional[str]) -> bool:
+        name = (storage_path or "").split("/")[-1]
+        return "_thumb." in name
+
+    def _delete_stored_file_and_thumb(self, storage_path: Optional[str]) -> None:
+        if not storage_path:
+            return
+        try:
+            storage_service.delete_file(storage_path)
+        except Exception as err:
+            logger.warning(f"[RETENTION] File removal warning for {storage_path}: {err}")
+        thumb = self._thumbnail_sibling(storage_path)
+        if thumb:
+            try:
+                storage_service.delete_file(thumb)
+            except Exception as err:
+                logger.warning(f"[RETENTION] Thumbnail removal warning for {thumb}: {err}")
+
+    def _delete_media_row(self, db: Session, family_id: str, storage_path: Optional[str]) -> None:
+        if not storage_path:
+            return
+        media = (
+            db.query(Media)
+            .filter(Media.family_id == family_id, Media.storage_path == storage_path)
+            .first()
+        )
+        if media:
+            db.delete(media)
+
     def compute_sha256(self, file_bytes: bytes) -> str:
         """Computes SHA256 hash for deduplication."""
         return hashlib.sha256(file_bytes).hexdigest()
@@ -63,22 +131,13 @@ class QuotaRetentionService:
         - AUDIO (10% quota = 200 MB)
         Supports both Global and Group-level calculations.
         """
-        # 1. Base Query filters
-        so_query = db.query(StorageObject).filter(StorageObject.status != "deleted")
         msg_query = db.query(Message)
-
         if family_id:
-            so_query = so_query.filter(StorageObject.family_id == family_id)
             msg_query = msg_query.filter(Message.family_id == family_id)
 
-        # 2. Category: CHAT
+        # 2. Category: CHAT (family-scoped; text estimate + CHAT storage objects)
         chat_msg_count = msg_query.count()
-        # Estimate 200 bytes per message text/metadata + any chat-specific storage objects
-        chat_obj_bytes = (
-            db.query(func.sum(StorageObject.file_size))
-            .filter(StorageObject.status != "deleted", StorageObject.category == "CHAT")
-            .scalar() or 0
-        )
+        chat_obj_bytes = self._storage_bytes(db, "CHAT", family_id)
         chat_used_bytes = (chat_msg_count * 200) + chat_obj_bytes
         chat_quota_bytes = settings.chat_quota_bytes
         chat_avail_bytes = max(0, chat_quota_bytes - chat_used_bytes)
@@ -94,34 +153,23 @@ class QuotaRetentionService:
             item_count=chat_msg_count
         )
 
-        # 3. Category: IMAGE
-        img_objs = (
-            db.query(StorageObject)
-            .filter(StorageObject.status != "deleted", StorageObject.category == "IMAGE")
-        )
-        if family_id:
-            img_objs = img_objs.filter(StorageObject.family_id == family_id)
-        
-        img_used_bytes = db.query(func.sum(StorageObject.file_size)).filter(
+        # 3. Category: IMAGE (StorageObject + gallery Media not yet registered)
+        img_objs = db.query(StorageObject).filter(
             StorageObject.status != "deleted", StorageObject.category == "IMAGE"
         )
         if family_id:
-            img_used_bytes = img_used_bytes.filter(StorageObject.family_id == family_id)
-        img_used_bytes = img_used_bytes.scalar() or 0
+            img_objs = img_objs.filter(StorageObject.family_id == family_id)
 
-        # Fallback to legacy Media table if StorageObject is transitioning
-        if img_used_bytes == 0 and family_id:
-            legacy_media_bytes = (
-                db.query(func.sum(Media.file_size))
-                .filter(Media.family_id == family_id)
-                .scalar() or 0
-            )
-            img_used_bytes = legacy_media_bytes
+        img_used_bytes = self._storage_bytes(db, "IMAGE", family_id)
+        img_count = img_objs.count()
+        if family_id:
+            legacy_media = self._legacy_media_not_in_storage_objects(db, family_id)
+            img_used_bytes += sum(int(row.file_size or 0) for row in legacy_media)
+            img_count += len(legacy_media)
 
         img_quota_bytes = settings.image_quota_bytes
         img_avail_bytes = max(0, img_quota_bytes - img_used_bytes)
         img_percent = (img_used_bytes / img_quota_bytes * 100.0) if img_quota_bytes > 0 else 0.0
-        img_count = img_objs.count()
 
         img_metric = CategoryQuotaMetric(
             category="IMAGE",
@@ -141,12 +189,7 @@ class QuotaRetentionService:
         if family_id:
             audio_objs = audio_objs.filter(StorageObject.family_id == family_id)
 
-        audio_used_bytes = db.query(func.sum(StorageObject.file_size)).filter(
-            StorageObject.status != "deleted", StorageObject.category == "AUDIO"
-        )
-        if family_id:
-            audio_used_bytes = audio_used_bytes.filter(StorageObject.family_id == family_id)
-        audio_used_bytes = audio_used_bytes.scalar() or 0
+        audio_used_bytes = self._storage_bytes(db, "AUDIO", family_id)
 
         audio_quota_bytes = settings.audio_quota_bytes
         audio_avail_bytes = max(0, audio_quota_bytes - audio_used_bytes)
@@ -266,6 +309,12 @@ class QuotaRetentionService:
                     continue
 
                 projected_used = metric.used_bytes + incoming_bytes
+                if incoming_bytes > metric.quota_bytes:
+                    raise QuotaExceededException(
+                        f"Bu {cat_upper} dosyası ayrılan kotadan büyük. "
+                        f"Dosya: {incoming_bytes} bytes, kota: {metric.quota_bytes} bytes."
+                    )
+
                 if projected_used > metric.quota_bytes:
                     required_cleanup = projected_used - metric.quota_bytes
                     logger.warning(
@@ -287,22 +336,24 @@ class QuotaRetentionService:
                         .all()
                     )
 
-                    # For CHAT text messages
-                    chat_candidates = []
+                    legacy_media: List[Media] = []
+                    if cat_upper == "IMAGE":
+                        legacy_media = self._legacy_media_not_in_storage_objects(db, family_id)
+
+                    text_msg_count = 0
                     if cat_upper == "CHAT":
-                        chat_candidates = (
-                            db.query(Message)
+                        text_msg_count = (
+                            db.query(func.count(Message.id))
                             .filter(Message.family_id == family_id)
-                            .order_by(Message.created_at.asc())
-                            .all()
+                            .scalar() or 0
                         )
 
                     total_reclaimable = sum(c.file_size for c in candidates)
+                    total_reclaimable += sum(int(m.file_size or 0) for m in legacy_media)
                     if cat_upper == "CHAT":
-                        total_reclaimable += len(chat_candidates) * 200
+                        total_reclaimable += text_msg_count * 200
 
                     if total_reclaimable < required_cleanup:
-                        # FAIL-SAFE: Cannot free enough space -> Abort backup completely without deleting anything!
                         err_msg = (
                             f"Depolama kotası yetersiz ({cat_upper}). "
                             f"Gerekli: {required_cleanup} bytes, silinebilir eski veri: {total_reclaimable} bytes."
@@ -313,7 +364,7 @@ class QuotaRetentionService:
                     cleanup_plans[cat_upper] = {
                         "required_bytes": required_cleanup,
                         "candidates": candidates,
-                        "chat_candidates": chat_candidates,
+                        "legacy_media": legacy_media,
                     }
 
             # Step 2: Execution Phase (Perform exact cleanup for approved plans)
@@ -340,30 +391,48 @@ class QuotaRetentionService:
                 # A. Delete Storage Objects (Oldest backed-up first)
                 for obj in plan["candidates"]:
                     if freed_bytes >= req_bytes:
-                        break  # Stop as soon as required space is opened!
+                        break
 
-                    try:
-                        storage_service.delete_file(obj.storage_path)
-                    except Exception as del_err:
-                        logger.warning(f"[RETENTION] File removal warning for {obj.storage_path}: {del_err}")
+                    self._delete_stored_file_and_thumb(obj.storage_path)
+                    self._delete_media_row(db, family_id, obj.storage_path)
 
                     freed_bytes += obj.file_size
                     obj.status = "deleted"
                     obj.deleted_at = datetime.now(timezone.utc)
                     deleted_objs_count += 1
 
-                    # If attached to a message, preserve message integrity with a graceful fallback note
                     if obj.message_id:
-                        msg = db.query(Message).filter(Message.id == obj.message_id).first()
+                        msg = db.query(Message).filter(
+                            Message.id == obj.message_id,
+                            Message.family_id == family_id,
+                        ).first()
                         if msg:
                             msg.media_url = None
                             msg.media_thumbnail_url = None
                             if not msg.content:
                                 msg.content = "📸 [Fotoğraf/Ses kaydı depolama kotası nedeniyle arşivlendi]"
 
+                # A2. Legacy gallery photos that were never registered in storage_objects
+                for media in plan.get("legacy_media") or []:
+                    if freed_bytes >= req_bytes:
+                        break
+                    self._delete_stored_file_and_thumb(media.storage_path)
+                    freed_bytes += int(media.file_size or 0)
+                    db.delete(media)
+                    deleted_objs_count += 1
+
                 # B. If CHAT category and still need space, delete oldest text messages
                 if cat_upper == "CHAT" and freed_bytes < req_bytes:
-                    for msg in plan["chat_candidates"]:
+                    remaining = req_bytes - freed_bytes
+                    needed_msgs = max(1, (remaining + 199) // 200)
+                    chat_candidates = (
+                        db.query(Message)
+                        .filter(Message.family_id == family_id)
+                        .order_by(Message.created_at.asc())
+                        .limit(needed_msgs)
+                        .all()
+                    )
+                    for msg in chat_candidates:
                         if freed_bytes >= req_bytes:
                             break
                         db.delete(msg)
@@ -428,7 +497,11 @@ class QuotaRetentionService:
         for pf in physical_files:
             rel_path = pf.get("path") or pf.get("name")
             size = pf.get("size", 0)
-            if rel_path and rel_path not in active_db_paths:
+            if not rel_path:
+                continue
+            if self._is_thumbnail_path(rel_path):
+                continue
+            if rel_path not in active_db_paths:
                 orphan_detected += 1
                 details.append(f"Orphan file detected: {rel_path} ({size} bytes)")
                 

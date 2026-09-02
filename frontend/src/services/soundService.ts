@@ -1,7 +1,7 @@
 /**
  * soundService.ts
- * Web Audio API based high-fidelity audio synthesizer & player
- * Provides WhatsApp-like messaging audio, car horn, tea clinking, dinner bell, and heart sounds
+ * Quick-action sounds play the same WAV files used by Android FCM channels
+ * (`/sounds/*.wav` ↔ `res/raw/*.wav`). Synth fallbacks cover web audio unlock failures.
  */
 
 let audioCtx: AudioContext | null = null;
@@ -103,10 +103,39 @@ export const playMessageReceived = (): void => {
   }
 };
 
+const SOUND_ASSETS = {
+  poke: '/sounds/poke.wav',
+  heart: '/sounds/heart.wav',
+  tea: '/sounds/tea.wav',
+  car_horn: '/sounds/car_horn.wav',
+  meal: '/sounds/meal.wav',
+} as const;
+
+const playSoundFile = (src: string, fallback: () => void): void => {
+  try {
+    if (typeof Audio === 'undefined') {
+      fallback();
+      return;
+    }
+    const audio = new Audio(src);
+    audio.volume = 1;
+    const playPromise = audio.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => fallback());
+    }
+  } catch {
+    fallback();
+  }
+};
+
 /**
  * Dürtme (poke) bildirimi sesi
  */
 export const playPokeSound = (): void => {
+  playSoundFile(SOUND_ASSETS.poke, playPokeSoundSynth);
+};
+
+const playPokeSoundSynth = (): void => {
   try {
     const ctx = getCtx();
     if (!ctx) return;
@@ -133,6 +162,10 @@ export const playPokeSound = (): void => {
  * Kalp gönderme sesi
  */
 export const playHeartSound = (): void => {
+  playSoundFile(SOUND_ASSETS.heart, playHeartSoundSynth);
+};
+
+const playHeartSoundSynth = (): void => {
   try {
     const ctx = getCtx();
     if (!ctx) return;
@@ -157,29 +190,48 @@ export const playHeartSound = (): void => {
 };
 
 /**
- * ☕ Çay Koydum Bildirim Sesi (Şıngırtı)
+ * ☕ Çay Koydum — fincanda kaşık karıştırma
  */
 export const playTeaSound = (): void => {
+  playSoundFile(SOUND_ASSETS.tea, playTeaSoundSynth);
+};
+
+const playTeaSoundSynth = (): void => {
   try {
     const ctx = getCtx();
     if (!ctx) return;
 
-    const clinkFreqs = [2800, 3400, 2900, 3600, 3100, 3800];
+    const noiseLen = 1.85;
+    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * noiseLen), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const t = i / ctx.sampleRate;
+      const swirl = (Math.random() * 2 - 1) * (0.45 + 0.55 * Math.sin(2 * Math.PI * 3.2 * t));
+      const fade = Math.min(1, t / 0.08) * Math.max(0, 1 - t / noiseLen);
+      data[i] = swirl * fade * 0.18;
+    }
+    const noise = ctx.createBufferSource();
+    const noiseGain = ctx.createGain();
+    noise.buffer = buffer;
+    noise.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noiseGain.gain.setValueAtTime(0.9, ctx.currentTime);
+    noise.start(ctx.currentTime);
+    noise.stop(ctx.currentTime + noiseLen);
+
+    const clinkFreqs = [2100, 2550, 1980, 2700, 2300, 2850, 2150, 2600];
     clinkFreqs.forEach((freq, i) => {
-      const startTime = ctx.currentTime + i * 0.065;
+      const startTime = ctx.currentTime + 0.1 + i * 0.18;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-
       osc.connect(gain);
       gain.connect(ctx.destination);
-
-      osc.type = 'triangle';
+      osc.type = 'sine';
       osc.frequency.setValueAtTime(freq, startTime);
-      gain.gain.setValueAtTime(0.35, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.07);
-
+      gain.gain.setValueAtTime(0.45, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.12);
       osc.start(startTime);
-      osc.stop(startTime + 0.075);
+      osc.stop(startTime + 0.13);
     });
   } catch (err) {
     // Silently ignore
@@ -190,6 +242,10 @@ export const playTeaSound = (): void => {
  * 🚗 Eve Geliyorum Bildirim Sesi ("Düt Düt!")
  */
 export const playCarHornSound = (): void => {
+  playSoundFile(SOUND_ASSETS.car_horn, playCarHornSoundSynth);
+};
+
+const playCarHornSoundSynth = (): void => {
   try {
     const ctx = getCtx();
     if (!ctx) return;
@@ -227,30 +283,41 @@ export const playCarHornSound = (): void => {
 };
 
 /**
- * 🍲 Yemek Hazır Bildirim Sesi (Yemek Çanı)
+ * 🍲 Yemek Hazır — çalan servis çanı
  */
 export const playMealSound = (): void => {
+  playSoundFile(SOUND_ASSETS.meal, playMealSoundSynth);
+};
+
+const playMealSoundSynth = (): void => {
   try {
     const ctx = getCtx();
     if (!ctx) return;
 
-    const freqs = [659.25, 880, 1318.5]; // E5, A5, E6
-    freqs.forEach((freq, idx) => {
-      const startTime = ctx.currentTime + idx * 0.09;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+    const strikeBell = (startTime: number) => {
+      const partials = [
+        { freq: 784, vol: 0.55 },
+        { freq: 1568, vol: 0.32 },
+        { freq: 2164, vol: 0.2 },
+        { freq: 3034, vol: 0.12 },
+      ];
+      partials.forEach(({ freq, vol }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, startTime);
+        gain.gain.setValueAtTime(vol, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 1.1);
+        osc.start(startTime);
+        osc.stop(startTime + 1.12);
+      });
+    };
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, startTime);
-      gain.gain.setValueAtTime(0.4, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.5);
-
-      osc.start(startTime);
-      osc.stop(startTime + 0.51);
-    });
+    strikeBell(ctx.currentTime);
+    strikeBell(ctx.currentTime + 0.55);
+    strikeBell(ctx.currentTime + 1.1);
   } catch (err) {
     // Silently ignore
   }

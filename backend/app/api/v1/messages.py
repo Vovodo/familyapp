@@ -1,11 +1,13 @@
 import re
 import json
+import uuid
 import httpx
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from loguru import logger
 from backend.app.db.session import get_db
@@ -15,7 +17,7 @@ from backend.app.schemas.schemas import (
     MessageUpdate,
     MessageResponse
 )
-from backend.app.api.deps import get_current_user, get_current_family_member
+from backend.app.api.deps import get_current_user, get_current_family_member, get_current_admin_member
 from backend.app.services.push_service import push_service
 
 router = APIRouter()
@@ -30,6 +32,78 @@ class PollCreateRequest(BaseModel):
 
 class PollVoteRequest(BaseModel):
     option_index: int = Field(..., ge=0, le=10)
+
+
+def _parse_poll_options(raw) -> list:
+    try:
+        options_list = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        options_list = []
+    return options_list or []
+
+
+def _poll_is_expired(poll: Poll) -> bool:
+    now = datetime.now(timezone.utc)
+    exp = poll.expires_at
+    if exp is None:
+        return bool(poll.is_closed)
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return bool(poll.is_closed or now > exp)
+
+
+def _poll_public_payload(
+    poll: Poll,
+    votes_rows: list,
+    current_user_id: str,
+    is_expired: Optional[bool] = None,
+) -> Dict[str, Any]:
+    options_list = _parse_poll_options(poll.options)
+    tallies: Dict[str, int] = {str(i): 0 for i in range(len(options_list))}
+    voters: Dict[str, list] = {str(i): [] for i in range(len(options_list))}
+    my_vote = None
+
+    for vote, user in votes_rows:
+        key = str(int(vote.option_index))
+        if key not in tallies:
+            continue
+        tallies[key] += 1
+        voters[key].append({
+            "user_id": vote.user_id,
+            "name": user.full_name if user else "Aile Üyesi",
+            "avatar": user.avatar_url if user else None,
+        })
+        if vote.user_id == current_user_id:
+            my_vote = int(vote.option_index)
+
+    return {
+        "poll_id": poll.id,
+        "message_id": poll.message_id,
+        "question": poll.question,
+        "options": options_list,
+        "duration_hours": poll.duration_hours,
+        "expires_at": poll.expires_at.isoformat() if poll.expires_at else None,
+        "is_closed": _poll_is_expired(poll) if is_expired is None else is_expired,
+        "total_votes": sum(tallies.values()),
+        "tallies": tallies,
+        "voters": voters,
+        "my_vote": my_vote,
+    }
+
+
+def _load_poll_votes(db: Session, poll_ids: List[str]) -> Dict[str, list]:
+    if not poll_ids:
+        return {}
+    rows = (
+        db.query(PollVote, User)
+        .outerjoin(User, PollVote.user_id == User.id)
+        .filter(PollVote.poll_id.in_(poll_ids))
+        .all()
+    )
+    votes_by_poll: Dict[str, list] = {}
+    for vote, user in rows:
+        votes_by_poll.setdefault(vote.poll_id, []).append((vote, user))
+    return votes_by_poll
 
 
 class BatchDeleteRequest(BaseModel):
@@ -108,29 +182,50 @@ async def get_link_preview(
 @router.get("/", response_model=List[MessageResponse])
 def get_messages(
     limit: int = Query(50, ge=1, le=100),
-    before: Optional[str] = Query(None, description="Cursor for pagination (message_id)"),
+    before: Optional[str] = Query(None, description="Cursor for older messages (message_id)"),
+    after: Optional[str] = Query(None, description="Cursor for newer messages since last local sync"),
     db: Session = Depends(get_db),
     member: FamilyMember = Depends(get_current_family_member)
 ):
     """
     Returns messages for the family with cursor pagination.
+    Default: latest page. `before` loads older history. `after` loads only messages newer than local cache.
     """
-    query = (
-        db.query(Message)
-        .filter(Message.family_id == member.family_id)
-        .order_by(Message.created_at.desc(), Message.id.desc())
-    )
+    query = db.query(Message).filter(Message.family_id == member.family_id)
 
-    if before:
-        cursor_msg = db.query(Message.created_at).filter(
-            Message.id == before,
-            Message.family_id == member.family_id
-        ).first()
-        if cursor_msg:
-            query = query.filter(Message.created_at < cursor_msg[0])
-
-    messages = query.limit(limit).all()
-    messages.reverse()
+    if after:
+        cursor_msg = (
+            db.query(Message.created_at, Message.id)
+            .filter(Message.id == after, Message.family_id == member.family_id)
+            .first()
+        )
+        if not cursor_msg:
+            return []
+        query = query.filter(
+            or_(
+                Message.created_at > cursor_msg[0],
+                and_(Message.created_at == cursor_msg[0], Message.id > cursor_msg[1]),
+            )
+        )
+        query = query.order_by(Message.created_at.asc(), Message.id.asc())
+        messages = query.limit(limit).all()
+    else:
+        query = query.order_by(Message.created_at.desc(), Message.id.desc())
+        if before:
+            cursor_msg = (
+                db.query(Message.created_at, Message.id)
+                .filter(Message.id == before, Message.family_id == member.family_id)
+                .first()
+            )
+            if cursor_msg:
+                query = query.filter(
+                    or_(
+                        Message.created_at < cursor_msg[0],
+                        and_(Message.created_at == cursor_msg[0], Message.id < cursor_msg[1]),
+                    )
+                )
+        messages = query.limit(limit).all()
+        messages.reverse()
 
     if not messages:
         return []
@@ -156,66 +251,13 @@ def get_messages(
     poll_map = {}
     if poll_msg_ids:
         polls = db.query(Poll).filter(Poll.message_id.in_(poll_msg_ids)).all()
-        poll_ids = [p.id for p in polls]
-        votes = (
-            db.query(PollVote, User)
-            .outerjoin(User, PollVote.user_id == User.id)
-            .filter(PollVote.poll_id.in_(poll_ids))
-            .all()
-        )
-        votes_by_poll: Dict[str, list] = {}
-        for pv, u in votes:
-            if pv.poll_id not in votes_by_poll:
-                votes_by_poll[pv.poll_id] = []
-            votes_by_poll[pv.poll_id].append({
-                "user_id": pv.user_id,
-                "option_index": pv.option_index,
-                "name": u.full_name if u else "Aile Üyesi",
-                "avatar": u.avatar_url if u else None,
-            })
-
-        now = datetime.now(timezone.utc)
+        votes_by_poll = _load_poll_votes(db, [p.id for p in polls])
         for p in polls:
-            try:
-                options_list = json.loads(p.options) if isinstance(p.options, str) else p.options
-            except Exception:
-                options_list = []
-            pv_list = votes_by_poll.get(p.id, [])
-            tallies = {i: 0 for i in range(len(options_list))}
-            voters = {i: [] for i in range(len(options_list))}
-            my_vote = None
-
-            for v in pv_list:
-                opt_idx = v["option_index"]
-                if opt_idx in tallies:
-                    tallies[opt_idx] += 1
-                if opt_idx in voters:
-                    voters[opt_idx].append({
-                        "user_id": v["user_id"],
-                        "name": v["name"],
-                        "avatar": v["avatar"],
-                    })
-                if v["user_id"] == member.user_id:
-                    my_vote = opt_idx
-
-            exp = p.expires_at
-            if exp.tzinfo is None:
-                exp = exp.replace(tzinfo=timezone.utc)
-            is_expired = p.is_closed or now > exp
-
-            poll_map[p.message_id] = {
-                "poll_id": p.id,
-                "message_id": p.message_id,
-                "question": p.question,
-                "options": options_list,
-                "duration_hours": p.duration_hours,
-                "expires_at": p.expires_at.isoformat(),
-                "is_closed": is_expired,
-                "total_votes": len(pv_list),
-                "tallies": tallies,
-                "voters": voters,
-                "my_vote": my_vote
-            }
+            poll_map[p.message_id] = _poll_public_payload(
+                p,
+                votes_by_poll.get(p.id, []),
+                member.user_id,
+            )
 
     results = []
     for msg in messages:
@@ -450,11 +492,10 @@ async def create_poll(
     """
     Creates a new poll in the family chat with specified duration.
     """
-    import uuid as _uuid
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(hours=payload.duration_hours)
-    poll_id = str(_uuid.uuid4())
-    message_id = str(_uuid.uuid4())
+    poll_id = str(uuid.uuid4())
+    message_id = str(uuid.uuid4())
 
     options_cleaned = [opt.strip() for opt in payload.options if opt.strip()]
     if len(options_cleaned) < 2:
@@ -490,17 +531,7 @@ async def create_poll(
     db.refresh(msg)
     db.refresh(poll)
 
-    poll_data = {
-        "poll_id": poll.id,
-        "question": poll.question,
-        "options": options_cleaned,
-        "duration_hours": poll.duration_hours,
-        "expires_at": poll.expires_at.isoformat(),
-        "is_closed": False,
-        "votes": {},
-        "total_votes": 0,
-        "my_vote": None
-    }
+    poll_data = _poll_public_payload(poll, [], current_user.id, is_expired=False)
 
     resp = {
         "id": msg.id,
@@ -560,51 +591,32 @@ async def vote_poll(
     if payload.option_index >= len(options_list):
         raise HTTPException(status_code=400, detail="Geçersiz seçenek.")
 
-    # Atomic vote replace: Delete any existing vote for this user on this poll and insert new
-    db.query(PollVote).filter(
-        PollVote.poll_id == poll.id,
-        PollVote.user_id == current_user.id
-    ).delete()
-
-    new_vote = PollVote(
-        id=str(uuid.uuid4()),
-        poll_id=poll.id,
-        user_id=current_user.id,
-        option_index=payload.option_index
+    existing_vote = (
+        db.query(PollVote)
+        .filter(PollVote.poll_id == poll.id, PollVote.user_id == current_user.id)
+        .first()
     )
-    db.add(new_vote)
+    if existing_vote:
+        existing_vote.option_index = payload.option_index
+    else:
+        db.add(PollVote(
+            id=str(uuid.uuid4()),
+            poll_id=poll.id,
+            user_id=current_user.id,
+            option_index=payload.option_index,
+        ))
     db.commit()
 
-    # Calculate tallies and voter details
-    votes_data = (
-        db.query(PollVote, User)
-        .outerjoin(User, PollVote.user_id == User.id)
-        .filter(PollVote.poll_id == poll.id)
-        .all()
+    snapshot = _poll_public_payload(
+        poll,
+        _load_poll_votes(db, [poll.id]).get(poll.id, []),
+        current_user.id,
+        is_expired=False,
     )
-
-    tallies: Dict[int, int] = {i: 0 for i in range(len(options_list))}
-    voters: Dict[int, list] = {i: [] for i in range(len(options_list))}
-
-    for v, u in votes_data:
-        if v.option_index in tallies:
-            tallies[v.option_index] += 1
-        if v.option_index in voters:
-            voters[v.option_index].append({
-                "user_id": v.user_id,
-                "name": u.full_name if u else "Aile Üyesi",
-                "avatar": u.avatar_url if u else None,
-            })
-
     return {
         "status": "success",
-        "poll_id": poll.id,
-        "message_id": poll.message_id,
+        **snapshot,
         "my_vote": payload.option_index,
-        "total_votes": len(votes_data),
-        "tallies": tallies,
-        "voters": voters,
-        "is_closed": False
     }
 
 
@@ -629,53 +641,11 @@ def get_poll_details(
     if not poll:
         raise HTTPException(status_code=404, detail="Anket bulunamadı.")
 
-    now = datetime.now(timezone.utc)
-    exp = poll.expires_at
-    if exp.tzinfo is None:
-        exp = exp.replace(tzinfo=timezone.utc)
-    is_expired = poll.is_closed or now > exp
-
-    try:
-        options_list = json.loads(poll.options) if isinstance(poll.options, str) else poll.options
-    except Exception:
-        options_list = []
-
-    votes_data = (
-        db.query(PollVote, User)
-        .outerjoin(User, PollVote.user_id == User.id)
-        .filter(PollVote.poll_id == poll.id)
-        .all()
+    return _poll_public_payload(
+        poll,
+        _load_poll_votes(db, [poll.id]).get(poll.id, []),
+        current_user.id,
     )
-
-    tallies: Dict[int, int] = {i: 0 for i in range(len(options_list))}
-    voters: Dict[int, list] = {i: [] for i in range(len(options_list))}
-    my_vote = None
-
-    for v, u in votes_data:
-        if v.option_index in tallies:
-            tallies[v.option_index] += 1
-        if v.option_index in voters:
-            voters[v.option_index].append({
-                "user_id": v.user_id,
-                "name": u.full_name if u else "Aile Üyesi",
-                "avatar": u.avatar_url if u else None,
-            })
-        if v.user_id == current_user.id:
-            my_vote = v.option_index
-
-    return {
-        "poll_id": poll.id,
-        "message_id": poll.message_id,
-        "question": poll.question,
-        "options": options_list,
-        "duration_hours": poll.duration_hours,
-        "expires_at": poll.expires_at.isoformat(),
-        "is_closed": is_expired,
-        "total_votes": len(votes_data),
-        "tallies": tallies,
-        "voters": voters,
-        "my_vote": my_vote
-    }
 
 
 @router.post("/clear-history")
@@ -683,16 +653,18 @@ def clear_chat_history(
     preserve_media_vault: bool = Query(True),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    member: FamilyMember = Depends(get_current_family_member)
+    admin_member: FamilyMember = Depends(get_current_admin_member),
 ):
     """
-    Clears all messages from the chat view and active database for the current family.
-    Preserves binary media files in the family photo album / local vault.
+    [AILE ADMIN] Wipes server-side chat history for the whole family.
+    Device-local "clear chat" must NOT call this — that is per-device only.
     """
-    deleted_count = db.query(Message).filter(Message.family_id == member.family_id).delete()
+    deleted_count = db.query(Message).filter(Message.family_id == admin_member.family_id).delete()
     db.commit()
 
-    logger.info(f"Chat history cleared ({deleted_count} messages) for family {member.family_id} by user {current_user.id}")
+    logger.info(
+        f"Chat history cleared ({deleted_count} messages) for family {admin_member.family_id} by admin {current_user.id}"
+    )
     return {
         "status": "success",
         "deleted_count": deleted_count,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Check, Clock, Crown, BarChart3, Users } from 'lucide-react';
 import { Message, PollData, PollVoter } from '../../types';
 import { api } from '../../services/api';
@@ -9,9 +9,10 @@ import { useFamily } from '../../contexts/FamilyContext';
 interface PollMessageCardProps {
   message: Message;
   isMe: boolean;
+  onPollChange?: (poll: PollData) => void;
 }
 
-export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe }) => {
+export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe, onPollChange }) => {
   const { user } = useAuth();
   const { currentFamily } = useFamily();
 
@@ -29,14 +30,61 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
   const [selectedOption, setSelectedOption] = useState<number | null>(
     () => poll?.my_vote ?? null
   );
+  const voteGenerationRef = useRef(0);
+  const selectedOptionRef = useRef<number | null>(poll?.my_vote ?? null);
 
-  // Sync with message.poll prop if updated
+  const countVotes = (data?: {
+    total_votes?: number;
+    tallies?: Record<string | number, number>;
+  } | null) => {
+    if (!data) return 0;
+    const fromTotal = Number(data.total_votes);
+    if (Number.isFinite(fromTotal) && fromTotal > 0) return fromTotal;
+    return Object.values(data.tallies || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+  };
+
+  const applyIncomingPoll = (incoming: PollData, force = false) => {
+    setPoll((prev) => {
+      const localVote = prev?.my_vote ?? selectedOptionRef.current;
+      const incomingCount = countVotes(incoming);
+      const localCount = countVotes(prev);
+
+      if (!prev || force) {
+        if (!force && localVote != null && incomingCount === 0) {
+          return prev || incoming;
+        }
+        return incoming;
+      }
+
+      if (localCount > incomingCount || (incomingCount === 0 && localVote != null && localCount > 0)) {
+        const kept: PollData = {
+          ...incoming,
+          ...prev,
+          my_vote: prev.my_vote ?? incoming.my_vote ?? localVote,
+          tallies: prev.tallies,
+          voters: prev.voters,
+          total_votes: localCount,
+        };
+        return kept;
+      }
+
+      return {
+        ...prev,
+        ...incoming,
+        my_vote: incoming.my_vote ?? prev.my_vote ?? localVote,
+        total_votes: Math.max(localCount, incomingCount),
+      };
+    });
+    if (incoming.my_vote !== undefined && incoming.my_vote !== null) {
+      selectedOptionRef.current = incoming.my_vote;
+      setSelectedOption(incoming.my_vote);
+    }
+  };
+
+  // Sync with message.poll prop if updated — never let a stale 0-vote snapshot wipe a local vote.
   useEffect(() => {
     if (message.poll) {
-      setPoll(message.poll);
-      if (message.poll.my_vote !== undefined && message.poll.my_vote !== null) {
-        setSelectedOption(message.poll.my_vote);
-      }
+      applyIncomingPoll(message.poll);
     }
   }, [message.poll]);
 
@@ -45,19 +93,29 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
     const targetId = poll?.poll_id || poll?.message_id || message.id;
     if (!targetId) return;
 
-    // Only fetch if missing voters or tallies
-    if (!poll || !poll.voters) {
-      api
-        .get<PollData>(`/messages/poll/${targetId}`)
-        .then((res) => {
-          setPoll((prev) => ({ ...prev, ...res.data }));
-          if (res.data.my_vote !== undefined && res.data.my_vote !== null) {
-            setSelectedOption(res.data.my_vote);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [message.id, poll?.poll_id]);
+    if (poll && (poll.my_vote != null || countVotes(poll) > 0)) return;
+
+    const hasVoters = Object.values(poll?.voters || {}).some(
+      (list) => Array.isArray(list) && list.length > 0
+    );
+    if (hasVoters) return;
+
+    let cancelled = false;
+    const generation = voteGenerationRef.current;
+
+    api
+      .get<PollData>(`/messages/poll/${targetId}`)
+      .then((res) => {
+        if (cancelled || generation !== voteGenerationRef.current) return;
+        if (countVotes(res.data) === 0 && selectedOptionRef.current != null) return;
+        applyIncomingPoll(res.data);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [message.id]);
 
   // Realtime Supabase Broadcast listener
   useEffect(() => {
@@ -110,7 +168,11 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
 
     if (selectedOption === optionIndex) return; // Already voted for this option
 
+    voteGenerationRef.current += 1;
+    const generation = voteGenerationRef.current;
+
     // 1. Instant optimistic state update
+    selectedOptionRef.current = optionIndex;
     setSelectedOption(optionIndex);
 
     const currentUserVoter: PollVoter = {
@@ -148,6 +210,7 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
     };
 
     setPoll(updatedPoll);
+    onPollChange?.(updatedPoll);
 
     if (navigator.vibrate) navigator.vibrate(25);
 
@@ -182,16 +245,20 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe 
       });
 
       if (res.data) {
-        setPoll((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            tallies: res.data.tallies || newTallies,
-            voters: res.data.voters || newVoters,
-            total_votes: res.data.total_votes || newTotalVotes,
-            my_vote: res.data.my_vote !== undefined ? res.data.my_vote : optionIndex,
-          };
-        });
+        if (generation !== voteGenerationRef.current) return;
+        const serverTotal = countVotes(res.data);
+        if (serverTotal < newTotalVotes) {
+          return;
+        }
+        const confirmed: PollData = {
+          ...updatedPoll,
+          tallies: res.data.tallies || newTallies,
+          voters: res.data.voters || newVoters,
+          total_votes: res.data.total_votes || newTotalVotes,
+          my_vote: res.data.my_vote !== undefined ? res.data.my_vote : optionIndex,
+        };
+        setPoll(confirmed);
+        onPollChange?.(confirmed);
       }
     } catch (err) {
       console.warn('Vote background sync warning:', err);

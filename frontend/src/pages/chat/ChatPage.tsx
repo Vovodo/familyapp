@@ -4,11 +4,13 @@ import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/
 import { isSameDay } from 'date-fns';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
-import { Message } from '../../types';
+import { useTheme } from '../../contexts/ThemeContext';
+import { Message, PollData } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { localChatStorage, reconcileMessages } from '../../services/localChatStorage';
 import { localMediaVault } from '../../services/localMediaVault';
+import { syncService } from '../../services/syncService';
 import { MessageBubble } from '../../components/chat/MessageBubble';
 import { ChatInput } from '../../components/chat/ChatInput';
 import { DateSeparator } from '../../components/chat/DateSeparator';
@@ -23,6 +25,7 @@ import { CreatePollModal } from '../../components/chat/CreatePollModal';
 export const ChatPage: React.FC = () => {
   const { user } = useAuth();
   const { currentFamily, activeMember } = useFamily();
+  const { currentTheme } = useTheme();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -73,6 +76,9 @@ export const ChatPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const channelRef = useRef<any>(null);
   const isNearBottomRef = useRef(true);
+  const userPinnedToBottomRef = useRef(true);
+  const pendingPinTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const lastTouchYRef = useRef<number | null>(null);
 
   // Settings handlers
   const handleChangeFontSize = (size: FontSizeOption) => {
@@ -91,69 +97,67 @@ export const ChatPage: React.FC = () => {
     localStorage.setItem('ailem_chat_wallpaper', wp);
   };
 
-  // Clear Chat History (Clears text & active messages, preserves local photos and audio in vault)
+  // Clear Chat History — this device only (WhatsApp "sohbeti temizle")
   const handleClearChatHistory = async () => {
     if (!currentFamily) return;
     setMessages([]);
-    localChatStorage.saveMessages(currentFamily.id, []);
+    await localChatStorage.saveMessages(currentFamily.id, []);
     setShowSettingsModal(false);
-
-    // Broadcast clear event to other family devices
-    if (supabase && currentFamily) {
-      supabase.channel(`family-chat-${currentFamily.id}`).send({
-        type: 'broadcast',
-        event: 'chat_cleared',
-        payload: { family_id: currentFamily.id },
-      });
-    }
-
-    try {
-      await api.post('/messages/clear-history');
-    } catch (err) {
-      console.warn('Failed to clear chat history on server:', err);
-    }
   };
 
-  // Scroll Helpers
-  const scrollToBottom = useCallback((smooth = true) => {
-    if (scrollContainerRef.current) {
-      if (smooth) {
-        scrollContainerRef.current.scrollTo({
-          top: scrollContainerRef.current.scrollHeight,
-          behavior: 'smooth',
-        });
-      } else {
-        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-      }
-      setShowScrollBottom(false);
-      setUnreadCount(0);
-      isNearBottomRef.current = true;
-    }
+  const clearPendingPins = useCallback(() => {
+    pendingPinTimersRef.current.forEach((id) => clearTimeout(id));
+    pendingPinTimersRef.current = [];
   }, []);
 
-  // Force Instant Scroll to Bottom when messages are loaded
+  const releaseStickToBottom = useCallback(() => {
+    userPinnedToBottomRef.current = false;
+    isNearBottomRef.current = false;
+    clearPendingPins();
+  }, [clearPendingPins]);
+
+  const scrollToBottom = useCallback((smooth = true, force = false) => {
+    if (!force && !userPinnedToBottomRef.current) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    if (smooth) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: 'smooth',
+      });
+    } else {
+      container.scrollTop = container.scrollHeight;
+    }
+    setShowScrollBottom(false);
+    setUnreadCount(0);
+    isNearBottomRef.current = true;
+    userPinnedToBottomRef.current = true;
+  }, []);
+
+  const queuePinToBottom = useCallback((delayMs: number) => {
+    const id = setTimeout(() => scrollToBottom(false), delayMs);
+    pendingPinTimersRef.current.push(id);
+  }, [scrollToBottom]);
+
+  // First paint: jump to latest once. Later timers must not yank the user if they already scrolled up.
   useEffect(() => {
     if (messages.length > 0 && !initialScrollDoneRef.current) {
       initialScrollDoneRef.current = true;
+      userPinnedToBottomRef.current = true;
 
-      // 1. Immediate instant jump
       if (scrollContainerRef.current) {
         scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
       }
-
-      // 2. Next animation frame
       requestAnimationFrame(() => {
+        if (!userPinnedToBottomRef.current) return;
         if (scrollContainerRef.current) {
           scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
         }
       });
-
-      // 3. Timers to catch image loads / font layout
-      setTimeout(() => scrollToBottom(false), 50);
-      setTimeout(() => scrollToBottom(false), 200);
-      setTimeout(() => scrollToBottom(false), 500);
+      queuePinToBottom(80);
     }
-  }, [messages.length, scrollToBottom]);
+  }, [messages.length, queuePinToBottom]);
 
   const handleScroll = () => {
     const container = scrollContainerRef.current;
@@ -163,12 +167,14 @@ export const ChatPage: React.FC = () => {
     const distanceToBottom = scrollHeight - scrollTop - clientHeight;
     const isAtBottom = distanceToBottom < 80;
     isNearBottomRef.current = isAtBottom;
+    userPinnedToBottomRef.current = isAtBottom;
 
     if (isAtBottom) {
       setShowScrollBottom(false);
       setUnreadCount(0);
     } else {
       setShowScrollBottom(true);
+      clearPendingPins();
     }
 
     if (scrollTop < 60 && hasMore && !isLoadingOlder && !isLoading) {
@@ -176,59 +182,138 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  // Load Messages Instant & Sync
-  const loadMessagesInstantAndSync = async (silent = false) => {
-    if (!currentFamily) return;
-
-    if (!silent) {
-      const cached = await localChatStorage.getMessages(currentFamily.id);
-      if (cached && cached.length > 0) {
-        setMessages(cached);
-        setIsLoading(false);
-        setTimeout(() => scrollToBottom(false), 10);
-      }
-    }
-
-    try {
-      const res = await api.get<Message[]>('/messages/', {
-        params: { limit: 50 },
-      });
-
-      setMessages((current) => {
-        const merged = reconcileMessages(current, res.data);
-        localChatStorage.saveMessages(currentFamily.id, merged);
-        return merged;
-      });
-
-      setHasMore(res.data.length >= 50);
-
-      if (!silent) {
-        setTimeout(() => scrollToBottom(false), 20);
-      }
-    } catch (err: any) {
-      if (!silent) {
-        setError('Mesajlar yüklenirken bir problem oluştu.');
-      }
-    } finally {
-      if (!silent) setIsLoading(false);
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < 0) {
+      releaseStickToBottom();
     }
   };
 
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    lastTouchYRef.current = e.touches[0]?.clientY ?? null;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const y = e.touches[0]?.clientY;
+    if (lastTouchYRef.current == null || y == null) return;
+    if (y - lastTouchYRef.current > 6) {
+      releaseStickToBottom();
+    }
+  };
+
+  const persistMessages = useCallback(
+    (familyId: string, next: Message[]) => {
+      localChatStorage.saveMessages(familyId, next);
+      return next;
+    },
+    []
+  );
+
+  const persistPollUpdate = useCallback(
+    (messageId: string, poll: PollData) => {
+      if (!currentFamily) return;
+      setMessages((prev) => {
+        const next = prev.map((msg) =>
+          msg.id === messageId || msg.poll?.poll_id === poll.poll_id ? { ...msg, poll } : msg
+        );
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
+    },
+    [currentFamily]
+  );
+
+  const lastDurableId = (list: Message[]): string | undefined => {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const id = list[i]?.id;
+      if (id && !id.startsWith('temp-')) return id;
+    }
+    return undefined;
+  };
+
+  // Local-first open: IndexedDB instantly, then only messages newer than the last local row.
+  const loadMessagesInstantAndSync = useCallback(
+    async (silent = false) => {
+      if (!currentFamily) return;
+
+      let cached: Message[] = [];
+      if (!silent) {
+        cached = await localChatStorage.getMessages(currentFamily.id);
+        if (cached.length > 0) {
+          setMessages(cached);
+          setIsLoading(false);
+          setHasMore(true);
+          queuePinToBottom(10);
+        }
+      } else {
+        cached = await localChatStorage.getMessages(currentFamily.id);
+      }
+
+      try {
+        const afterId = lastDurableId(cached);
+        let incoming: Message[] = [];
+
+        const recentRes = await api.get<Message[]>('/messages/', { params: { limit: 30 } });
+        incoming = incoming.concat(recentRes.data);
+
+        if (afterId) {
+          let cursor = afterId;
+          for (let page = 0; page < 20; page++) {
+            const res = await api.get<Message[]>('/messages/', {
+              params: { after: cursor, limit: 50 },
+            });
+            if (!res.data.length) break;
+            incoming = incoming.concat(res.data);
+            cursor = res.data[res.data.length - 1].id;
+            if (res.data.length < 50) break;
+          }
+        } else {
+          setHasMore(recentRes.data.length >= 30);
+        }
+
+        if (incoming.length > 0 || !silent) {
+          setMessages((current) => persistMessages(currentFamily.id, reconcileMessages(current, incoming)));
+        }
+
+        if (!silent && userPinnedToBottomRef.current) {
+          queuePinToBottom(20);
+        }
+      } catch (err: any) {
+        if (!silent) {
+          setError('Mesajlar yüklenirken bir problem oluştu.');
+        }
+      } finally {
+        if (!silent) setIsLoading(false);
+      }
+    },
+    [currentFamily, persistMessages, queuePinToBottom]
+  );
+
   useEffect(() => {
     initialScrollDoneRef.current = false;
+    userPinnedToBottomRef.current = true;
+    isNearBottomRef.current = true;
+    clearPendingPins();
     loadMessagesInstantAndSync(false);
+    return () => clearPendingPins();
   }, [currentFamily?.id]);
 
-  // Silent background reconciliation every 6 seconds for guaranteed message delivery
+  // Reconcile only when the app comes back to the foreground — never poll the DB on a timer.
   useEffect(() => {
     if (!currentFamily) return;
-    const interval = setInterval(() => {
+
+    const onResume = () => {
       if (document.visibilityState === 'visible') {
         loadMessagesInstantAndSync(true);
       }
-    }, 6000);
-    return () => clearInterval(interval);
-  }, [currentFamily?.id]);
+    };
+
+    document.addEventListener('visibilitychange', onResume);
+    window.addEventListener('focus', onResume);
+    return () => {
+      document.removeEventListener('visibilitychange', onResume);
+      window.removeEventListener('focus', onResume);
+    };
+  }, [currentFamily?.id, loadMessagesInstantAndSync]);
 
   // Fetch Older Messages (Infinite Scroll)
   const fetchOlderMessages = async () => {
@@ -298,13 +383,15 @@ export const ChatPage: React.FC = () => {
       })
       .on('broadcast', { event: 'message_deleted' }, ({ payload }) => {
         const deletedIds: string[] = payload.message_ids || [payload.message_id];
-        setMessages((prev) =>
-          prev.map((msg) =>
+        setMessages((prev) => {
+          const next = prev.map((msg) =>
             deletedIds.includes(msg.id)
               ? { ...msg, content: '🚫 Bu mesaj silindi', media_url: undefined, media_thumbnail_url: undefined }
               : msg
-          )
-        );
+          );
+          if (currentFamily) localChatStorage.saveMessages(currentFamily.id, next);
+          return next;
+        });
       })
       .on('broadcast', { event: 'chat_cleared' }, () => {
         setMessages([]);
@@ -406,7 +493,7 @@ export const ChatPage: React.FC = () => {
       localChatStorage.saveMessages(currentFamily.id, next);
       return next;
     });
-    setTimeout(() => scrollToBottom(true), 20);
+    setTimeout(() => scrollToBottom(true, true), 20);
     playMessageSent();
 
     try {
@@ -416,10 +503,18 @@ export const ChatPage: React.FC = () => {
       });
 
       setMessages((prev) => {
-        const next = prev.map((m) => (m.client_message_id === clientMessageId ? res.data : m));
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId ? { ...res.data, status: 'sent' as const } : m
+        );
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
+
+      syncService.queueMessageForBackup(
+        currentFamily.id,
+        res.data,
+        Boolean(currentFamily.cloud_chat_backup_enabled)
+      );
 
       channelRef.current?.send({
         type: 'broadcast',
@@ -465,7 +560,7 @@ export const ChatPage: React.FC = () => {
       localChatStorage.saveMessages(currentFamily.id, next);
       return next;
     });
-    setTimeout(() => scrollToBottom(true), 20);
+    setTimeout(() => scrollToBottom(true, true), 20);
 
     try {
       const res = await api.post<Message>('/messages/', {
@@ -475,10 +570,18 @@ export const ChatPage: React.FC = () => {
       });
 
       setMessages((prev) => {
-        const next = prev.map((m) => (m.client_message_id === clientMessageId ? res.data : m));
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId ? { ...res.data, status: 'sent' as const } : m
+        );
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
+
+      syncService.queueMessageForBackup(
+        currentFamily.id,
+        res.data,
+        Boolean(currentFamily.cloud_chat_backup_enabled)
+      );
 
       channelRef.current?.send({
         type: 'broadcast',
@@ -515,6 +618,7 @@ export const ChatPage: React.FC = () => {
       sender_id: user.id,
       media_url: localVaultUrl,
       media_type: 'image/jpeg',
+      local_media_path: `family/images/${imageFilename}`,
       is_edited: false,
       status: 'sending',
       created_at: new Date().toISOString(),
@@ -528,7 +632,7 @@ export const ChatPage: React.FC = () => {
       localChatStorage.saveMessages(currentFamily.id, next);
       return next;
     });
-    setTimeout(() => scrollToBottom(true), 20);
+    setTimeout(() => scrollToBottom(true, true), 20);
 
     try {
       const formData = new FormData();
@@ -546,10 +650,20 @@ export const ChatPage: React.FC = () => {
       });
 
       setMessages((prev) => {
-        const next = prev.map((m) => (m.client_message_id === clientMessageId ? res.data : m));
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId
+            ? { ...res.data, local_media_path: `family/images/${imageFilename}`, status: 'sent' as const }
+            : m
+        );
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
+
+      syncService.queueMessageForBackup(
+        currentFamily.id,
+        res.data,
+        Boolean(currentFamily.cloud_chat_backup_enabled)
+      );
 
       channelRef.current?.send({
         type: 'broadcast',
@@ -589,6 +703,7 @@ export const ChatPage: React.FC = () => {
       sender_id: user.id,
       media_url: localVaultUrl,
       media_type: 'audio',
+      local_media_path: `family/audio/${audioFilename}`,
       is_edited: false,
       status: 'sending',
       created_at: new Date().toISOString(),
@@ -602,7 +717,7 @@ export const ChatPage: React.FC = () => {
       localChatStorage.saveMessages(currentFamily.id, next);
       return next;
     });
-    setTimeout(() => scrollToBottom(true), 20);
+    setTimeout(() => scrollToBottom(true, true), 20);
     playMessageSent();
 
     try {
@@ -621,10 +736,20 @@ export const ChatPage: React.FC = () => {
       });
 
       setMessages((prev) => {
-        const next = prev.map((m) => (m.client_message_id === clientMessageId ? res.data : m));
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId
+            ? { ...res.data, local_media_path: `family/audio/${audioFilename}`, status: 'sent' as const }
+            : m
+        );
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
+
+      syncService.queueMessageForBackup(
+        currentFamily.id,
+        res.data,
+        Boolean(currentFamily.cloud_chat_backup_enabled)
+      );
 
       channelRef.current?.send({
         type: 'broadcast',
@@ -642,6 +767,77 @@ export const ChatPage: React.FC = () => {
       });
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleRetryMessage = async (msg: Message) => {
+    if (!currentFamily || !user || msg.status !== 'failed') return;
+
+    const clientMessageId = msg.client_message_id;
+    if (!clientMessageId) return;
+
+    setMessages((prev) => {
+      const next = prev.map((m) =>
+        m.client_message_id === clientMessageId ? { ...m, status: 'sending' as const } : m
+      );
+      localChatStorage.saveMessages(currentFamily.id, next);
+      return next;
+    });
+
+    try {
+      let mediaUrl = msg.media_url?.startsWith('http') ? msg.media_url : undefined;
+
+      if (!mediaUrl && msg.local_media_path) {
+        const isAudio = msg.media_type === 'audio' || Boolean(msg.media_type?.startsWith('audio/'));
+        const blob = await localMediaVault.readMediaBlob(msg.local_media_path, isAudio ? 'audio' : 'images');
+        if (blob) {
+          const formData = new FormData();
+          const filename = msg.local_media_path.split('/').pop() || `retry_${Date.now()}`;
+          formData.append('file', blob, filename);
+          const endpoint = isAudio ? '/media/upload-audio' : '/media/upload';
+          const uploadRes = await api.post(endpoint, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+          mediaUrl = uploadRes.data.url;
+        }
+      }
+
+      const res = await api.post<Message>('/messages/', {
+        content: msg.content,
+        media_url: mediaUrl,
+        media_type: msg.media_type,
+        client_message_id: clientMessageId,
+      });
+
+      setMessages((prev) => {
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId
+            ? { ...res.data, local_media_path: msg.local_media_path, status: 'sent' as const }
+            : m
+        );
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
+
+      syncService.queueMessageForBackup(
+        currentFamily.id,
+        res.data,
+        Boolean(currentFamily.cloud_chat_backup_enabled)
+      );
+
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'new_message',
+        payload: res.data,
+      });
+    } catch {
+      setMessages((prev) => {
+        const next = prev.map((m) =>
+          m.client_message_id === clientMessageId ? { ...m, status: 'failed' as const } : m
+        );
+        localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
     }
   };
 
@@ -699,13 +895,15 @@ export const ChatPage: React.FC = () => {
     try {
       await api.delete(`/messages/${id}?for_everyone=true`);
 
-      setMessages((prev) =>
-        prev.map((msg) =>
+      setMessages((prev) => {
+        const next = prev.map((msg) =>
           msg.id === id
             ? { ...msg, content: '🚫 Bu mesaj silindi', media_url: undefined, media_thumbnail_url: undefined, is_edited: true }
             : msg
-        )
-      );
+        );
+        if (currentFamily) localChatStorage.saveMessages(currentFamily.id, next);
+        return next;
+      });
 
       channelRef.current?.send({
         type: 'broadcast',
@@ -738,8 +936,14 @@ export const ChatPage: React.FC = () => {
         localChatStorage.saveMessages(currentFamily.id, next);
         return next;
       });
-      setTimeout(() => scrollToBottom(true), 20);
+      setTimeout(() => scrollToBottom(true, true), 20);
       playMessageSent();
+
+      syncService.queueMessageForBackup(
+        currentFamily.id,
+        res.data,
+        Boolean(currentFamily.cloud_chat_backup_enabled)
+      );
 
       channelRef.current?.send({
         type: 'broadcast',
@@ -777,8 +981,9 @@ export const ChatPage: React.FC = () => {
 
   // Wallpaper Class
   const currentWallpaperClass = useMemo(() => {
+    if (currentTheme.isDark) return 'theme-bg';
     return WALLPAPERS.find((w) => w.id === wallpaper)?.bgClass || 'bg-warm-50';
-  }, [wallpaper]);
+  }, [wallpaper, currentTheme.isDark]);
 
   return (
     <div className={`flex flex-col h-full flex-1 relative overflow-hidden ${currentWallpaperClass}`}>
@@ -793,7 +998,7 @@ export const ChatPage: React.FC = () => {
 
       {/* STICKY TOP BAR (Glued to top at all times) */}
       <div className="sticky top-0 z-40 w-full shadow-xs">
-        <div className="bg-white/95 backdrop-blur-md border-b border-gray-200/80 px-4 py-2.5 flex items-center justify-between">
+        <div className="theme-header backdrop-blur-md border-b theme-border px-4 py-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-family-500 to-rose-500 text-white flex items-center justify-center shadow-xs">
               <MessageCircle className="w-5 h-5" />
@@ -833,7 +1038,10 @@ export const ChatPage: React.FC = () => {
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-1 relative"
+        onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-1 relative [overflow-anchor:none]"
       >
         {/* Loading Spinner */}
         {isLoading && (
@@ -892,10 +1100,11 @@ export const ChatPage: React.FC = () => {
                 fontSize={fontSize}
                 onLongPress={handleLongPressMessage}
                 onImageClick={(url) => setSelectedImage(url)}
-                onRetry={() => handleSendMessage(msg.content || '')}
+                onRetry={() => handleRetryMessage(msg)}
                 onAvatarClick={(senderId, senderName, senderAvatar) => {
                   setProfilePopup({ senderId, senderName, senderAvatar });
                 }}
+                onPollChange={persistPollUpdate}
               />
             </React.Fragment>
           );
@@ -911,7 +1120,7 @@ export const ChatPage: React.FC = () => {
       <ScrollToBottomButton
         visible={showScrollBottom}
         unreadCount={unreadCount}
-        onClick={() => scrollToBottom(true)}
+        onClick={() => scrollToBottom(true, true)}
       />
 
       {/* CHAT INPUT BAR */}
