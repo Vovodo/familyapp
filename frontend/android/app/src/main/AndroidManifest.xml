@@ -30,6 +30,17 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
+            <!-- QR / web davet bağlantısı: https://.../join?code=AILE-xxxxxx -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="family.rfqcollector.com"
+                    android:pathPrefix="/join" />
+            </intent-filter>
+
         </activity>
 
         <!-- FCM Default Notification Channel -->

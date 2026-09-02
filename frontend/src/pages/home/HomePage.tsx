@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   MessageCircle,
   ShoppingBag,
@@ -19,11 +19,14 @@ import {
   Wallet,
   Gamepad2,
   Clapperboard,
+  QrCode,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 import { WeatherWidget } from '../../components/home/WeatherWidget';
+import { InviteQrScanner } from '../../components/family/InviteQrScanner';
+import { extractInviteCode, peekPendingInvite, takePendingInvite } from '../../utils/inviteCode';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { playHeartVibration } from '../../services/notificationService';
@@ -41,6 +44,7 @@ export const HomePage: React.FC = () => {
   const { currentFamily, activeMember, createFamily, joinFamily, isLoading, familiesLoaded } =
     useFamily();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -48,6 +52,7 @@ export const HomePage: React.FC = () => {
   const [familyName, setFamilyName] = useState('');
   const [nickname, setNickname] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [showQrScanner, setShowQrScanner] = useState(false);
 
   // Quick action state
   const [activeAction, setActiveAction] = useState<QuickActionType | null>(null);
@@ -61,6 +66,16 @@ export const HomePage: React.FC = () => {
       if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (currentFamily || !familiesLoaded) return;
+    const fromQuery = extractInviteCode(searchParams.get('code'));
+    const pending = peekPendingInvite();
+    const code = fromQuery || pending;
+    if (!code) return;
+    setInviteCode(code);
+    setShowJoinModal(true);
+  }, [currentFamily, familiesLoaded, searchParams]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -157,6 +172,7 @@ export const HomePage: React.FC = () => {
     try {
       setActionError(null);
       await joinFamily(inviteCode.trim(), nickname.trim() || undefined);
+      takePendingInvite();
       setShowJoinModal(false);
       setInviteCode('');
     } catch (err: any) {
@@ -248,7 +264,7 @@ export const HomePage: React.FC = () => {
               <div className="text-left">
                 <div className="font-extrabold">Aile Grubuna Katıl</div>
                 <div className="text-[11px] text-gray-500 font-normal">
-                  Davet kodu ile mevcut gruba girin
+                  Davet kodu veya QR ile mevcut gruba girin
                 </div>
               </div>
             </div>
@@ -306,7 +322,7 @@ export const HomePage: React.FC = () => {
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl">
               <h3 className="text-xl font-bold text-gray-900 mb-2">Aileye Katıl</h3>
-              <p className="text-xs text-gray-500 mb-4">Size verilen 6-8 haneli katılım kodunu girin</p>
+              <p className="text-xs text-gray-500 mb-4">Katılım kodunu yazın veya QR kodu tarayın</p>
               <form onSubmit={handleJoin} className="space-y-3">
                 <input
                   type="text"
@@ -316,6 +332,14 @@ export const HomePage: React.FC = () => {
                   className="w-full px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-2xl text-base font-mono uppercase tracking-wider focus:bg-white focus:outline-none focus:ring-2 focus:ring-family-500 text-center font-bold"
                   autoFocus
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowQrScanner(true)}
+                  className="w-full py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 font-bold rounded-2xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>QR kod tara</span>
+                </button>
                 <input
                   type="text"
                   value={nickname}
@@ -341,6 +365,15 @@ export const HomePage: React.FC = () => {
               </form>
             </div>
           </div>
+        )}
+        {showQrScanner && (
+          <InviteQrScanner
+            onDetected={(code) => {
+              setInviteCode(code);
+              setShowQrScanner(false);
+            }}
+            onClose={() => setShowQrScanner(false)}
+          />
         )}
       </div>
     );

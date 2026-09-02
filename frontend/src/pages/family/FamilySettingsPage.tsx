@@ -29,6 +29,7 @@ import {
   Mic,
   Palette,
   ChevronRight,
+  Crown,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -40,12 +41,13 @@ import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 import { PermissionAssistantModal } from '../../components/common/PermissionAssistantModal';
 import { CloudRestorePromptModal } from '../../components/common/CloudRestorePromptModal';
 import { ThemeStoreModal } from '../../components/theme/ThemeStoreModal';
+import { FamilyInviteQr } from '../../components/family/FamilyInviteQr';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
 export const FamilySettingsPage: React.FC = () => {
   const { user, logout, updateProfile } = useAuth();
-  const { currentFamily, deleteFamily, updateFamilySettings, removeMember, leaveFamily } = useFamily();
+  const { currentFamily, deleteFamily, updateFamilySettings, removeMember, leaveFamily, transferOwnership } = useFamily();
   const { currentTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -101,6 +103,9 @@ export const FamilySettingsPage: React.FC = () => {
   // Kick Member Modal
   const [memberToKick, setMemberToKick] = useState<{ id: string; name: string } | null>(null);
   const [isKicking, setIsKicking] = useState(false);
+  const [memberToTransfer, setMemberToTransfer] = useState<{ id: string; name: string } | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [showTransferPicker, setShowTransferPicker] = useState(false);
 
   // Privacy Toggle State
   const [isUpdatingPrivacy, setIsUpdatingPrivacy] = useState(false);
@@ -246,6 +251,20 @@ export const FamilySettingsPage: React.FC = () => {
     }
   };
 
+  const handleTransferOwnership = async () => {
+    if (!memberToTransfer) return;
+    setIsTransferring(true);
+    try {
+      await transferOwnership(memberToTransfer.id);
+      setMemberToTransfer(null);
+      setShowTransferPicker(false);
+    } catch (err: any) {
+      alert('Sahiplik aktarılamadı: ' + err.message);
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
   const handleDeleteFamily = async (e: React.FormEvent) => {
     e.preventDefault();
     if (confirmText.trim().toLowerCase() !== 'evet' || !currentFamily || !isCreator) return;
@@ -333,7 +352,7 @@ export const FamilySettingsPage: React.FC = () => {
                 {currentFamily.invite_code}
               </div>
               <div className="text-[10px] text-family-600 mt-0.5">
-                Yeni aile bireyleri bu kod ile katılabilir
+                Yeni aile bireyleri bu kod veya aşağıdaki QR ile katılabilir
               </div>
             </div>
 
@@ -357,6 +376,12 @@ export const FamilySettingsPage: React.FC = () => {
                 </>
               )}
             </button>
+          </div>
+        )}
+
+        {currentFamily?.invite_code && (
+          <div className="rounded-2xl border border-family-100 bg-white">
+            <FamilyInviteQr inviteCode={currentFamily.invite_code} />
           </div>
         )}
       </div>
@@ -623,11 +648,25 @@ export const FamilySettingsPage: React.FC = () => {
         <div className="bg-red-50/70 rounded-3xl p-5 border border-red-200 space-y-3">
           <div className="flex items-center gap-2 text-red-900 font-bold text-sm">
             <ShieldAlert className="w-5 h-5 text-red-600" />
-            <span>Grup Kurucu Yetkisi (Tehlikeli Bölge)</span>
+            <span>Grup Kurucu Yetkisi</span>
           </div>
           <p className="text-xs text-red-700 leading-relaxed">
-            Bu aile grubunu kuran kişi sizsiniz. Grubu kapattığınızda tüm konuşma geçmişi, notlar ve fotoğraflar kalıcı olarak silinir.
+            Sahipliği başka bir üyeye aktarırsanız grup açık kalır; siz ayrılıp yeni bir aile kurabilirsiniz. Grubu kapatmak tüm verileri siler.
           </p>
+          <button
+            type="button"
+            onClick={() => setShowTransferPicker(true)}
+            disabled={(currentFamily?.members?.length || 0) < 2 || currentFamily?.created_by !== user?.id}
+            className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 active:scale-98 text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
+          >
+            <Crown className="w-4 h-4" />
+            <span>Sahipliği Başka Üyeye Aktar</span>
+          </button>
+          {(currentFamily?.members?.length || 0) < 2 && (
+            <p className="text-[10px] text-red-600 font-medium">
+              Aktarmak için grupta sizden başka bir üye olmalı.
+            </p>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -922,6 +961,75 @@ export const FamilySettingsPage: React.FC = () => {
           <span>Hesaptan Çıkış Yap</span>
         </button>
       </div>
+
+      {/* Modal: Transfer ownership picker */}
+      {showTransferPicker && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl border border-purple-100">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-gray-900">Yeni grup sahibini seçin</h4>
+              <button onClick={() => setShowTransferPicker(false)} className="p-1 text-gray-400 hover:text-gray-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Seçilen üye kurucu ve yönetici olur. Siz üye olarak kalırsınız; ardından gruptan ayrılıp yeni aile kurabilirsiniz.
+            </p>
+            <div className="space-y-2 max-h-56 overflow-y-auto">
+              {currentFamily?.members
+                ?.filter((member) => member.user_id !== user?.id)
+                .map((member) => (
+                  <button
+                    key={member.id}
+                    type="button"
+                    onClick={() =>
+                      setMemberToTransfer({
+                        id: member.id,
+                        name: member.nickname || member.user?.full_name || 'Bu üye',
+                      })
+                    }
+                    className="w-full text-left p-3 rounded-2xl bg-gray-50 hover:bg-purple-50 border border-gray-100 hover:border-purple-200 text-xs font-bold text-gray-900 cursor-pointer"
+                  >
+                    {member.nickname || member.user?.full_name}
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {memberToTransfer && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4 shadow-2xl border border-purple-100">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-gray-900">Sahipliği aktar</h4>
+              <button onClick={() => setMemberToTransfer(null)} className="p-1 text-gray-400 hover:text-gray-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Grup sahipliği <strong>{memberToTransfer.name}</strong> kişisine geçecek. Bu işlem geri alınamaz.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setMemberToTransfer(null)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl text-xs"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                disabled={isTransferring}
+                onClick={handleTransferOwnership}
+                className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5"
+              >
+                {isTransferring ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Aktar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Confirm Kick Member */}
       {memberToKick && (

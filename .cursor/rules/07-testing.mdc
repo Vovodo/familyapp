@@ -1,50 +1,40 @@
 ---
-description: Pytest backend doğrulaması, izolasyon testleri ve frontend build kapısı
+description: Değişiklik kapsamına göre minimum gerekli test; full suite yalnızca release veya geniş etki
 alwaysApply: true
 ---
 
-# Test ve kalite kapısı
+# Test kapsamı (zorunlu)
 
-Kod yazılmış olması yetmez. Değişiklik çalışmadan ve ilgili testler geçmeden iş bitmez.
+Her geliştirmeyi doğrula. Her değişiklikte tüm suite’i çalıştırma.
+Kapsamı etkinin büyüklüğüne göre seç. Amaç: etkilenen alanlar güvenilir; gereksiz uzun koşular yok.
 
-## Backend (var olan tek otomatik suite)
+Yakın zamanda yeşil olan ve bu değişiklikle kesişmeyen testleri tekrarlama.
+Kapsamı daraltıp etkilenen alanı atlama.
+
+## Kapsam seçimi
+
+1. **UI / CSS / görsel** — ilgili frontend `tsc`/build; gerekirse browser. Backend pytest yok.
+2. **Tek React component / frontend feature** — davranış + `cd frontend && npm run build` (veya `npm run build:clean` yalnızca tip). İlgisiz backend/E2E yok.
+3. **Tek FastAPI endpoint/service** — ilgili pytest dosyası/test; gerekirse HTTP. Tüm frontend suite yok.
+4. **Model / şema / migrasyon** — `models.py` + `run_safe_migrations()`; ilgili backend testleri; kolonun temiz ortamda `ADD COLUMN IF NOT EXISTS` ile geldiğini doğrula. Geniş etkiyse suite’i genişlet.
+5. **Auth / yetki / izolasyon** — `test_isolation_and_features.py` ve etkilenen endpoint testleri; sahte `x-family-id` → 403; login/session/yetki senaryoları.
+6. **Realtime (SSE / Supabase broadcast)** — ilgili test + çok istemci / kopma-reconnect.
+7. **Çok modül / mimari** — etkilenen modül + integration; gerekirse E2E.
+8. **Release / production deploy** — full pytest, frontend build, integration/E2E, migrasyon, kritik güvenlik.
+
+## Araçlar
 
 ```bash
+# ilgili backend (örnek)
+python -m pytest backend/tests/test_isolation_and_features.py -v
+
+# full suite yalnız madde 8 veya gerçekten çapraz etki
 python -m pytest backend/tests -v
-```
 
-- Framework: pytest, FastAPI `TestClient`
-- DB: `sqlite:///./test_family.db` (`conftest.py`); docs’taki in-memory StaticPool değil
-- `get_db` override + transaction rollback
-
-Dosyalar:
-
-- `test_auth.py` — kayıt, login, profil, quickJoin
-- `test_isolation_and_features.py` — çapraz aile 403, davet kodu
-- `test_quota_retention.py` — kota, fail-safe, checksum
-- `test_sync_and_backup.py` — mandatory sync, backup API
-- `test_chat_idempotency.py`, `test_heart_and_push.py`, `test_weather.py`
-
-Aile verisi değişince izolasyon senaryosu ekle veya mevcut testi genişlet (sahte `x-family-id` → 403).
-
-## Frontend test runner yok
-
-`package.json` içinde jest/vitest/playwright script’i yok. Yokken test framework ekleme (görev değilse).
-
-Frontend doğrulama:
-
-```bash
 cd frontend && npm run build
 ```
 
-(`tsc -b && vite build && node scripts/build-ota.js`). Yalnızca tip için: `npm run build:clean`.
-
-## API
-
-- Auth’lu istekte Bearer. Aile işi için gerekirse `x-family-id`
-- Public: `/api/v1/health/`, login/register
-- Edge: boş aile, gizli not, kota aşımı, tekrar `client_message_id`
-
-## Döngü
-
-Başarısız test veya build → düzelt → aynı komutu tekrar çalıştır. Geçmeyen testi silerek yeşile çekme.
+- Framework: pytest, FastAPI `TestClient`; DB `sqlite:///./test_family.db` (`conftest.py`)
+- Frontend runner yok; jest/vitest/playwright ekleme (görev değilse)
+- Geçmeyen testi silerek yeşile çekme; başarısızsa düzelt, aynı komutu tekrar çalıştır
+- Aile verisi değişince izolasyon senaryosu ekle veya genişlet

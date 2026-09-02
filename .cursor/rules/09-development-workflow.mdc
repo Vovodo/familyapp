@@ -13,21 +13,21 @@ Uygulama kaynağını rastgele dosyadan değiştirme. Önce mevcut kodu oku. Fak
 2. **Modeller ve servisler** — `models.py`, `deps.py`, `backend/app/services/`, `frontend/src/services/`.
 3. **DB gerekirse** — Kolon/tabloyu `models.py`’ye yaz; `run_safe_migrations()` içine `ADD COLUMN IF NOT EXISTS`; `db/base.py` export listesini güncelle. Alembic kullanma.
 4. **Backend** — Pydantic şema, router, `family_id == member.family_id`, Türkçe hata. Aile admin işi: `get_current_admin_member`. Sistem admin: `User.role == "admin"`.
-5. **API doğrula** — `python -m pytest backend/tests -v` (ilgili dosya veya tüm suite). İzolasyon + yetki senaryolarını kırdıysan testi güncelle.
+5. **API doğrula** — Yalnızca etkilenen pytest dosyası/test (bkz. `07-testing.mdc`). Full suite varsayılan değil. İzolasyon + yetki kırıldıysa ilgili testi güncelle.
 6. **Frontend** — `types/index.ts`, `api.ts` yolu, page/component, cacheService anahtarı, gerekirse Family/Auth context. `useQuery` ile yeni paralel veri katmanı açma.
 7. **UI** — Tema token, safe-area, Türkçe kopya, hızlı eylem renklerini bozma. Capacitor yüzeyiyse Preferences/Filesystem/Camera mevcut servislerden.
-8. **Testleri çalıştır** — Backend pytest. Frontend runner yok; davranış + `npm run build`.
-9. **Build** — `cd frontend && npm run build` (tsc + vite + OTA script). Backend: `uvicorn backend.app.main:app`.
+8. **Testleri çalıştır** — Kapsamı değişikliğe göre seç. Frontend runner yok; UI/feature ise davranış + gerekirse `npm run build`.
+9. **Build** — Frontend değiştiyse `cd frontend && npm run build` (tsc + vite + OTA). Yalnızca tip: `npm run build:clean`. Backend: `uvicorn backend.app.main:app`.
 10. **Hata varsa düzelt** — Tip, import, 403 izolasyon, boş state.
-11. **Tekrar test et** — Aynı pytest ve build komutları yeşil olmalı.
-12. **Tamamlandı sayma** — Özellik gerçekten çalışmadan (izolasyon, gizli not, kota, offline cache) işi kapatma.
+11. **Tekrar test et** — Başarısız olan *aynı* komutu tekrar çalıştır; tüm suite’i peşine ekleme.
+12. **Tamamlandı sayma** — Etkilenen davranış gerçekten çalışmadan (izolasyon, gizli not, kota, offline cache) işi kapatma.
 
 ## Komutlar
 
 ```bash
 # backend
 uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
-python -m pytest backend/tests -v
+python -m pytest backend/tests/<ilgili_dosya>.py -v
 
 # frontend
 cd frontend && npm run dev
@@ -64,7 +64,7 @@ Yapma: eski APK’nın üzerine ek kopya yığmak; birden fazla `ailem.apk` bır
 
 ## Bitirme kontrolü
 
-- [ ] Yanlış aile `x-family-id` ile 403
+- [ ] Yetki/izolasyon değiştiyse sahte `x-family-id` → 403
 - [ ] Secret `.env` / APK içine girmedi
-- [ ] pytest geçti
-- [ ] `npm run build` geçti
+- [ ] Etkilenen testler geçti (full suite yalnız release / geniş çapraz etki)
+- [ ] Frontend değiştiyse `npm run build` geçti

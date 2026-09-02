@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Heart,
   Lock,
@@ -15,8 +15,11 @@ import {
   ShieldCheck,
   CheckCircle2,
   RotateCcw,
+  QrCode,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { InviteQrScanner } from '../../components/family/InviteQrScanner';
+import { extractInviteCode, peekPendingInvite, takePendingInvite } from '../../utils/inviteCode';
 
 const QUICK_ROLES = ['Baba', 'Anne', 'Oğlum', 'Kızım', 'Dede', 'Nine', 'Kardeşim'];
 
@@ -41,6 +44,15 @@ export const RegisterPage: React.FC = () => {
 
   const { sendVerificationCode, verifyAndRegister } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [showQrScanner, setShowQrScanner] = useState(false);
+
+  useEffect(() => {
+    const code = extractInviteCode(searchParams.get('code')) || peekPendingInvite();
+    if (!code) return;
+    setFamilyAction('join');
+    setInviteCode(code);
+  }, [searchParams]);
 
   // Step 1: Validate and request OTP code via Resend
   const handleRequestCode = async (e: React.FormEvent) => {
@@ -99,6 +111,7 @@ export const RegisterPage: React.FC = () => {
         invite_code: familyAction === 'join' ? inviteCode.trim().toUpperCase() : undefined,
       });
 
+      takePendingInvite();
       navigate('/');
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Kayıt tamamlanamadı. Kodu kontrol edin.');
@@ -277,18 +290,28 @@ export const RegisterPage: React.FC = () => {
                   className="w-full px-3 py-2 bg-emerald-50/40 border border-emerald-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
                 />
               ) : (
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-500">
-                    <KeyRound className="w-3.5 h-3.5" />
+                <div className="space-y-2">
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-sky-500">
+                      <KeyRound className="w-3.5 h-3.5" />
+                    </div>
+                    <input
+                      type="text"
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                      placeholder="Örn: AILE-123456"
+                      className="w-full pl-9 pr-3 py-2 bg-sky-50/40 border border-sky-200 rounded-xl text-xs font-mono font-bold uppercase focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
+                      required
+                    />
                   </div>
-                  <input
-                    type="text"
-                    value={inviteCode}
-                    onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
-                    placeholder="Örn: AILE-123456"
-                    className="w-full pl-9 pr-3 py-2 bg-sky-50/40 border border-sky-200 rounded-xl text-xs font-mono font-bold uppercase focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition"
-                    required
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowQrScanner(true)}
+                    className="w-full py-2 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>QR kod tara</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -380,6 +403,16 @@ export const RegisterPage: React.FC = () => {
           </p>
         </div>
       </div>
+      {showQrScanner && (
+        <InviteQrScanner
+          onDetected={(code) => {
+            setFamilyAction('join');
+            setInviteCode(code);
+            setShowQrScanner(false);
+          }}
+          onClose={() => setShowQrScanner(false)}
+        />
+      )}
     </div>
   );
 };

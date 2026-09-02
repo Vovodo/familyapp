@@ -99,6 +99,10 @@ class FamilyJoin(BaseModel):
     nickname: Optional[str] = None
 
 
+class FamilyTransferOwnership(BaseModel):
+    member_id: str
+
+
 class SendVerificationCodeRequest(BaseModel):
     email: EmailStr
     purpose: str = "register" # "register" or "reset_password"

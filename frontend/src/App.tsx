@@ -17,6 +17,7 @@ import { NotesPage } from './pages/notes/NotesPage';
 import { RemindersPage } from './pages/reminders/RemindersPage';
 import { TasksPage } from './pages/tasks/TasksPage';
 import { BudgetPage } from './pages/budget/BudgetPage';
+import { JoinInviteRedirect, InviteDeepLinkListener } from './pages/family/JoinInviteRedirect';
 import { FamilySettingsPage } from './pages/family/FamilySettingsPage';
 import { GamesPage } from './pages/games/GamesPage';
 import { DrawGuessPage } from './pages/games/DrawGuessPage';
@@ -98,6 +99,7 @@ export const App: React.FC = () => {
         <AuthProvider>
           <FamilyProvider>
             <BrowserRouter>
+              <InviteDeepLinkListener />
               <DrawingGameProvider>
               <Routes>
                 {/* Public Routes */}
@@ -117,6 +119,7 @@ export const App: React.FC = () => {
                     </PublicRoute>
                   }
                 />
+                <Route path="/join" element={<JoinInviteRedirect />} />
 
                 {/* Protected App Routes with Shell */}
                 <Route

@@ -198,3 +198,127 @@ def test_existing_member_cannot_create_a_second_family(client):
     assert again.status_code == 201
     assert again.json()["id"] != first_id
 
+
+def test_join_refuses_second_family_membership(client):
+    host = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Kurucu", "email": "host_join@test.com", "password": "passwordA123"},
+    )
+    host_h = {"Authorization": f"Bearer {host.json()['access_token']}"}
+    fam = client.post("/api/v1/families/", json={"name": "Birinci Aile"}, headers=host_h).json()
+
+    other = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Diger", "email": "other_join@test.com", "password": "passwordB123"},
+    )
+    other_h = {"Authorization": f"Bearer {other.json()['access_token']}"}
+    client.post("/api/v1/families/", json={"name": "Ikinci Aile"}, headers=other_h)
+
+    blocked = client.post(
+        "/api/v1/families/join",
+        json={"invite_code": fam["invite_code"]},
+        headers=other_h,
+    )
+    assert blocked.status_code == 409
+    assert "zaten bir aile" in blocked.json()["detail"].lower()
+
+
+def test_creator_can_transfer_ownership_then_leave_and_create_again(client):
+    creator = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Eski Reis", "email": "old_owner@test.com", "password": "passwordA123"},
+    )
+    creator_h = {"Authorization": f"Bearer {creator.json()['access_token']}"}
+    fam = client.post("/api/v1/families/", json={"name": "Devredilen Aile"}, headers=creator_h).json()
+
+    member = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Yeni Reis", "email": "new_owner@test.com", "password": "passwordB123"},
+    )
+    member_h = {"Authorization": f"Bearer {member.json()['access_token']}"}
+    assert client.post(
+        "/api/v1/families/join",
+        json={"invite_code": fam["invite_code"], "nickname": "Yeni Reis"},
+        headers=member_h,
+    ).status_code == 200
+
+    me = client.get("/api/v1/families/me", headers=creator_h).json()
+    target = next(m for m in me["members"] if m["user_id"] != creator.json()["user"]["id"])
+
+    # Üye aktaramaz
+    denied = client.post(
+        "/api/v1/families/transfer-ownership",
+        json={"member_id": target["id"]},
+        headers=member_h,
+    )
+    assert denied.status_code == 403
+
+    transferred = client.post(
+        "/api/v1/families/transfer-ownership",
+        json={"member_id": target["id"]},
+        headers=creator_h,
+    )
+    assert transferred.status_code == 200, transferred.text
+    assert transferred.json()["created_by"] == target["user_id"]
+    roles = {m["user_id"]: m["role"] for m in transferred.json()["members"]}
+    assert roles[target["user_id"]] == "admin"
+    assert roles[creator.json()["user"]["id"]] == "member"
+
+    # Eski kurucu ayrılıp yeni grup kurabilir
+    assert client.post("/api/v1/families/leave", headers=creator_h).status_code == 200
+    new_fam = client.post("/api/v1/families/", json={"name": "Yeni Grubum"}, headers=creator_h)
+    assert new_fam.status_code == 201
+    assert new_fam.json()["id"] != fam["id"]
+
+    still = client.get("/api/v1/families/my-families", headers=member_h).json()
+    assert len(still) == 1
+    assert still[0]["id"] == fam["id"]
+    assert still[0]["created_by"] == target["user_id"]
+
+
+def test_transfer_ownership_rejects_spoofed_family(client):
+    owner = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Sahip", "email": "owner_x@test.com", "password": "passwordA123"},
+    )
+    owner_h = {"Authorization": f"Bearer {owner.json()['access_token']}"}
+    fam = client.post("/api/v1/families/", json={"name": "X"}, headers=owner_h).json()
+    guest = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Uye", "email": "guest_x@test.com", "password": "passwordB123"},
+    )
+    guest_h = {"Authorization": f"Bearer {guest.json()['access_token']}"}
+    client.post(
+        "/api/v1/families/join",
+        json={"invite_code": fam["invite_code"]},
+        headers=guest_h,
+    )
+    target_id = next(
+        m["id"]
+        for m in client.get("/api/v1/families/me", headers=owner_h).json()["members"]
+        if m["user_id"] != owner.json()["user"]["id"]
+    )
+
+    outsider = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Yabanci", "email": "out_x@test.com", "password": "passwordC123"},
+    )
+    outsider_fam = client.post(
+        "/api/v1/families/",
+        json={"name": "Yabanci Aile"},
+        headers={"Authorization": f"Bearer {outsider.json()['access_token']}"},
+    ).json()
+    spoofed = {
+        "Authorization": f"Bearer {outsider.json()['access_token']}",
+        "x-family-id": fam["id"],
+    }
+    res = client.post(
+        "/api/v1/families/transfer-ownership",
+        json={"member_id": target_id},
+        headers=spoofed,
+    )
+    assert res.status_code == 403
+    # Asıl aileye dokunulmadı
+    assert client.get("/api/v1/families/me", headers=owner_h).json()["created_by"] == owner.json()["user"]["id"]
+    assert outsider_fam["id"] != fam["id"]
+

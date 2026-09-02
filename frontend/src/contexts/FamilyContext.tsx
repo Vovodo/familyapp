@@ -22,6 +22,7 @@ interface FamilyContextType {
   updateFamilySettings: (data: { name?: string; is_public?: boolean; cloud_chat_backup_enabled?: boolean }) => Promise<void>;
   removeMember: (memberId: string) => Promise<void>;
   leaveFamily: () => Promise<void>;
+  transferOwnership: (memberId: string) => Promise<Family>;
   deleteFamily: (familyId: string) => Promise<void>;
 }
 
@@ -158,6 +159,12 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     await refreshFamily();
   };
 
+  const transferOwnership = async (memberId: string): Promise<Family> => {
+    const res = await api.post<Family>('/families/transfer-ownership', { member_id: memberId });
+    setCurrentFamily(res.data);
+    return res.data;
+  };
+
   const leaveFamily = async () => {
     await api.post('/families/leave');
     await storage.remove('active_family_id');
@@ -213,6 +220,7 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         updateFamilySettings,
         removeMember,
         leaveFamily,
+        transferOwnership,
         deleteFamily,
       }}
     >

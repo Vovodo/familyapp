@@ -28,6 +28,7 @@ from backend.app.schemas.schemas import (
     FamilyResponse,
     FamilyMemberResponse,
     FamilySettingsUpdate,
+    FamilyTransferOwnership,
     HeartEventRequest,
     HeartEventResponse
 )
@@ -113,14 +114,18 @@ def join_family(
             detail="Bu katılım koduna sahip bir aile bulunamadı."
         )
 
-    # Check if already a member
     existing = (
         db.query(FamilyMember)
-        .filter(FamilyMember.family_id == family.id, FamilyMember.user_id == current_user.id)
+        .filter(FamilyMember.user_id == current_user.id)
         .first()
     )
     if existing:
-        return family
+        if existing.family_id == family.id:
+            return family
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Zaten bir aile grubuna üyesiniz. Başka bir gruba katılmak için önce mevcut ailenizden ayrılmalısınız.",
+        )
 
     member = FamilyMember(
         family_id=family.id,
@@ -257,6 +262,63 @@ def leave_family(
     db.delete(member)
     db.commit()
     return {"status": "success", "message": "Aile grubundan ayrıldınız."}
+
+
+@router.post("/transfer-ownership", response_model=FamilyResponse)
+def transfer_family_ownership(
+    payload: FamilyTransferOwnership,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member),
+):
+    """
+    Grup kurucusu sahipliği başka bir üyeye aktarır. Aktarımdan sonra
+    eski kurucu üye olarak kalır ve gruptan ayrılıp yeni aile kurabilir.
+    """
+    family = (
+        db.query(Family)
+        .filter(Family.id == member.family_id)
+        .with_for_update()
+        .first()
+    )
+    if not family:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Aile bulunamadı.")
+
+    if family.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sahipliği yalnızca grup kurucusu aktarabilir.",
+        )
+
+    target = (
+        db.query(FamilyMember)
+        .filter(
+            FamilyMember.id == payload.member_id,
+            FamilyMember.family_id == family.id,
+        )
+        .first()
+    )
+    if not target:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sahiplik aktarılacak üye bu grupta bulunamadı.",
+        )
+    if target.user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sahipliği kendinize aktaramazsınız. Başka bir üye seçin.",
+        )
+
+    family.created_by = target.user_id
+    target.role = "admin"
+    member.role = "member"
+
+    db.commit()
+    db.refresh(family)
+    logger.info(
+        f"Aile sahipliği aktarıldı: aile {family.id}, {current_user.id} -> {target.user_id}"
+    )
+    return family
 
 
 @router.delete("/{family_id}", status_code=status.HTTP_200_OK)
