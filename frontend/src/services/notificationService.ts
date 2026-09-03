@@ -34,6 +34,8 @@ export const playHeartVibration = async () => {
 
 class NotificationService {
   private isInitialized = false;
+  private pushListenersAttached = false;
+  private pendingFcmToken: string | null = null;
   private onHeartReceivedCallbacks: Set<(data: { sender_name: string; event_id: string }) => void> = new Set();
 
   public subscribeHeartReceived(cb: (data: { sender_name: string; event_id: string }) => void) {
@@ -167,52 +169,87 @@ class NotificationService {
     if (!Capacitor.isNativePlatform()) return;
 
     try {
-      // Register with Apple / Google (FCM) to receive push token
-      await PushNotifications.addListener('registration', async (token: Token) => {
-        console.log('[FCM] Push token received:', token.value);
-        await this.registerTokenWithBackend(token.value);
-      });
+      if (!this.pushListenersAttached) {
+        this.pushListenersAttached = true;
 
-      await PushNotifications.addListener('registrationError', (error: any) => {
-        console.warn('[FCM] Registration error:', error);
-      });
+        await PushNotifications.addListener('registration', async (token: Token) => {
+          console.log('[FCM] Push token received:', token.value);
+          this.pendingFcmToken = token.value;
+          await storage.set('pending_fcm_token', token.value);
+          await this.registerTokenWithBackend(token.value);
+        });
 
-      // Foreground FCM push received
-      await PushNotifications.addListener('pushNotificationReceived', (notification) => {
-        console.log('[FCM] Push received in foreground:', notification);
-        const data = notification.data || {};
-        if (data.type === 'heart') {
-          this.notifyHeartReceived({
-            sender_name: data.sender_name || 'Aile Bireyi',
-            event_id: data.heart_id || `heart-${Date.now()}`,
-          });
-        }
-      });
+        await PushNotifications.addListener('registrationError', (error: unknown) => {
+          console.warn('[FCM] Registration error:', error);
+        });
 
-      // User tapped push notification (from background / killed state)
-      await PushNotifications.addListener('pushNotificationActionPerformed', (action: ActionPerformed) => {
-        console.log('[FCM] Push action performed:', action);
-        const data = action.notification.data || {};
-        if (data.type === 'heart') {
-          this.notifyHeartReceived({
-            sender_name: data.sender_name || 'Aile Bireyi',
-            event_id: data.heart_id || `heart-${Date.now()}`,
-          });
-        }
-      });
+        await PushNotifications.addListener('pushNotificationReceived', (notification) => {
+          console.log('[FCM] Push received in foreground:', notification);
+          const data = notification.data || {};
+          if (data.type === 'heart') {
+            this.notifyHeartReceived({
+              sender_name: data.sender_name || 'Aile Bireyi',
+              event_id: data.heart_id || `heart-${Date.now()}`,
+            });
+          }
+        });
 
-      // Check / request FCM permission
-      const status = await PushNotifications.checkPermissions();
-      if (status.receive === 'granted') {
-        await PushNotifications.register();
+        await PushNotifications.addListener('pushNotificationActionPerformed', (action: ActionPerformed) => {
+          console.log('[FCM] Push action performed:', action);
+          const data = action.notification.data || {};
+          if (data.type === 'heart') {
+            this.notifyHeartReceived({
+              sender_name: data.sender_name || 'Aile Bireyi',
+              event_id: data.heart_id || `heart-${Date.now()}`,
+            });
+          }
+        });
       }
+
+      await this.ensurePushRegistered();
     } catch (e) {
       console.warn('[FCM] Setup error:', e);
     }
   }
 
+  /** Call after login or when notification permission is newly granted. */
+  public async ensurePushRegistered(): Promise<void> {
+    if (!Capacitor.isNativePlatform()) return;
+
+    try {
+      const status = await PushNotifications.checkPermissions();
+      if (status.receive !== 'granted') return;
+
+      await PushNotifications.register();
+
+      const cached = this.pendingFcmToken || (await storage.get('pending_fcm_token'));
+      if (cached) {
+        await this.registerTokenWithBackend(cached);
+      }
+    } catch (e) {
+      console.warn('[FCM] ensurePushRegistered error:', e);
+    }
+  }
+
+  /** Re-sync FCM token with backend when auth session becomes available. */
+  public async syncPushRegistration(): Promise<void> {
+    await this.ensurePushRegistered();
+    const cached = this.pendingFcmToken || (await storage.get('pending_fcm_token'));
+    if (cached) {
+      await this.registerTokenWithBackend(cached);
+    }
+  }
+
   public async registerTokenWithBackend(token: string) {
     try {
+      const authToken = await storage.get('auth_token');
+      if (!authToken) {
+        this.pendingFcmToken = token;
+        await storage.set('pending_fcm_token', token);
+        console.log('[FCM] Token cached; will register after login.');
+        return;
+      }
+
       let deviceId = await storage.get('device_uuid');
       if (!deviceId) {
         deviceId = `dev-${Math.random().toString(36).substring(2, 10)}-${Date.now()}`;
@@ -224,6 +261,8 @@ class NotificationService {
         device_id: deviceId,
         platform: 'android',
       });
+      this.pendingFcmToken = token;
+      await storage.set('pending_fcm_token', token);
       console.log('[FCM] Device token registered with backend successfully.');
     } catch (err) {
       console.warn('[FCM] Failed to register device token with backend:', err);
@@ -311,7 +350,7 @@ class NotificationService {
       if (Capacitor.isNativePlatform()) {
         const pushRes = await PushNotifications.requestPermissions();
         if (pushRes.receive === 'granted') {
-          await PushNotifications.register();
+          await this.ensurePushRegistered();
         }
         await LocalNotifications.requestPermissions();
         return pushRes.receive === 'granted';

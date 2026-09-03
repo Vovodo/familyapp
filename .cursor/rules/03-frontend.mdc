@@ -39,6 +39,8 @@ Yerel depolar: `localNotesStorage`, `localShoppingStorage`, `localRemindersStora
 
 `supabase.channel('family-chat-'+id)` vb. broadcast. Backend SSE ayrı (`events.py`); EventSource ekleme zorunlu değil. Yorumlardaki "WebSocket" ifadesi kanal API’sidir.
 
+Paylaşılan listeler/oyunlar: optimistic UI + broadcast; sunucu rebase (`listSync.ts`). Aynı state’e GET ve DB dinleyicisi birlikte yazma — bkz. `10-sync-performance-consistency.mdc`.
+
 ## Bileşenler
 
 - `pages/<özellik>/` sayfa

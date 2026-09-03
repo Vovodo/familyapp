@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { Clock, Check, CheckCheck, AlertCircle, RotateCw } from 'lucide-react';
+import { Clock, CheckCheck, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Message, PollData } from '../../types';
@@ -49,6 +49,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
 
     const isDeleted = message.content === '🚫 Bu mesaj silindi' || (message as any).is_deleted;
     const isPoll = message.media_type === 'poll';
+    const isAudio =
+      !!message.media_url &&
+      (message.media_type === 'audio' ||
+        message.media_type?.startsWith('audio/') ||
+        /\.(webm|m4a|mp3|ogg|wav|aac)(\?.*)?$/i.test(message.media_url));
+    const hasMedia = !!message.media_url && !isDeleted && !isPoll;
+    const fillBubble = isPoll || hasMedia;
     const firstUrl = useMemo(
       () => (!isDeleted && !isPoll ? extractFirstUrl(message.content) : null),
       [message.content, isDeleted, isPoll]
@@ -118,6 +125,34 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
       }
     };
 
+    const compactText = !fillBubble && !firstUrl;
+    const timestampClass = `items-center gap-0.5 text-[9px] leading-none select-none ${
+      isMe ? 'text-white/85' : 'theme-text-secondary'
+    }`;
+    const timestampMeta = (
+      <>
+        <span>{timeStr}</span>
+        {isMe && (
+          <span>
+            {message.status === 'sending' ? (
+              <Clock className="w-3 h-3 text-white/70 animate-pulse inline" />
+            ) : message.status === 'failed' ? (
+              <button
+                type="button"
+                onClick={() => onRetry?.(message)}
+                className="flex items-center gap-0.5 text-rose-200 font-bold hover:text-white"
+              >
+                <AlertCircle className="w-3 h-3 inline" />
+                <span>Tekrar Dene</span>
+              </button>
+            ) : (
+              <CheckCheck className="w-3 h-3 text-white/90 inline" />
+            )}
+          </span>
+        )}
+      </>
+    );
+
     return (
       <div
         className={`flex items-start gap-2 ${
@@ -151,7 +186,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                 />
               ) : (
                 <div
-                  className="w-7 h-7 rounded-full bg-family-100 text-family-700 flex items-center justify-center font-bold text-xs shadow-2xs cursor-pointer active:scale-90 transition"
+                  className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shadow-2xs cursor-pointer active:scale-90 transition text-white"
+                  style={{ backgroundColor: 'var(--theme-accent)' }}
                   onClick={(e) => {
                     e.stopPropagation();
                     onAvatarClick?.(message.sender_id, senderDisplayName, null);
@@ -166,21 +202,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
           </div>
         )}
 
-        {/* Message Bubble Body */}
         <div
-          className={`relative max-w-[84%] sm:max-w-[72%] p-2.5 sm:p-3 shadow-xs transition-all ${getBubbleCorners()} ${
+          className={`relative max-w-[84%] sm:max-w-[72%] shadow-xs transition-all ${getBubbleCorners()} ${
+            fillBubble ? 'px-1 pt-1 pb-1' : compactText ? 'px-2 py-1' : 'px-2 pt-1 pb-3'
+          } ${
             isDeleted
               ? isMe
-                ? 'bg-family-700/60 text-white/70 italic border border-white/10'
-                : 'bg-gray-100 text-gray-400 italic border border-gray-200/80'
+                ? 'chat-bubble-out chat-bubble-out-deleted italic border border-white/10'
+                : 'theme-text-secondary italic border theme-border'
               : isMe
-              ? 'bg-gradient-to-br from-family-600 to-family-700 text-white shadow-family-600/10'
-              : 'bg-white text-gray-900 border border-gray-200/90 shadow-gray-200/30'
+              ? 'chat-bubble-out text-white'
+              : 'theme-text-primary border theme-border'
           }`}
+          style={
+            isDeleted && !isMe
+              ? { backgroundColor: 'var(--theme-surface-secondary)' }
+              : !isMe && !isDeleted
+                ? { backgroundColor: 'var(--theme-surface)' }
+                : undefined
+          }
         >
           {/* Sender Header */}
           {!isMe && isFirstInGroup && !isDeleted && (
-            <div className="text-[11px] font-black mb-1 text-family-600 leading-none">
+            <div className="text-[11px] font-black mb-0.5 leading-none" style={{ color: 'var(--theme-accent)' }}>
               {senderDisplayName}
             </div>
           )}
@@ -194,57 +238,36 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
             />
           ) : (
             <>
-              {/* Audio Voice Note Attachment */}
-              {message.media_url && !isDeleted && (message.media_type === 'audio' || message.media_type?.startsWith('audio/') || /\.(webm|m4a|mp3|ogg|wav|aac)(\?.*)?$/i.test(message.media_url)) ? (
-                <div className="-mx-1 -mt-1">
-                  <AudioMessagePlayer audioUrl={message.media_url} isMe={isMe} />
-                </div>
-              ) : message.media_url && !isDeleted ? (
+              {isAudio ? (
+                <AudioMessagePlayer audioUrl={message.media_url!} isMe={isMe} />
+              ) : hasMedia ? (
                 <VaultChatImage
-                  remoteUrl={message.media_url}
+                  remoteUrl={message.media_url!}
                   localPath={message.local_media_path}
                   onImageClick={onImageClick}
                 />
               ) : null}
 
-              {/* Text Message Content */}
-              {message.content && (
-                <p className={`whitespace-pre-wrap break-words ${fontClass}`}>
+              {message.content?.trim() && !isAudio ? (
+                <p className={`whitespace-pre-wrap break-words ${fontClass} ${hasMedia ? 'mt-1' : ''}`}>
                   {message.content}
+                  {compactText ? (
+                    <span className={`inline-flex ml-1.5 relative top-[1px] ${timestampClass}`}>
+                      {timestampMeta}
+                    </span>
+                  ) : (
+                    <span className="inline-block w-[3.25rem]" aria-hidden />
+                  )}
                 </p>
-              )}
+              ) : null}
 
-              {/* Rich OpenGraph Link Preview Card */}
               {firstUrl && <LinkPreviewCard url={firstUrl} isMe={isMe} />}
             </>
           )}
 
-          {/* Footer Metadata: Time + Delivery Status Ticks */}
-          <div
-            className={`flex items-center justify-end gap-1 mt-1 text-[10px] leading-none select-none ${
-              isMe ? 'text-white/80' : 'text-gray-400'
-            }`}
-          >
-            <span>{timeStr}</span>
-            {isMe && (
-              <span>
-                {message.status === 'sending' ? (
-                  <Clock className="w-3 h-3 text-white/70 animate-pulse inline" />
-                ) : message.status === 'failed' ? (
-                  <button
-                    type="button"
-                    onClick={() => onRetry?.(message)}
-                    className="flex items-center gap-0.5 text-rose-300 font-bold hover:text-white"
-                  >
-                    <AlertCircle className="w-3 h-3 inline" />
-                    <span>Tekrar Dene</span>
-                  </button>
-                ) : (
-                  <CheckCheck className="w-3.5 h-3.5 text-white/90 inline" />
-                )}
-              </span>
-            )}
-          </div>
+          {!compactText && (
+            <div className={`absolute bottom-1 right-1.5 flex ${timestampClass}`}>{timestampMeta}</div>
+          )}
         </div>
       </div>
     );
@@ -271,9 +294,9 @@ const VaultChatImage: React.FC<{
   }, [remoteUrl, localPath]);
 
   return (
-    <div className="mb-2 -mx-1.5 -mt-1.5 rounded-2xl overflow-hidden bg-black/5 relative">
+    <div className="-mx-1 -mt-1 mb-0 rounded-[inherit] overflow-hidden bg-black/20 relative">
       {!imageLoaded && (
-        <div className="w-full h-44 sm:h-52 bg-black/10 animate-pulse flex items-center justify-center text-xs text-gray-400">
+        <div className="w-full h-28 bg-black/20 animate-pulse flex items-center justify-center text-xs theme-text-secondary">
           Yükleniyor...
         </div>
       )}
@@ -285,7 +308,7 @@ const VaultChatImage: React.FC<{
           e.stopPropagation();
           onImageClick?.(src || remoteUrl);
         }}
-        className={`w-full max-h-80 object-cover cursor-pointer transition-transform duration-200 hover:scale-[1.01] ${
+        className={`w-full max-h-52 object-cover cursor-pointer ${
           imageLoaded ? 'block' : 'hidden'
         }`}
         loading="lazy"

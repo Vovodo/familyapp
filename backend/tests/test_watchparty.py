@@ -174,6 +174,40 @@ def test_concurrent_controls_increment_seq_last_write_wins(client):
     assert final["control_seq"] >= 2
 
 
+def test_rapid_play_pause_without_base_seq_last_write_wins(client):
+    host_h, _, _, _, _ = _family_with_two(client)
+    room = _create_room(client, host_h, video_url=VIDEO)
+    room_id = room["room_id"]
+
+    play = client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/control",
+        json={"action": "play", "position_ms": 12_000},
+        headers=host_h,
+    )
+    pause = client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/control",
+        json={"action": "pause", "position_ms": 12_400},
+        headers=host_h,
+    )
+    resume = client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/control",
+        json={"action": "play", "position_ms": 12_400},
+        headers=host_h,
+    )
+    assert play.status_code == 200 and pause.status_code == 200 and resume.status_code == 200
+    body = resume.json()
+    assert body["playback_state"] == "playing"
+    assert 12_400 <= body["position_ms"] <= 12_400 + 250
+    paused = client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/control",
+        json={"action": "pause", "position_ms": 12_400},
+        headers=host_h,
+    )
+    assert paused.status_code == 200
+    assert paused.json()["playback_state"] == "paused"
+    assert paused.json()["position_ms"] == 12_400
+
+
 def test_chat_persists_in_order_and_is_idempotent(client):
     host_h, _, guest_h, _, _ = _family_with_two(client)
     room = _create_room(client, host_h, video_url=VIDEO)
@@ -218,6 +252,75 @@ def test_host_leave_transfers_to_remaining_member(client):
     assert guest_view["host_user_id"] == guest_id
     assert guest_view["is_host"] is True
     assert host_id not in {p["user_id"] for p in guest_view["participants"]}
+
+
+def test_host_can_transfer_to_online_member(client):
+    host_h, host_id, guest_h, guest_id, _ = _family_with_two(client)
+    room = _create_room(client, host_h, video_url=VIDEO)
+    room_id = room["room_id"]
+    client.post(f"/api/v1/watch-party/rooms/{room_id}/join", headers=guest_h)
+
+    denied = client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/host",
+        json={"user_id": guest_id},
+        headers=guest_h,
+    )
+    assert denied.status_code == 403
+
+    ok = client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/host",
+        json={"user_id": guest_id},
+        headers=host_h,
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["host_user_id"] == guest_id
+    assert ok.json()["is_host"] is False
+
+
+def test_stale_control_seq_rejected(client):
+    host_h, _, guest_h, _, _ = _family_with_two(client)
+    room = _create_room(client, host_h, video_url=VIDEO)
+    room_id = room["room_id"]
+    client.post(f"/api/v1/watch-party/rooms/{room_id}/join", headers=guest_h)
+
+    first = client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/control",
+        json={"action": "seek", "position_ms": 1000},
+        headers=host_h,
+    )
+    seq = first.json()["control_seq"]
+
+    stale = client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/control",
+        json={"action": "seek", "position_ms": 5000, "base_control_seq": seq - 1},
+        headers=guest_h,
+    )
+    assert stale.status_code == 409
+
+    fresh = client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/control",
+        json={"action": "seek", "position_ms": 5000, "base_control_seq": seq},
+        headers=guest_h,
+    )
+    assert fresh.status_code == 200
+    assert fresh.json()["position_ms"] == 5000
+
+
+def test_message_list_includes_sender_name(client):
+    host_h, _, guest_h, _, _ = _family_with_two(client)
+    room = _create_room(client, host_h, video_url=VIDEO)
+    room_id = room["room_id"]
+    client.post(f"/api/v1/watch-party/rooms/{room_id}/join", headers=guest_h)
+    client.post(
+        f"/api/v1/watch-party/rooms/{room_id}/messages",
+        json={"body": "Merhaba oda", "client_message_id": "n1"},
+        headers=host_h,
+    )
+    listing = client.get(f"/api/v1/watch-party/rooms/{room_id}/messages", headers=guest_h)
+    assert listing.status_code == 200
+    row = listing.json()[0]
+    assert row["name"]
+    assert row["body"] == "Merhaba oda"
 
 
 def test_watch_party_family_isolation(client):

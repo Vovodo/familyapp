@@ -1,0 +1,65 @@
+---
+description: Kullanıcılar arası senkron, akıcılık ve tutarlılık — son düzeltmelerden çıkan zorunlu kurallar
+alwaysApply: true
+---
+
+# Senkron, hız ve tutarlılık
+
+Ürün önceliği: **aynı ailedeki cihazlar aynı gerçeği görsün**, etkileşim **anında** hissedilsin, UI **titremesin / geri almasın**.
+
+Son düzeltmelerin odağı: alışveriş çok cihaz senkronu, çiz-tahmin oyunu canlılığı, aile sahipliği/kapatma (Postgres), mikrofon izni yanlış kırmızı, sahte “internet yok” hataları.
+
+## Altın kural: tek yazma yolu, tek gerçek kaynak
+
+- **Optimistic UI** anında gösterir; **sunucu + broadcast** nihai gerçektir.
+- Aynı listeye hem `GET` hem `postgres_changes` hem broadcast yazma → yarış; eski yanıt yeni durumu ezer.
+- Yerel depoda `merge` ile sunucu silmelerini geri getirme. Silinen kayıt = **tombstone** veya sunucu listesi otoriter.
+
+```ts
+// ❌ Uçuşta GET + DB dinleyicisi aynı state’i günceller
+// ✅ Broadcast anında; refetch yalnızca subscribe/visibility; rebase sunucudan
+```
+
+## Frontend — paylaşılan liste / oyun state
+
+1. **Önce UI, sonra ağ.** Toggle/ekle/sil → local state hemen; API arka planda.
+2. **Eski yanıtı reddet.** `appliedAt`, `revision`, `updated_at` veya snapshot zamanı ile geç gelen GET/broadcast at.
+3. **Bekleyen işleri koru.** Sunucudan rebase ederken tamamlanmamış toggle / `temp-*` id’leri düşürme.
+4. **Çift kanal kullanma.** Bir özellik için tek realtime yolu seç (shopping: broadcast; gereksiz `postgres_changes` ekleme).
+5. **Flicker yok.** Pending timeout ile zorla geri alma yapma; sunucu onayı veya tombstone ile kapat.
+6. Ortak mantık: `listSync.ts`, `cacheService`, mevcut `local*Storage` — sayfa içi kopya merge yazma.
+
+Canlı oyun / seyir odası:
+- Heartbeat + **revision** ile bayat state’in skoru/UI’ı ezmesini engelle.
+- Tahmin, çizim, lobi: broadcast öncelikli; gereksiz tam state poll’u ekleme.
+- Lobiden düşme: `visibilitychange` / app background ile temiz leave.
+
+## Backend — tutarlılık ve production farkları
+
+1. **SQLite test ≠ Postgres prod.** `lazy="joined"` + `with_for_update()` Postgres’te patlar; kilit gerekmiyorsa kullanma.
+2. **Aile silme/kapatma:** tüm `family_id` tablolarını FK sırasıyla sil (görev, bütçe, anket, oyun, seyir, bildirim…). Test: dolu aile silinir, komşu aile dokunulmaz (`test_isolation_and_features.py`).
+3. Yazma endpoint’leri dönüşte **`updated_at` / revision** ver; istemci eski snapshot ayırt etsin.
+4. 500’ler JSON `detail` ile dönsün; proxy 502 CORS’suz kalırsa istemci “offline” sanmasın.
+
+## Capacitor / Android
+
+- **`navigator.permissions.query('microphone')` native izni yansıtmaz.** Durum: `getUserMedia` başarısı, `enumerateDevices` label, veya kullanıcı kaydı sonrası cache.
+- Kamera/bildirim: Capacitor plugin `checkPermissions`; mikrofon: WebView API’sine güvenme.
+- Kritik işlemlerde boş gövdeli `DELETE` yerine `POST` tercih et (proxy uyumu).
+
+## Hata mesajları (`api.ts`)
+
+```ts
+// ❌ error.request → "internetinizi kontrol edin"
+// ✅ 502/503/504 → sunucu geçici; ECONNABORTED → zaman aşımı; detail varsa onu göster
+```
+
+## Bitirmeden önce (sync değiştiyse)
+
+- [ ] İki istemci: A ekler/siler, B anında görür; B toggle, A titremez
+- [ ] Silinen kayıt yerel cache’de geri gelmiyor
+- [ ] Yavaş ağ simülasyonu: eski GET yeni durumu ezmiyor
+- [ ] Backend: izolasyon + ilgili pytest; frontend: `npm run build`
+- [ ] Realtime özellik: kopma / sekme geri dönüşü senaryosu
+
+Yeni “hızlı sync” katmanı (React Query, yeni WebSocket, ikinci merge util) ekleme — mevcut broadcast + cache + rebase desenini genişlet.

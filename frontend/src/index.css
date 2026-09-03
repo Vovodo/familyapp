@@ -6,6 +6,21 @@
   :root {
     --safe-area-top: env(safe-area-inset-top, 0px);
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --theme-bg: #160F28;
+    --theme-surface: #1E1638;
+    --theme-surface-secondary: #2C1F4C;
+    --theme-text-primary: #F7F3FF;
+    --theme-text-secondary: #C9B3E8;
+    --theme-border: #3A2A5C;
+    --theme-accent: #E879A8;
+    --theme-hero-gradient: linear-gradient(135deg, #7C3AED 0%, #D946A0 52%, #F0725A 100%);
+    --theme-header-bg: #1A1230;
+    --theme-header-border: #3A2A5C;
+    --theme-nav-bg: #1A1230;
+    --theme-nav-border: #3A2A5C;
+    --theme-nav-active: #A78BFA;
+    --theme-nav-inactive: #9B8BB8;
+    --theme-card-shadow: 0 4px 24px rgba(217, 70, 160, 0.18);
   }
 
   html, body {
@@ -14,8 +29,8 @@
     -webkit-user-select: none;
     scrollbar-gutter: stable;
     overflow-x: hidden;
-    background-color: var(--theme-bg, #fff5f6);
-    color: var(--theme-text-primary, #4c0519);
+    background-color: var(--theme-bg);
+    color: var(--theme-text-primary);
   }
 
   main {
@@ -110,45 +125,92 @@
   animation: slideUpFade 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes watch-float {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px) scale(0.6);
+  }
+  15% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-120px) scale(0.9);
+  }
+}
+
+.animate-watch-float {
+  animation: watch-float 2.4s ease-out forwards;
+}
+
+@keyframes watch-live-dot {
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+
+.animate-watch-live {
+  animation: watch-live-dot 1.4s ease-in-out infinite;
+}
+
 /* Dynamic Theme Utility Classes */
 .theme-bg {
-  background-color: var(--theme-bg, #fff5f6);
+  background-color: var(--theme-bg, #160F28);
 }
 
 .theme-surface {
-  background-color: var(--theme-surface, #ffffff);
-  border-color: var(--theme-border, #fecdd3);
-  box-shadow: var(--theme-card-shadow, 0 4px 20px rgba(0, 0, 0, 0.05));
+  background-color: var(--theme-surface, #1E1638);
+  border-color: var(--theme-border, #3A2A5C);
+  box-shadow: var(--theme-card-shadow, 0 4px 24px rgba(217, 70, 160, 0.18));
 }
 
 .theme-surface-secondary {
-  background-color: var(--theme-surface-secondary, #ffe4e8);
+  background-color: var(--theme-surface-secondary, #2C1F4C);
 }
 
 .theme-text-primary {
-  color: var(--theme-text-primary, #4c0519);
+  color: var(--theme-text-primary, #F7F3FF);
 }
 
 .theme-text-secondary {
-  color: var(--theme-text-secondary, #9f1239);
+  color: var(--theme-text-secondary, #C9B3E8);
 }
 
 .theme-border {
-  border-color: var(--theme-border, #fecdd3);
+  border-color: var(--theme-border, #3A2A5C);
 }
 
 .theme-header {
-  background-color: var(--theme-header-bg, #ffffff);
-  border-color: var(--theme-header-border, #ffe4e8);
+  background-color: var(--theme-header-bg, #1A1230);
+  border-color: var(--theme-header-border, #3A2A5C);
 }
 
 .theme-nav {
-  background-color: var(--theme-nav-bg, #ffffff);
-  border-color: var(--theme-nav-border, #ffe4e8);
+  background-color: var(--theme-nav-bg, #1A1230);
+  border-color: var(--theme-nav-border, #3A2A5C);
 }
 
 .theme-hero-card {
-  background: var(--theme-hero-gradient, linear-gradient(135deg, #e11d48 0%, #be123c 100%));
+  background: var(--theme-hero-gradient, linear-gradient(135deg, #7C3AED 0%, #D946A0 52%, #F0725A 100%));
+}
+
+.theme-cta {
+  background: var(--theme-hero-gradient, linear-gradient(135deg, #7C3AED 0%, #D946A0 52%, #F0725A 100%));
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(217, 70, 160, 0.28);
+}
+
+/* Sohbet giden balon: tema pembesi değil, görseldeki koyu kırmızı */
+.chat-bubble-out {
+  background: #8E2438 !important;
+  color: #ffffff;
+}
+html.dark .chat-bubble-out {
+  background: #8E2438 !important;
+  color: #ffffff !important;
+}
+.chat-bubble-out-deleted {
+  opacity: 0.72;
 }
 
 html.dark {
@@ -280,4 +342,23 @@ html.dark .keep-note-paper textarea::placeholder {
   background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%) !important;
   color: #ffffff !important;
   box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35) !important;
+}
+
+@keyframes brand-logo-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.045); opacity: 0.92; }
+}
+
+.brand-logo-pulse {
+  animation: brand-logo-pulse 1.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes guess-toast-in {
+  from { transform: translateX(18px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.guess-toast-in {
+  animation: guess-toast-in 0.28s ease-out both;
 }

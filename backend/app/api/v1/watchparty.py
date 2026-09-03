@@ -17,21 +17,17 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_family_member, get_current_user
 from backend.app.db.session import get_db
 from backend.app.models.models import FamilyMember, User, WatchRoom, WatchRoomMessage, WatchRoomParticipant
-from backend.app.services.youtube_url import (
-    canonical_youtube_url,
-    extract_youtube_video_id,
-    parse_start_ms,
-)
+from backend.app.services.video_provider import parse_video_url, supported_providers
 
 router = APIRouter()
 
-PRESENCE_TTL_SECONDS = 25
+PRESENCE_TTL_SECONDS = 45
 MAX_OPEN_ROOMS = 8
 MAX_MESSAGE_LEN = 500
 MAX_TITLE_LEN = 120
 MESSAGE_PAGE = 50
 
-SUPPORTED_PROVIDERS = ("youtube",)
+SUPPORTED_PROVIDERS = supported_providers()
 
 
 # ---------------------------------------------------------------- şemalar
@@ -110,6 +106,7 @@ class WatchControlIn(BaseModel):
     action: str = Field(min_length=2, max_length=20)
     position_ms: Optional[int] = Field(default=None, ge=0, le=24 * 60 * 60 * 1000)
     duration_ms: Optional[int] = Field(default=None, ge=0, le=24 * 60 * 60 * 1000)
+    base_control_seq: Optional[int] = Field(default=None, ge=0)
 
 
 class WatchHeartbeatIn(BaseModel):
@@ -264,29 +261,36 @@ def _member_name(db: Session, family_id: str, user_id: str, user: Optional[User]
 
 
 def _apply_video(room: WatchRoom, video_url: str, provider: str, video_title: Optional[str]) -> None:
-    provider = (provider or "youtube").strip().lower()
-    if provider not in SUPPORTED_PROVIDERS:
+    provider_key = (provider or "youtube").strip().lower()
+    if provider_key not in SUPPORTED_PROVIDERS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Bu video kaynağı henüz desteklenmiyor. YouTube bağlantısı kullanın.",
         )
-    video_id = extract_youtube_video_id(video_url)
-    if not video_id:
+    try:
+        parsed = parse_video_url(video_url, provider_key)
+    except ValueError as exc:
+        if str(exc).startswith("unsupported_provider"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Bu video kaynağı henüz desteklenmiyor. YouTube bağlantısı kullanın.",
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Geçerli bir YouTube bağlantısı girin. Örnek: https://www.youtube.com/watch?v=...",
-        )
+        ) from exc
+
     now = _now()
-    room.video_provider = "youtube"
-    room.video_id = video_id
-    room.video_url = canonical_youtube_url(video_id)
+    room.video_provider = parsed.provider
+    room.video_id = parsed.video_id
+    room.video_url = parsed.canonical_url
     if video_title:
         room.video_title = video_title.strip()[:200]
     elif not room.video_title:
         room.video_title = None
     room.duration_ms = None
     room.playback_state = "paused"
-    room.position_ms = parse_start_ms(video_url)
+    room.position_ms = parsed.start_ms
     room.position_updated_at = now
     room.control_seq = int(room.control_seq or 0) + 1
     room.updated_at = now
@@ -354,7 +358,7 @@ def _serialize_room(
     )
 
 
-def _serialize_message(msg: WatchRoomMessage) -> WatchMessageOut:
+def _serialize_message(db: Session, msg: WatchRoomMessage) -> WatchMessageOut:
     return WatchMessageOut(
         id=msg.id,
         room_id=msg.room_id,
@@ -655,6 +659,14 @@ def control_watch_room(
     if not room.video_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Önce odaya bir video ekleyin.")
 
+    if payload.base_control_seq is not None and payload.base_control_seq != int(room.control_seq or 0):
+        db.commit()
+        db.refresh(room)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Oynatma durumu güncellendi. Lütfen tekrar deneyin.",
+        )
+
     now = _now()
     action = payload.action.strip().lower()
     if payload.duration_ms:
@@ -783,7 +795,7 @@ def list_watch_messages(
             query = query.filter(WatchRoomMessage.created_at < cursor.created_at)
     rows = query.order_by(WatchRoomMessage.created_at.desc()).limit(limit).all()
     rows.reverse()
-    return [_serialize_message(m) for m in rows]
+    return [_serialize_message(db, m) for m in rows]
 
 
 @router.post("/rooms/{room_id}/messages", response_model=WatchMessageOut, status_code=status.HTTP_201_CREATED)
@@ -811,7 +823,7 @@ def post_watch_message(
             .first()
         )
         if existing:
-            return _serialize_message(existing)
+            return _serialize_message(db, existing)
 
     msg = WatchRoomMessage(
         room_id=room.id,
@@ -835,7 +847,7 @@ def post_watch_message(
             .first()
         )
         if existing:
-            return _serialize_message(existing)
+            return _serialize_message(db, existing)
         raise
     db.refresh(msg)
-    return _serialize_message(msg)
+    return _serialize_message(db, msg)

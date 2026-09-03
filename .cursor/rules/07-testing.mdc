@@ -18,7 +18,7 @@ Kapsamı daraltıp etkilenen alanı atlama.
 3. **Tek FastAPI endpoint/service** — ilgili pytest dosyası/test; gerekirse HTTP. Tüm frontend suite yok.
 4. **Model / şema / migrasyon** — `models.py` + `run_safe_migrations()`; ilgili backend testleri; kolonun temiz ortamda `ADD COLUMN IF NOT EXISTS` ile geldiğini doğrula. Geniş etkiyse suite’i genişlet.
 5. **Auth / yetki / izolasyon** — `test_isolation_and_features.py` ve etkilenen endpoint testleri; sahte `x-family-id` → 403; login/session/yetki senaryoları.
-6. **Realtime (SSE / Supabase broadcast)** — ilgili test + çok istemci / kopma-reconnect.
+6. **Realtime / çok cihaz sync** — ilgili test + iki istemci (A yazar, B görür); shopping → `test_shopping_sync.py`; oyun → `test_drawing_game.py`; kopma-reconnect.
 7. **Çok modül / mimari** — etkilenen modül + integration; gerekirse E2E.
 8. **Release / production deploy** — full pytest, frontend build, integration/E2E, migrasyon, kritik güvenlik.
 

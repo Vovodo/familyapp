@@ -5,6 +5,7 @@ import { App as CapApp } from '@capacitor/app';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { FamilyProvider } from './contexts/FamilyContext';
 import { DrawingGameProvider } from './contexts/DrawingGameContext';
+import { VoiceChannelProvider } from './contexts/VoiceChannelContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { MobileLayout } from './components/layout/MobileLayout';
 import { LoginPage } from './pages/auth/LoginPage';
@@ -25,7 +26,7 @@ import { WatchPartyPage } from './pages/watchparty/WatchPartyPage';
 import { WatchPartyRoomPage } from './pages/watchparty/WatchPartyRoomPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { liveUpdateService } from './services/liveUpdate';
-import { Loader2, Heart } from 'lucide-react';
+import { BrandLoading } from './components/branding/BrandLoading';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,17 +41,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-warm-50 flex flex-col items-center justify-center space-y-3">
-        <div className="w-16 h-16 rounded-3xl bg-family-100 flex items-center justify-center text-family-600 shadow-md animate-bounce">
-          <Heart className="w-8 h-8 fill-family-500 text-family-500" />
-        </div>
-        <div className="flex items-center gap-2 text-sm font-bold text-gray-700">
-          <Loader2 className="w-4 h-4 animate-spin text-family-600" />
-          <span>Aile Uygulaması Yükleniyor...</span>
-        </div>
-      </div>
-    );
+    return <BrandLoading message="Aile Uygulaması Yükleniyor..." />;
   }
 
   if (!user) {
@@ -64,11 +55,7 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isLoading } = useAuth();
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-warm-50 flex flex-col items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-family-600" />
-      </div>
-    );
+    return <BrandLoading message="Yükleniyor..." />;
   }
 
   if (user) {
@@ -102,6 +89,7 @@ export const App: React.FC = () => {
             <BrowserRouter>
               <InviteDeepLinkListener />
               <DrawingGameProvider>
+              <VoiceChannelProvider>
               <Routes>
                 {/* Public Routes */}
                 <Route
@@ -149,6 +137,7 @@ export const App: React.FC = () => {
                 {/* Fallback */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </VoiceChannelProvider>
               </DrawingGameProvider>
             </BrowserRouter>
           </FamilyProvider>

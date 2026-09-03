@@ -1,10 +1,17 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
+
+export const THEME_STORAGE_KEY = 'ailem_active_theme';
+export const DEFAULT_THEME_ID = 'ailem';
+const LEGACY_DEFAULT_THEME_IDS = new Set(['rose']);
 
 export interface ThemeDefinition {
   id: string;
   name: string;
   description: string;
   isDark: boolean;
+  isDefault?: boolean;
   palette: string[]; // 4 representative color swatches for store preview
   colors: {
     bg: string;
@@ -26,6 +33,31 @@ export interface ThemeDefinition {
 }
 
 export const THEMES: ThemeDefinition[] = [
+  {
+    id: 'ailem',
+    name: 'Ailem',
+    description: 'Logomuzla uyumlu ana tema',
+    isDark: true,
+    isDefault: true,
+    palette: ['#160F28', '#2C1F4C', '#E879A8', '#F7F3FF'],
+    colors: {
+      bg: '#160F28',
+      surface: '#1E1638',
+      surfaceSecondary: '#2C1F4C',
+      textPrimary: '#F7F3FF',
+      textSecondary: '#C9B3E8',
+      border: '#3A2A5C',
+      accent: '#E879A8',
+      heroGradient: 'linear-gradient(135deg, #7C3AED 0%, #D946A0 52%, #F0725A 100%)',
+      headerBg: '#1A1230',
+      headerBorder: '#3A2A5C',
+      navBg: '#1A1230',
+      navBorder: '#3A2A5C',
+      navActive: '#A78BFA',
+      navInactive: '#9B8BB8',
+      cardShadow: '0 4px 24px rgba(217, 70, 160, 0.18)',
+    },
+  },
   {
     id: 'midnight',
     name: 'Midnight Black',
@@ -96,30 +128,6 @@ export const THEMES: ThemeDefinition[] = [
       navActive: '#c084fc',
       navInactive: '#7e679e',
       cardShadow: '0 4px 20px rgba(168, 85, 247, 0.15)',
-    },
-  },
-  {
-    id: 'rose',
-    name: 'Rose',
-    description: 'Sıcak ve romantik',
-    isDark: false,
-    palette: ['#fff5f6', '#ffffff', '#e11d48', '#4c0519'],
-    colors: {
-      bg: '#fff5f6',
-      surface: '#ffffff',
-      surfaceSecondary: '#ffe4e8',
-      textPrimary: '#4c0519',
-      textSecondary: '#9f1239',
-      border: '#fecdd3',
-      accent: '#e11d48',
-      heroGradient: 'linear-gradient(135deg, #e11d48 0%, #be123c 100%)',
-      headerBg: '#ffffff',
-      headerBorder: '#ffe4e8',
-      navBg: '#ffffff',
-      navBorder: '#ffe4e8',
-      navActive: '#e11d48',
-      navInactive: '#9f1239',
-      cardShadow: '0 4px 20px rgba(225, 29, 72, 0.08)',
     },
   },
   {
@@ -324,41 +332,65 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+export const getDefaultTheme = (): ThemeDefinition =>
+  THEMES.find((t) => t.id === DEFAULT_THEME_ID) || THEMES[0];
+
+export const resolveStoredThemeId = (): string => {
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  if (!stored || LEGACY_DEFAULT_THEME_IDS.has(stored)) {
+    localStorage.setItem(THEME_STORAGE_KEY, DEFAULT_THEME_ID);
+    return DEFAULT_THEME_ID;
+  }
+  if (!THEMES.some((t) => t.id === stored)) {
+    localStorage.setItem(THEME_STORAGE_KEY, DEFAULT_THEME_ID);
+    return DEFAULT_THEME_ID;
+  }
+  return stored;
+};
+
+const applyNativeChrome = (theme: ThemeDefinition) => {
+  if (!Capacitor.isNativePlatform()) return;
+  StatusBar.setStyle({ style: theme.isDark ? Style.Light : Style.Dark }).catch(() => {});
+  StatusBar.setBackgroundColor({ color: theme.colors.headerBg }).catch(() => {});
+};
+
+const applyThemeToDOM = (theme: ThemeDefinition) => {
+  const root = document.documentElement;
+  root.setAttribute('data-theme', theme.id);
+  root.classList.toggle('dark', theme.isDark);
+
+  root.style.setProperty('--theme-bg', theme.colors.bg);
+  root.style.setProperty('--theme-surface', theme.colors.surface);
+  root.style.setProperty('--theme-surface-secondary', theme.colors.surfaceSecondary);
+  root.style.setProperty('--theme-text-primary', theme.colors.textPrimary);
+  root.style.setProperty('--theme-text-secondary', theme.colors.textSecondary);
+  root.style.setProperty('--theme-border', theme.colors.border);
+  root.style.setProperty('--theme-accent', theme.colors.accent);
+  root.style.setProperty('--theme-hero-gradient', theme.colors.heroGradient);
+  root.style.setProperty('--theme-header-bg', theme.colors.headerBg);
+  root.style.setProperty('--theme-header-border', theme.colors.headerBorder);
+  root.style.setProperty('--theme-nav-bg', theme.colors.navBg);
+  root.style.setProperty('--theme-nav-border', theme.colors.navBorder);
+  root.style.setProperty('--theme-nav-active', theme.colors.navActive);
+  root.style.setProperty('--theme-nav-inactive', theme.colors.navInactive);
+  root.style.setProperty('--theme-card-shadow', theme.colors.cardShadow);
+
+  const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+  if (metaThemeColor) {
+    metaThemeColor.setAttribute('content', theme.colors.headerBg);
+  }
+
+  applyNativeChrome(theme);
+};
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeThemeId, setActiveThemeId] = useState<string>(() => {
-    return localStorage.getItem('ailem_active_theme') || 'rose';
+    const id = resolveStoredThemeId();
+    applyThemeToDOM(THEMES.find((t) => t.id === id) || getDefaultTheme());
+    return id;
   });
 
-  const currentTheme = THEMES.find((t) => t.id === activeThemeId) || THEMES[3]; // Default to Rose
-
-  const applyThemeToDOM = (theme: ThemeDefinition) => {
-    const root = document.documentElement;
-    root.setAttribute('data-theme', theme.id);
-    root.classList.toggle('dark', theme.isDark);
-
-    // Apply CSS Variables
-    root.style.setProperty('--theme-bg', theme.colors.bg);
-    root.style.setProperty('--theme-surface', theme.colors.surface);
-    root.style.setProperty('--theme-surface-secondary', theme.colors.surfaceSecondary);
-    root.style.setProperty('--theme-text-primary', theme.colors.textPrimary);
-    root.style.setProperty('--theme-text-secondary', theme.colors.textSecondary);
-    root.style.setProperty('--theme-border', theme.colors.border);
-    root.style.setProperty('--theme-accent', theme.colors.accent);
-    root.style.setProperty('--theme-hero-gradient', theme.colors.heroGradient);
-    root.style.setProperty('--theme-header-bg', theme.colors.headerBg);
-    root.style.setProperty('--theme-header-border', theme.colors.headerBorder);
-    root.style.setProperty('--theme-nav-bg', theme.colors.navBg);
-    root.style.setProperty('--theme-nav-border', theme.colors.navBorder);
-    root.style.setProperty('--theme-nav-active', theme.colors.navActive);
-    root.style.setProperty('--theme-nav-inactive', theme.colors.navInactive);
-    root.style.setProperty('--theme-card-shadow', theme.colors.cardShadow);
-
-    // Update Meta Theme Color for mobile browser address bar / notch
-    const metaThemeColor = document.querySelector('meta[name="theme-color"]');
-    if (metaThemeColor) {
-      metaThemeColor.setAttribute('content', theme.colors.headerBg);
-    }
-  };
+  const currentTheme = THEMES.find((t) => t.id === activeThemeId) || getDefaultTheme();
 
   useEffect(() => {
     applyThemeToDOM(currentTheme);
@@ -368,7 +400,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const target = THEMES.find((t) => t.id === themeId);
     if (target) {
       setActiveThemeId(target.id);
-      localStorage.setItem('ailem_active_theme', target.id);
+      localStorage.setItem(THEME_STORAGE_KEY, target.id);
       applyThemeToDOM(target);
     }
   };

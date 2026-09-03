@@ -12,9 +12,9 @@ const config: CapacitorConfig = {
     SplashScreen: {
       launchShowDuration: 1500,
       launchAutoHide: true,
-      backgroundColor: '#FAF9F6',
+      backgroundColor: '#1A1230',
       androidSplashResourceName: 'splash',
-      androidScaleType: 'CENTER_CROP',
+      androidScaleType: 'CENTER',
       showSpinner: false,
     },
     LocalNotifications: {
@@ -26,8 +26,8 @@ const config: CapacitorConfig = {
       presentationStyle: 'fullscreen',
     },
     StatusBar: {
-      style: 'DARK',
-      backgroundColor: '#CA374C',
+      style: 'LIGHT',
+      backgroundColor: '#1A1230',
     },
   },
 };

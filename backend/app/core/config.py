@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "Admin1234!*"
     ADMIN_NAME: str = "Sistem Yöneticisi (Ege)"
 
+    # Firebase Cloud Messaging (FCM)
+    FIREBASE_CREDENTIALS_JSON: str = ""
+    FIREBASE_CREDENTIALS_PATH: str = ""
+
     model_config = SettingsConfigDict(
         env_file=_ENV_FILES,
         env_file_encoding="utf-8",

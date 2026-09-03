@@ -19,6 +19,7 @@ from backend.app.models.models import (
     WatchRoom,
     WatchRoomParticipant,
     WatchRoomMessage,
+    VoiceChannelParticipant,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "WatchRoom",
     "WatchRoomParticipant",
     "WatchRoomMessage",
+    "VoiceChannelParticipant",
 ]

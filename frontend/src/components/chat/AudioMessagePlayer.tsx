@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, Mic, RotateCcw } from 'lucide-react';
+import { Play, Pause } from 'lucide-react';
 import { localMediaVault } from '../../services/localMediaVault';
 
 interface AudioMessagePlayerProps {
@@ -27,6 +27,18 @@ const resolveAudioUrl = (url: string): string => {
     ''
   );
   return `${apiBase}${url.startsWith('/') ? '' : '/'}${url}`;
+};
+
+const waveformBars = (seed: string): number[] => {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i += 1) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Array.from({ length: 32 }, (_, i) => {
+    const n = ((h >>> (i % 16)) + i * 19 + seed.length) % 100;
+    return 0.22 + (n / 100) * 0.78;
+  });
 };
 
 export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl, isMe }) => {
@@ -177,15 +189,15 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
   }, []);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const bars = waveformBars(audioUrl);
 
   return (
     <div
-      className={`flex items-center gap-3 p-1.5 sm:p-2 rounded-2xl min-w-[220px] sm:min-w-[260px] max-w-full select-none ${
-        isMe ? 'text-white' : 'text-gray-900'
+      className={`flex items-center gap-2 min-w-[200px] max-w-full select-none ${
+        isMe ? 'text-white' : 'theme-text-primary'
       }`}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Hidden Native Audio Element */}
       <audio
         ref={audioRef}
         src={playableSrc}
@@ -200,81 +212,65 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
         }}
       />
 
-      {/* Play / Pause Action Button */}
       <button
         type="button"
         onClick={togglePlayPause}
-        className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all flex-shrink-0 active:scale-90 cursor-pointer shadow-sm ${
-          isMe
-            ? 'bg-white text-family-700 hover:bg-family-50'
-            : 'bg-family-600 text-white hover:bg-family-700'
+        className={`w-9 h-9 rounded-full flex items-center justify-center transition-all flex-shrink-0 active:scale-90 cursor-pointer ${
+          isMe ? 'bg-white/20 text-white' : 'text-white'
         }`}
+        style={!isMe ? { background: '#7C3AED' } : undefined}
         title={isPlaying ? 'Durdur' : 'Oynat'}
       >
         {isPlaying ? (
-          <Pause className="w-5 h-5 fill-current" />
+          <Pause className="w-4 h-4 fill-current" />
         ) : (
-          <Play className="w-5 h-5 fill-current ml-0.5" />
+          <Play className="w-4 h-4 fill-current ml-0.5" />
         )}
       </button>
 
-      {/* Progress & Track Area */}
-      <div className="flex-1 flex flex-col justify-center min-w-0 space-y-1.5">
-        {/* Interactive Progress Bar */}
+      <div className="flex-1 min-w-0">
         <div
           ref={progressBarRef}
           onClick={handleSeek}
-          className="relative h-4 flex items-center cursor-pointer group py-1"
+          className="flex items-end gap-[2px] h-7 cursor-pointer"
         >
-          {/* Background Track */}
-          <div
-            className={`w-full h-1.5 rounded-full overflow-hidden transition-all ${
-              isMe ? 'bg-white/30' : 'bg-gray-200'
-            }`}
-          >
-            {/* Filled Progress */}
-            <div
-              className={`h-full rounded-full transition-all duration-75 ${
-                isMe ? 'bg-white' : 'bg-family-600'
-              }`}
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-
-          {/* Draggable Scrubber Handle */}
-          <div
-            className={`absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full shadow-md transition-transform scale-0 group-hover:scale-100 ${
-              isMe ? 'bg-white shadow-black/20' : 'bg-family-600 shadow-family-600/30'
-            }`}
-            style={{ left: `calc(${progressPercent}% - 7px)` }}
-          />
+          {bars.map((amp, i) => {
+            const barProgress = ((i + 0.5) / bars.length) * 100;
+            const active = barProgress <= progressPercent;
+            return (
+              <span
+                key={i}
+                className={`flex-1 rounded-full min-w-[2px] transition-colors ${
+                  active
+                    ? isMe
+                      ? 'bg-white'
+                      : ''
+                    : isMe
+                      ? 'bg-white/30'
+                      : 'bg-white/15'
+                }`}
+                style={{
+                  height: `${Math.round(amp * 100)}%`,
+                  backgroundColor: active && !isMe ? '#7C3AED' : undefined,
+                }}
+              />
+            );
+          })}
         </div>
-
-        {/* Timers & Speed Badge */}
-        <div className="flex items-center justify-between text-[11px] font-medium leading-none">
-          <span className={isMe ? 'text-white/90' : 'text-gray-600'}>
-            {isPlaying || currentTime > 0
-              ? formatTime(currentTime)
-              : formatTime(duration || 0)}
+        <div className="flex items-center justify-between leading-none mt-0.5 pr-12">
+          <span className={`text-[9px] font-bold ${isMe ? 'text-white/85' : 'theme-text-secondary'}`}>
+            {formatTime(isPlaying || currentTime > 0 ? currentTime : duration || 0)}
           </span>
-
-          <div className="flex items-center gap-1.5">
-            {/* Speed Toggle (1x, 1.5x, 2x) */}
-            <button
-              type="button"
-              onClick={cyclePlaybackRate}
-              className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold transition active:scale-95 cursor-pointer ${
-                isMe
-                  ? 'bg-white/20 hover:bg-white/30 text-white'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200'
-              }`}
-              title="Oynatma Hızı"
-            >
-              {playbackRate}x
-            </button>
-
-            <Mic className={`w-3 h-3 ${isMe ? 'text-white/60' : 'text-gray-400'}`} />
-          </div>
+          <button
+            type="button"
+            onClick={cyclePlaybackRate}
+            className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold cursor-pointer ${
+              isMe ? 'bg-white/15 text-white' : 'theme-text-secondary'
+            }`}
+            title="Oynatma Hızı"
+          >
+            {playbackRate}x
+          </button>
         </div>
       </div>
     </div>

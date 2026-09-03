@@ -1,10 +1,14 @@
-import os
 import json
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict
+from pathlib import Path
+from typing import List, Optional
 from loguru import logger
 from sqlalchemy.orm import Session
+from backend.app.core.config import settings
 from backend.app.models.models import DeviceToken, Message, User, Family
+
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_DEFAULT_CRED_PATH = _BACKEND_DIR / "firebase_service_account.json"
 
 try:
     import firebase_admin
@@ -35,9 +39,8 @@ class PushNotificationService:
             self.is_initialized = True
             return
 
-        # 1. Check for service account JSON file path or inline JSON
-        cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "backend/firebase_service_account.json")
-        inline_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
+        inline_json = (settings.FIREBASE_CREDENTIALS_JSON or "").strip()
+        cred_path = Path(settings.FIREBASE_CREDENTIALS_PATH.strip()) if settings.FIREBASE_CREDENTIALS_PATH else _DEFAULT_CRED_PATH
 
         try:
             if inline_json:
@@ -46,18 +49,24 @@ class PushNotificationService:
                 firebase_admin.initialize_app(cred)
                 self.is_initialized = True
                 logger.info("Firebase Admin SDK initialized successfully via FIREBASE_CREDENTIALS_JSON.")
-            elif os.path.exists(cred_path):
-                cred = credentials.Certificate(cred_path)
+            elif cred_path.is_file():
+                cred = credentials.Certificate(str(cred_path))
                 firebase_admin.initialize_app(cred)
                 self.is_initialized = True
                 logger.info(f"Firebase Admin SDK initialized successfully via file: {cred_path}")
-            elif os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and os.path.exists(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")):
-                cred = credentials.Certificate(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-                firebase_admin.initialize_app(cred)
-                self.is_initialized = True
-                logger.info("Firebase Admin SDK initialized successfully via GOOGLE_APPLICATION_CREDENTIALS.")
             else:
-                logger.info("No Firebase Service Account JSON found. FCM push notifications are in standby mode.")
+                import os
+                gac = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+                if gac and Path(gac).is_file():
+                    cred = credentials.Certificate(gac)
+                    firebase_admin.initialize_app(cred)
+                    self.is_initialized = True
+                    logger.info("Firebase Admin SDK initialized successfully via GOOGLE_APPLICATION_CREDENTIALS.")
+                else:
+                    logger.warning(
+                        "FCM disabled: set FIREBASE_CREDENTIALS_JSON in env/.env or place "
+                        f"firebase_service_account.json at {_DEFAULT_CRED_PATH}"
+                    )
         except Exception as e:
             logger.error(f"Failed to initialize Firebase Admin SDK: {e}")
 
@@ -92,8 +101,8 @@ class PushNotificationService:
             self._initialize_firebase()
 
         if not self.is_initialized:
-            logger.warning("FCM not configured! (FIREBASE_CREDENTIALS_JSON or firebase_service_account.json missing on server).")
-            return len(tokens)
+            logger.warning("FCM not configured — heart push skipped.")
+            return 0
 
         vibrate_pattern = [0, 500, 200, 500, 200, 500, 200, 500]
 
@@ -184,8 +193,8 @@ class PushNotificationService:
             self._initialize_firebase()
 
         if not self.is_initialized:
-            logger.warning("FCM not configured! (FIREBASE_CREDENTIALS_JSON or firebase_service_account.json missing on server).")
-            return len(tokens)
+            logger.warning("FCM not configured — chat push skipped.")
+            return 0
 
         # Build WhatsApp-style Stacked Multi-Message Preview (InboxStyle)
         family_name = "Aile Sohbeti"
@@ -324,7 +333,8 @@ class PushNotificationService:
             self._initialize_firebase()
 
         if not self.is_initialized:
-            return len(tokens)
+            logger.warning("FCM not configured — reminder push skipped.")
+            return 0
 
         notif_title = f"⏰ Hatırlatıcı: {title}"
         notif_body = description or f"{creator_name} tarafından planlanan hatırlatma zamanı geldi!"
@@ -399,7 +409,8 @@ class PushNotificationService:
         if not self.is_initialized:
             self._initialize_firebase()
         if not self.is_initialized:
-            return len(tokens)
+            logger.warning("FCM not configured — poke push skipped.")
+            return 0
 
         title = "👉 Dürtme!"
         body = f"{sender_name} sizi dürtüyor!"
@@ -496,7 +507,8 @@ class PushNotificationService:
         if not self.is_initialized:
             self._initialize_firebase()
         if not self.is_initialized:
-            return len(tokens)
+            logger.warning("FCM not configured — status action push skipped.")
+            return 0
 
         # Color, channel and sound customization based on action type
         color_map = {

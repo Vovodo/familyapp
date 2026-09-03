@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Sliders, Trash2, X, Check, Loader2, Sparkles, MessageCircle, AlertCircle } from 'lucide-react';
+import { Trash2, Loader2, MoreVertical, AlertCircle } from 'lucide-react';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { isSameDay } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -21,11 +22,14 @@ import { ChatSettingsModal, FontSizeOption, WallpaperOption, WALLPAPERS } from '
 import { playMessageSent, playMessageReceived } from '../../services/soundService';
 import { MemberProfilePopup } from '../../components/chat/MemberProfilePopup';
 import { CreatePollModal } from '../../components/chat/CreatePollModal';
+import { VoiceChannelBar } from '../../components/chat/VoiceChannelBar';
+import { Logo } from '../../components/branding/Logo';
 
 export const ChatPage: React.FC = () => {
   const { user } = useAuth();
   const { currentFamily, activeMember } = useFamily();
   const { currentTheme } = useTheme();
+  const navigate = useNavigate();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -996,34 +1000,59 @@ export const ChatPage: React.FC = () => {
         onChange={handleFileInputChange}
       />
 
-      {/* STICKY TOP BAR (Glued to top at all times) */}
-      <div className="sticky top-0 z-40 w-full shadow-xs">
-        <div className="theme-header backdrop-blur-md border-b theme-border px-4 py-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-family-500 to-rose-500 text-white flex items-center justify-center shadow-xs">
-              <MessageCircle className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-black text-gray-900 leading-tight">
+      {/* Compact chat header + voice channel */}
+      <div className="sticky top-0 z-40 w-full theme-header safe-area-top">
+        <div className="px-3 py-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Logo size="sm" className="!w-9 !h-9 flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium theme-text-secondary truncate">
+                {(() => {
+                  const hour = new Date().getHours();
+                  const greet =
+                    hour >= 6 && hour < 12
+                      ? 'Günaydın'
+                      : hour >= 12 && hour < 18
+                        ? 'İyi günler'
+                        : hour >= 18 && hour < 22
+                          ? 'İyi akşamlar'
+                          : 'İyi geceler';
+                  const name = activeMember?.nickname || user?.full_name?.split(' ')[0] || '';
+                  return `${greet}${name ? ` ${name}` : ''} ❤️`;
+                })()}
+              </p>
+              <h2 className="text-sm font-black theme-text-primary leading-tight truncate">
                 {currentFamily?.name || 'Aile Sohbeti'}
               </h2>
-              <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Canlı Aile Grubu</span>
-              </p>
             </div>
           </div>
 
-          {/* Settings Trigger */}
-          <button
-            type="button"
-            onClick={() => setShowSettingsModal(true)}
-            className="p-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 transition active:scale-95 cursor-pointer shadow-2xs"
-            title="Sohbet Ayarları"
-          >
-            <Sliders className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => navigate('/family')}
+              className="w-9 h-9 rounded-full overflow-hidden border theme-border cursor-pointer"
+              title="Aile ayarları"
+            >
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full bg-violet-700 text-white flex items-center justify-center text-xs font-black">
+                  {(activeMember?.nickname || user?.full_name || 'A')[0]}
+                </div>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSettingsModal(true)}
+              className="w-9 h-9 rounded-full flex items-center justify-center theme-text-secondary cursor-pointer"
+              title="Sohbet Ayarları"
+            >
+              <MoreVertical className="w-5 h-5" />
+            </button>
+          </div>
         </div>
+        <VoiceChannelBar />
       </div>
 
       {/* Delete Notice Toast (15-min limit) */}
@@ -1041,7 +1070,7 @@ export const ChatPage: React.FC = () => {
         onWheel={handleWheel}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
-        className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-1 relative [overflow-anchor:none]"
+        className="flex-1 overflow-y-auto px-3 py-2 space-y-1 relative [overflow-anchor:none]"
       >
         {/* Loading Spinner */}
         {isLoading && (
@@ -1067,11 +1096,9 @@ export const ChatPage: React.FC = () => {
         {/* Empty State */}
         {!isLoading && messages.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center px-4">
-            <div className="w-16 h-16 rounded-3xl bg-rose-100/80 text-rose-600 flex items-center justify-center mb-3 shadow-inner">
-              <Sparkles className="w-8 h-8" />
-            </div>
-            <h3 className="font-black text-gray-800 text-base">Sohbete İlk Mesajı Atın! ❤️</h3>
-            <p className="text-xs text-gray-500 mt-1 max-w-xs leading-relaxed">
+            <Logo size="lg" className="mb-3" />
+            <h3 className="font-black theme-text-primary text-base">Sohbete İlk Mesajı Atın</h3>
+            <p className="text-xs theme-text-secondary mt-1 max-w-xs leading-relaxed">
               Ailenizle günaydınlaşın, fotoğraflar, anketler veya sıcacık bir GIF göndererek neşelendirin.
             </p>
           </div>

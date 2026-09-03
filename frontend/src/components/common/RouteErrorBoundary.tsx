@@ -1,6 +1,7 @@
 import React from 'react';
 import * as Sentry from '@sentry/react';
 import { AlertCircle } from 'lucide-react';
+import { Logo } from '../branding/Logo';
 
 const Fallback: React.FC<{ error: unknown; resetError(): void }> = ({ error, resetError }) => {
   const message = error instanceof Error ? error.message : 'Bilinmeyen bir hata oluştu.';
@@ -8,6 +9,7 @@ const Fallback: React.FC<{ error: unknown; resetError(): void }> = ({ error, res
   return (
     <div className="m-3 p-4 rounded-2xl border theme-border theme-surface space-y-2">
       <div className="flex items-center gap-2 font-black text-sm theme-text-primary">
+        <Logo size="xs" />
         <AlertCircle className="w-4 h-4 text-rose-500" />
         <span>Bu sayfa yüklenemedi</span>
       </div>

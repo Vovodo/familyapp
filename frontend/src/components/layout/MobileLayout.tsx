@@ -11,7 +11,10 @@ import { RouteErrorBoundary } from '../common/RouteErrorBoundary';
 import { notificationService } from '../../services/notificationService';
 import { useFamily } from '../../contexts/FamilyContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { Loader2, Heart, WifiOff, RefreshCw } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
+import { Logo } from '../branding/Logo';
+import { BrandLoading } from '../branding/BrandLoading';
+import { VoiceChannelDock } from '../chat/VoiceChannelDock';
 
 interface MobileLayoutProps {
   showHeader?: boolean;
@@ -61,17 +64,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   }, [location.pathname, navigate]);
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-warm-50 flex flex-col items-center justify-center space-y-3">
-        <div className="w-16 h-16 rounded-3xl bg-family-100 flex items-center justify-center text-family-600 shadow-md animate-bounce">
-          <Heart className="w-8 h-8 fill-family-500 text-family-500" />
-        </div>
-        <div className="flex items-center gap-2 text-sm font-bold text-gray-700">
-          <Loader2 className="w-4 h-4 animate-spin text-family-600" />
-          <span>Aile Verileri Yükleniyor...</span>
-        </div>
-      </div>
-    );
+    return <BrandLoading message="Aile Verileri Yükleniyor..." />;
   }
 
   // The membership list never arrived, so we cannot tell an empty account apart
@@ -88,9 +81,9 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
     };
 
     return (
-      <div className="min-h-screen bg-warm-50 flex flex-col items-center justify-center px-6 space-y-4 text-center">
-        <div className="w-16 h-16 rounded-3xl bg-amber-100 flex items-center justify-center text-amber-600 shadow-md">
-          <WifiOff className="w-8 h-8" />
+      <div className="min-h-screen theme-bg flex flex-col items-center justify-center px-6 space-y-4 text-center">
+        <div className="w-16 h-16 rounded-3xl bg-amber-100 flex items-center justify-center shadow-md overflow-hidden">
+          <Logo size="md" />
         </div>
         <div className="space-y-1">
           <h1 className="text-lg font-black text-gray-900">Aile bilgileriniz alınamadı</h1>
@@ -125,7 +118,10 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   }
 
   const isChat = location.pathname === '/chat';
+  const isWatchRoom = /^\/watch-party\/[^/]+/.test(location.pathname);
+  const isDrawGame = location.pathname === '/games/draw';
   const hasFamily = !!currentFamily;
+  const lockMain = isChat || isWatchRoom || isDrawGame;
 
   return (
     <div className="flex flex-col h-screen w-full theme-bg theme-text-primary relative shadow-2xl overflow-hidden transition-colors duration-200">
@@ -133,9 +129,9 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
       {hasFamily && <PermissionAssistantModal />}
       <HeartCelebrationOverlay />
       <OfflineBanner />
-      {showHeader && <Header />}
+      {showHeader && !isWatchRoom && !isDrawGame && !isChat && <Header />}
       
-      <main className={`flex-1 flex flex-col ${isChat ? 'overflow-hidden pb-16' : hasFamily ? 'overflow-y-auto pb-20' : 'overflow-y-auto pb-6'}`}>
+      <main className={`flex-1 flex flex-col ${lockMain ? (isDrawGame ? 'overflow-hidden pb-0' : 'overflow-hidden pb-16') : hasFamily ? 'overflow-y-auto pb-20' : 'overflow-y-auto pb-6'}`}>
         {!hasFamily && location.pathname !== '/' ? (
           <Navigate to="/" replace />
         ) : (
@@ -145,7 +141,8 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         )}
       </main>
 
-      {showBottomNav && hasFamily && <BottomNav />}
+      {showBottomNav && hasFamily && !isDrawGame && <BottomNav />}
+      {hasFamily && <VoiceChannelDock />}
     </div>
   );
 };

@@ -307,6 +307,7 @@ export interface DrawingGameState {
   round_started_at: string | null;
   round_ends_at: string | null;
   seconds_left: number | null;
+  countdown_left?: number | null;
   solved_by_user_id: string | null;
   solved_by_name: string | null;
   stroke_seq: number;
@@ -320,6 +321,7 @@ export interface DrawingGameState {
   pool_size: number;
   my_words_seen: number;
   online_count?: number;
+  started_round?: boolean;
 }
 
 export type WatchPlaybackState = 'idle' | 'playing' | 'paused' | 'ended';
@@ -382,6 +384,16 @@ export interface WatchChatMessage {
   created_at: string;
 }
 
+export interface WatchReactionEvent {
+  id: string;
+  room_id: string;
+  user_id: string;
+  name: string;
+  emoji: string;
+  x: number;
+  at: number;
+}
+
 export interface DrawingStrokeRecord {
   seq: number;
   round_number: number;
@@ -431,4 +443,24 @@ export interface AdminDashboardData {
     debug: boolean;
     cors_origins: string[];
   };
+}
+
+export interface VoiceParticipant {
+  user_id: string;
+  name: string;
+  avatar_url?: string | null;
+  muted: boolean;
+  speaking?: boolean;
+  is_self: boolean;
+  joined_at?: string;
+}
+
+export interface VoiceChannelState {
+  family_id: string;
+  family_name: string;
+  participants: VoiceParticipant[];
+  participant_count: number;
+  self_in_channel: boolean;
+  self_muted: boolean;
+  server_now: string;
 }

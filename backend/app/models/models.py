@@ -613,3 +613,22 @@ class WatchRoomMessage(Base):
     room = relationship("WatchRoom", back_populates="messages")
     user = relationship("User", foreign_keys=[user_id], lazy="joined")
 
+
+class VoiceChannelParticipant(Base):
+    """Aile başına tek ses kanalı. Satır = şu anda odada olan üye."""
+    __tablename__ = "voice_channel_participants"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    muted = Column(Boolean, default=False, nullable=False)
+    last_heartbeat_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
+    joined_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("family_id", "user_id", name="uq_voice_channel_participant"),
+        Index("idx_voice_channel_family_heartbeat", "family_id", "last_heartbeat_at"),
+    )
+
+    user = relationship("User", foreign_keys=[user_id])
+

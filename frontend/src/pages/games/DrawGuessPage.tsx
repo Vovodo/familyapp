@@ -2,17 +2,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
-  Brush,
-  Check,
   Eraser,
   Loader2,
   LogOut,
-  Palette,
+  MessageCircle,
+  Music2,
+  Pencil,
   Play,
-  RefreshCw,
   Send,
+  Settings,
   Shuffle,
-  Timer,
   Trash2,
   Trophy,
   Undo2,
@@ -30,6 +29,8 @@ import {
   NormalizedStroke,
 } from '../../components/games/DrawingCanvas';
 import { DrawingConfetti } from '../../components/games/DrawingConfetti';
+import { Logo } from '../../components/branding/Logo';
+import { BrandLoading } from '../../components/branding/BrandLoading';
 import { DrawingGameState, DrawingGuessItem, DrawingPlayer, DrawingStrokesResponse } from '../../types';
 
 const PALETTE = [
@@ -40,7 +41,7 @@ const PALETTE = [
   { color: '#22c55e', label: 'Yeşil' },
   { color: '#0ea5e9', label: 'Mavi' },
   { color: '#8b5cf6', label: 'Mor' },
-  { color: '#78350f', label: 'Kahve' },
+  { color: '#ffffff', label: 'Beyaz' },
 ];
 
 const BRUSHES = [
@@ -51,6 +52,9 @@ const BRUSHES = [
 ];
 
 const ERASER_COLOR = '#ffffff';
+const COUNTDOWN_SECONDS = 3;
+const AUTO_NEXT_ROUND_MS = 2600;
+const ROUND_SECONDS = 150;
 
 const CATEGORY_LABELS: Record<string, string> = {
   hayvanlar: 'Hayvanlar',
@@ -74,40 +78,11 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const categoryLabel = (key?: string | null) => (key ? CATEGORY_LABELS[key] || key : '');
 
-const PlayerFace: React.FC<{
-  name: string;
-  avatarUrl?: string | null;
-  size?: 'sm' | 'md';
-  badge?: string;
-}> = ({ name, avatarUrl, size = 'md', badge }) => {
-  const dim = size === 'sm' ? 'w-9 h-9 text-[11px]' : 'w-14 h-14 text-base';
-  return (
-    <div className="flex flex-col items-center gap-1 min-w-[3.5rem] max-w-[4.5rem]">
-      <div className="relative">
-        {avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt={name}
-            className={`${dim} rounded-full object-cover border-2 border-white shadow-md bg-white`}
-          />
-        ) : (
-          <div
-            className={`${dim} rounded-full bg-fuchsia-100 text-fuchsia-700 font-black flex items-center justify-center border-2 border-white shadow-md`}
-          >
-            {(name[0] || '?').toUpperCase()}
-          </div>
-        )}
-        {badge && (
-          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-[8px] font-black px-1.5 py-px rounded-md bg-fuchsia-600 text-white whitespace-nowrap">
-            {badge}
-          </span>
-        )}
-      </div>
-      <span className="text-[11px] font-bold theme-text-primary truncate w-full text-center leading-tight">
-        {name}
-      </span>
-    </div>
-  );
+const formatClock = (total: number) => {
+  const safe = Math.max(0, total);
+  const m = Math.floor(safe / 60);
+  const s = safe % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 };
 
 export const DrawGuessPage: React.FC = () => {
@@ -124,6 +99,8 @@ export const DrawGuessPage: React.FC = () => {
   const seenGuessIdsRef = useRef<Set<string>>(new Set());
   const pendingJoinRef = useRef(false);
   const sendingGuessRef = useRef(false);
+  const autoNextKeyRef = useRef<string | null>(null);
+  const handleNextRoundRef = useRef<() => void>(() => {});
 
   const [state, setState] = useState<DrawingGameState | null>(drawingSession?.state ?? null);
   const [isLoading, setIsLoading] = useState(!drawingSession?.state);
@@ -134,7 +111,10 @@ export const DrawGuessPage: React.FC = () => {
   const [brushWidth, setBrushWidth] = useState(BRUSHES[1].width);
   const [isEraser, setIsEraser] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
+  const [showDrawerMenu, setShowDrawerMenu] = useState(false);
+  const [guessToasts, setGuessToasts] = useState<DrawingGuessItem[]>([]);
 
   stateRef.current = state;
 
@@ -142,6 +122,7 @@ export const DrawGuessPage: React.FC = () => {
     state?.status === 'drawing' && !!user?.id && state.drawer_user_id === user.id;
   const activeColor = isEraser ? ERASER_COLOR : color;
   const activeWidth = isEraser ? Math.max(brushWidth, 80) : brushWidth;
+  const inCountdown = state?.status === 'drawing' && countdown !== null && countdown > 0;
 
   const applyState = useCallback(
     (next: DrawingGameState) => {
@@ -220,11 +201,15 @@ export const DrawGuessPage: React.FC = () => {
         return { ...prev, guesses: [...withoutTempDup, guess] };
       });
       if (guess.is_correct) celebrateCorrect();
+      if (stateRef.current?.drawer_user_id === user?.id) {
+        setGuessToasts((prev) => [...prev.slice(-3), guess]);
+        window.setTimeout(() => {
+          setGuessToasts((prev) => prev.filter((item) => item.id !== guess.id));
+        }, 2800);
+      }
     },
-    [celebrateCorrect]
+    [celebrateCorrect, user?.id]
   );
-
-  // ------------------------------------------------------------ veri çekme
 
   const fetchState = useCallback(async (): Promise<DrawingGameState | null> => {
     try {
@@ -238,7 +223,6 @@ export const DrawGuessPage: React.FC = () => {
     }
   }, [applyState]);
 
-  /** Tuvali sunucudaki kalıcı kayıttan baştan kurar (katılma / yenileme / kopma). */
   const resyncCanvas = useCallback(async () => {
     try {
       const res = await api.get<DrawingStrokesResponse>('/games/drawing/strokes');
@@ -247,7 +231,6 @@ export const DrawGuessPage: React.FC = () => {
         .map((s) => ({ c: s.payload!.c, w: s.payload!.w, p: s.payload!.p }));
       canvasRef.current?.replaceAll(strokes);
     } catch {
-      // Aktif tur yoksa (404) tuval boş kalır; hata göstermeye gerek yok.
       canvasRef.current?.clearAll();
     }
   }, []);
@@ -267,12 +250,9 @@ export const DrawGuessPage: React.FC = () => {
     };
   }, [fetchState, resyncCanvas, currentFamily?.id]);
 
-  // ------------------------------------------------------------ realtime
-
   const handleStrokeDelta = useCallback((payload: StrokeDeltaPayload) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    // Başlık mesajı kaybolsa bile çizgi çizilebilsin diye idempotent başlatma.
     canvas.beginRemoteStroke(payload.sid, payload.c || '#111827', payload.w || 36);
     if (payload.p.length > 0) {
       canvas.appendRemotePoints(payload.sid, payload.p);
@@ -358,25 +338,26 @@ export const DrawGuessPage: React.FC = () => {
     seenGuessIdsRef.current = new Set((stateRef.current?.guesses || []).map((item) => item.id));
   }, [state?.round_number]);
 
-  // ------------------------------------------------------------ tur sayacı
-
   useEffect(() => {
-    if (state?.status !== 'drawing' || state.seconds_left === null) {
+    if (state?.status !== 'drawing' || !state.round_started_at || !state.round_ends_at) {
       setSecondsLeft(null);
+      setCountdown(null);
       revealSentRef.current = false;
       return;
     }
 
     revealSentRef.current = false;
-    const deadline = Date.now() + (state.seconds_left ?? 0) * 1000;
-    setSecondsLeft(state.seconds_left);
+    const started = new Date(state.round_started_at).getTime();
+    const ends = new Date(state.round_ends_at).getTime();
 
-    const tick = setInterval(() => {
-      const remaining = Math.max(0, Math.round((deadline - Date.now()) / 1000));
-      setSecondsLeft(remaining);
+    const tick = () => {
+      const now = Date.now();
+      const cd = Math.max(0, Math.ceil((started + COUNTDOWN_SECONDS * 1000 - now) / 1000));
+      setCountdown(cd > 0 ? cd : null);
+      const remaining = Math.max(0, Math.round((ends - now) / 1000));
+      setSecondsLeft(cd > 0 ? ROUND_SECONDS : remaining);
 
-      // Süre bitince turu yalnızca çizen kapatır; sunucu zaten idempotent.
-      if (remaining === 0 && !revealSentRef.current && stateRef.current?.drawer_user_id === user?.id) {
+      if (cd <= 0 && remaining <= 0 && !revealSentRef.current && stateRef.current?.drawer_user_id === user?.id) {
         revealSentRef.current = true;
         void api
           .post('/games/drawing/round/reveal')
@@ -386,12 +367,12 @@ export const DrawGuessPage: React.FC = () => {
           })
           .catch(() => {});
       }
-    }, 1000);
+    };
 
-    return () => clearInterval(tick);
-  }, [state?.status, state?.seconds_left, state?.round_number, fetchState, user?.id]);
-
-  // ------------------------------------------------------------ eylemler
+    tick();
+    const timer = window.setInterval(tick, 200);
+    return () => window.clearInterval(timer);
+  }, [state?.status, state?.round_started_at, state?.round_ends_at, state?.round_number, fetchState, user?.id]);
 
   const runAction = useCallback(
     async (action: () => Promise<void>) => {
@@ -465,17 +446,16 @@ export const DrawGuessPage: React.FC = () => {
 
   const handleNextRound = () =>
     runAction(async () => {
-      const prevRound = stateRef.current?.round_number;
-      const prevStatus = stateRef.current?.status;
       const res = await api.post<DrawingGameState>('/games/drawing/round/next');
       applyState(res.data);
-      const startedFresh =
-        prevStatus !== 'drawing' || res.data.round_number !== prevRound;
-      if (startedFresh) {
+      if (res.data.started_round) {
         canvasRef.current?.clearAll();
         syncRef.current?.broadcastGameEvent('round_started');
+        setShowDrawerMenu(false);
       }
     });
+
+  handleNextRoundRef.current = handleNextRound;
 
   const handleSkipWord = () =>
     runAction(async () => {
@@ -484,6 +464,7 @@ export const DrawGuessPage: React.FC = () => {
       applyState(res.data);
       syncRef.current?.broadcastCanvasCleared();
       syncRef.current?.broadcastGameEvent('word_skipped');
+      setShowDrawerMenu(false);
     });
 
   const handlePassTurn = () =>
@@ -493,6 +474,7 @@ export const DrawGuessPage: React.FC = () => {
       applyState(res.data);
       syncRef.current?.broadcastCanvasCleared();
       syncRef.current?.broadcastGameEvent('turn_passed');
+      setShowDrawerMenu(false);
     });
 
   const handleRevealRound = () =>
@@ -500,6 +482,7 @@ export const DrawGuessPage: React.FC = () => {
       const res = await api.post<DrawingGameState>('/games/drawing/round/reveal');
       applyState(res.data);
       syncRef.current?.broadcastGameEvent('round_end');
+      setShowDrawerMenu(false);
     });
 
   const handleClearCanvas = () =>
@@ -515,12 +498,13 @@ export const DrawGuessPage: React.FC = () => {
       canvasRef.current?.clearAll();
       applyState(res.data);
       syncRef.current?.broadcastGameEvent('game_finished');
+      setShowDrawerMenu(false);
     });
 
   const handleGuess = async (event: React.FormEvent) => {
     event.preventDefault();
     const text = guessText.trim();
-    if (!text || sendingGuessRef.current || !user) return;
+    if (!text || sendingGuessRef.current || !user || inCountdown) return;
     setGuessText('');
     sendingGuessRef.current = true;
 
@@ -551,8 +535,6 @@ export const DrawGuessPage: React.FC = () => {
     }
   };
 
-  // ------------------------------------------------------------ çizim köprüsü
-
   const handleStrokeStart = useCallback(
     (strokeId: string, strokeColor: string, strokeWidth: number) => {
       syncRef.current?.beginStroke(strokeId, strokeColor, strokeWidth);
@@ -568,12 +550,29 @@ export const DrawGuessPage: React.FC = () => {
     syncRef.current?.endStroke(strokeId, stroke);
   }, []);
 
-  // ------------------------------------------------------------ görünüm
-
-  const scoreboard = useMemo(
-    () => [...(state?.players || [])].sort((a, b) => b.score - a.score),
+  const onlineCount = useMemo(
+    () => (state?.players || []).filter((p) => p.is_online !== false).length,
     [state?.players]
   );
+
+  useEffect(() => {
+    if (state?.status !== 'round_end' || !state.is_player) return;
+    if (onlineCount < (state.min_players || 2)) return;
+    const onlineIds = (state.players || [])
+      .filter((p) => p.is_online !== false)
+      .map((p) => p.user_id)
+      .sort();
+    const isLeader = onlineIds[0] === user?.id;
+    const delay = isLeader ? AUTO_NEXT_ROUND_MS : AUTO_NEXT_ROUND_MS + 1800;
+    const key = `${state.game_id}-${state.round_number}`;
+    const timer = window.setTimeout(() => {
+      if (autoNextKeyRef.current === key) return;
+      if (stateRef.current?.status !== 'round_end') return;
+      autoNextKeyRef.current = key;
+      handleNextRoundRef.current();
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [state?.status, state?.round_number, state?.game_id, state?.is_player, onlineCount, state?.min_players, state?.players, user?.id]);
 
   const avatarByUserId = useMemo(() => {
     const map = new Map<string, string>();
@@ -590,231 +589,272 @@ export const DrawGuessPage: React.FC = () => {
 
   const enoughPlayers = (state?.players.length || 0) >= (state?.min_players || 2);
   const enoughFamilyMembers = (state?.family_member_count || 0) >= (state?.min_players || 2);
-  const recentGuesses = (state?.guesses || []).slice(-8);
+  const recentGuesses = (state?.guesses || []).slice(-10);
+  const myScore = state?.players.find((p) => p.user_id === user?.id)?.score ?? 0;
+  const familyName = currentFamily?.name || 'Aile';
+  const selfInitial = (user?.full_name?.[0] || '?').toUpperCase();
+  const slotCount = Math.max(4, state?.players.length || 0);
+  const isPlay =
+    state?.status === 'drawing' || state?.status === 'round_end';
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[70vh] gap-3">
-        <Loader2 className="w-6 h-6 animate-spin text-family-600" />
-        <span className="text-xs font-bold theme-text-secondary">Oyun yükleniyor...</span>
+      <div className="h-full" style={{ background: '#120F1D' }}>
+        <BrandLoading fullScreen={false} message="Oyun yükleniyor..." />
       </div>
     );
   }
 
   return (
-    <div className="p-4 space-y-3 w-full max-w-2xl mx-auto">
+    <div
+      className="relative flex flex-col h-full min-h-0 w-full overflow-hidden"
+      style={{ background: '#120F1D', color: '#F8F7FC' }}
+    >
       <DrawingConfetti active={showConfetti} />
-      <div className="flex items-center gap-2 flex-wrap">
+      <div
+        className={`flex items-center gap-2 px-3 pt-2 pb-2 flex-shrink-0 ${isPlay ? '' : 'px-4'}`}
+        style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top, 0px))' }}
+      >
         <button
           type="button"
           onClick={() => navigate('/games')}
-          className="w-9 h-9 rounded-2xl theme-surface-secondary flex items-center justify-center theme-text-secondary hover:opacity-80 transition cursor-pointer"
+          className="w-9 h-9 rounded-2xl bg-white/8 flex items-center justify-center text-white/80 hover:bg-white/14 transition cursor-pointer"
           aria-label="Oyunlara dön"
         >
           <ArrowLeft className="w-4 h-4" />
         </button>
-        <div className="min-w-0">
-          <h1 className="text-base font-black theme-text-primary truncate">Çiz ve Tahmin Et</h1>
-          <p className="text-[11px] font-medium theme-text-secondary">
-            {state?.status === 'drawing'
-              ? `${state.round_number}. tur · çizen: ${state.drawer_name}`
-              : `${state?.pool_size || 0} kelimelik havuz`}
-          </p>
-        </div>
-        {state?.status === 'drawing' && secondsLeft !== null && (
-          <div
-            className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-black ${
-              secondsLeft <= 15 ? 'bg-rose-100 text-rose-700' : 'theme-surface-secondary theme-text-primary'
-            }`}
-          >
-            <Timer className="w-3.5 h-3.5" />
-            <span>{secondsLeft}s</span>
-          </div>
-        )}
-        {state?.is_player && state.status !== 'none' && (
-          <button
-            type="button"
-            onClick={handleLeaveGame}
-            disabled={isBusy}
-            className={`${state?.status === 'drawing' && secondsLeft !== null ? '' : 'ml-auto'} px-2.5 py-1.5 rounded-2xl bg-rose-50 text-rose-700 text-[11px] font-black flex items-center gap-1 disabled:opacity-50 cursor-pointer`}
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>{state.status === 'lobby' ? 'Lobiden ayrıl' : 'Oyundan ayrıl'}</span>
-          </button>
+        {isPlay ? (
+          <>
+            <Logo size="xs" />
+            <span className="text-xs font-black text-white/80">Tur {state?.round_number || 1}</span>
+            {secondsLeft !== null && !inCountdown && (
+              <span className="ml-1 px-2.5 py-1 rounded-full bg-violet-600 text-[11px] font-black">
+                {formatClock(secondsLeft)}
+              </span>
+            )}
+            <span className="ml-auto text-[11px] font-black text-white/70">Puan: {myScore}</span>
+            {isDrawer && (
+              <button
+                type="button"
+                onClick={() => setShowDrawerMenu((v) => !v)}
+                className="w-9 h-9 rounded-2xl bg-white/8 flex items-center justify-center text-white/80 cursor-pointer"
+                aria-label="Ayarlar"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="min-w-0 flex-1 text-center">
+              <p className="text-sm font-black truncate">{familyName}</p>
+            </div>
+            <div className="w-9 h-9 rounded-2xl bg-violet-600 text-white font-black flex items-center justify-center text-sm">
+              {selfInitial}
+            </div>
+          </>
         )}
       </div>
 
       {error && (
-        <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs font-bold text-rose-700">
+        <div className="mx-3 mb-2 p-3 bg-rose-500/15 border border-rose-400/30 rounded-2xl text-xs font-bold text-rose-200">
           {error}
         </div>
       )}
 
-      {/* Oyun yok: başlatma ekranı */}
       {state?.status === 'none' && (
-        <div className="theme-surface rounded-3xl p-6 border theme-border text-center space-y-4">
-          <div className="w-16 h-16 rounded-3xl bg-fuchsia-100 text-fuchsia-600 mx-auto flex items-center justify-center">
-            <Palette className="w-8 h-8" />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-lg font-black theme-text-primary">Yeni oyun kur</h2>
-            <p className="text-xs theme-text-secondary leading-relaxed max-w-sm mx-auto">
-              Bir kişi kelimeyi çizer, diğerleri tahmin eder. Oyun için en az{' '}
-              {state.min_players} aile üyesi gerekiyor.
-            </p>
-          </div>
-          {!enoughFamilyMembers && (
-            <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-2xl p-2.5">
-              Ailenizde şu an {state.family_member_count} üye var. Oynamak için önce başka bir üyeyi
-              davet edin.
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={handleStartGame}
-            disabled={isBusy}
-            className="w-full py-3.5 bg-fuchsia-600 hover:bg-fuchsia-700 active:scale-98 text-white font-black rounded-2xl text-sm flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-          >
-            {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            <span>Oyunu Başlat</span>
-          </button>
-        </div>
-      )}
-
-      {/* Lobi */}
-      {state?.status === 'lobby' && (
-        <div className="theme-surface rounded-3xl p-5 border theme-border space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Users className="w-4 h-4 text-fuchsia-600" />
-              <h2 className="text-sm font-black theme-text-primary">
-                Odadaki oyuncular ({state.players.length})
-              </h2>
+        <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-3">
+          <LobbyChrome
+            poolSize={state.pool_size}
+            onLeave={state.is_player ? handleLeaveGame : undefined}
+            leaveBusy={isBusy}
+          />
+          <div className="rounded-3xl bg-white/6 border border-white/8 p-6 text-center space-y-4">
+            <Logo size="lg" className="mx-auto" />
+            <div className="space-y-1">
+              <h2 className="text-lg font-black">Yeni oyun kur</h2>
+              <p className="text-xs text-white/55 leading-relaxed max-w-sm mx-auto">
+                Bir kişi kelimeyi çizer, diğerleri tahmin eder. En az {state.min_players} aile üyesi gerekir.
+              </p>
             </div>
-            <span className="text-[10px] font-bold theme-text-secondary">
-              En az {state.min_players} · üst sınır yok
-            </span>
-          </div>
-          <div className="flex flex-row flex-wrap justify-center gap-3 py-1">
-            {state.players.length === 0 ? (
-              <p className="text-xs theme-text-secondary">Henüz kimse yok. İlk sen katıl.</p>
-            ) : (
-              state.players.map((player) => (
-                <PlayerFace
-                  key={player.user_id}
-                  name={player.name}
-                  avatarUrl={playerAvatar(player)}
-                  badge={player.user_id === user?.id ? 'sen' : undefined}
-                />
-              ))
-            )}
-          </div>
-          <p className="text-xs theme-text-secondary leading-relaxed text-center">
-            {enoughPlayers
-              ? 'Herkes hazır. Turu başlattığınızda sistem çizecek kişiyi ve kelimeyi seçer.'
-              : `Turun başlaması için en az ${state.min_players} oyuncu gerekiyor. Diğer üyeler bu sayfadan katılmalı.`}
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {!state.is_player && (
-              <button
-                type="button"
-                onClick={handleJoinGame}
-                className="py-3 theme-surface-secondary hover:opacity-80 theme-text-primary font-bold rounded-2xl text-xs cursor-pointer"
-              >
-                Oyuna Katıl
-              </button>
-            )}
-            {state.is_player && (
-              <button
-                type="button"
-                onClick={handleLeaveGame}
-                disabled={isBusy}
-                className="py-3 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-2xl text-xs disabled:opacity-50 cursor-pointer"
-              >
-                Lobiden Ayrıl
-              </button>
+            {!enoughFamilyMembers && (
+              <p className="text-[11px] font-bold text-amber-200 bg-amber-500/15 border border-amber-400/20 rounded-2xl p-2.5">
+                Ailenizde şu an {state.family_member_count} üye var. Oynamak için başka bir üyeyi davet edin.
+              </p>
             )}
             <button
               type="button"
-              onClick={handleNextRound}
-              disabled={isBusy || !enoughPlayers}
-              className="py-3 font-black rounded-2xl text-xs flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer bg-fuchsia-600 hover:bg-fuchsia-700 text-white"
+              onClick={handleStartGame}
+              disabled={isBusy}
+              className="w-full py-3.5 bg-violet-600 hover:bg-violet-500 active:scale-98 text-white font-black rounded-2xl text-sm flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
             >
-              <Play className="w-4 h-4" />
-              <span>Turu Başlat</span>
+              {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              <span>Oyunu Başlat</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* Kelime şeridi */}
-      {(state?.status === 'drawing' || state?.status === 'round_end') && (
-        <div className="theme-surface rounded-3xl px-4 py-3 border theme-border text-center space-y-0.5">
-          {state.status === 'drawing' && isDrawer && (
-            <>
-              <p className="text-[10px] font-black uppercase tracking-wider text-fuchsia-600">
-                Çizeceğin kelime
-              </p>
-              <p className="text-2xl font-black theme-text-primary tracking-tight">{state.word}</p>
-              <p className="text-[11px] theme-text-secondary">
-                Kimseye söyleme, sadece çiz.
-                {state.word_category ? ` Kategori: ${categoryLabel(state.word_category)}` : ''}
-              </p>
-            </>
+      {state?.status === 'lobby' && (
+        <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-3">
+          <LobbyChrome
+            poolSize={state.pool_size}
+            onLeave={state.is_player ? handleLeaveGame : undefined}
+            leaveBusy={isBusy}
+          />
+          <PlayerSlots
+            players={state.players}
+            slotCount={slotCount}
+            userId={user?.id}
+            playerAvatar={playerAvatar}
+          />
+          <HowToPlay />
+          {!state.is_player && (
+            <button
+              type="button"
+              onClick={handleJoinGame}
+              className="w-full py-3.5 bg-white/10 hover:bg-white/14 text-white font-black rounded-2xl text-sm cursor-pointer"
+            >
+              Oyuna Katıl
+            </button>
           )}
-          {state.status === 'drawing' && !isDrawer && (
-            <>
-              <p className="text-[10px] font-black uppercase tracking-wider theme-text-secondary">
-                {state.drawer_name} çiziyor
-              </p>
-              <p className="text-xl font-black theme-text-primary tracking-[0.25em]">
-                {state.word_masked}
-              </p>
-              <p className="text-[11px] theme-text-secondary">
-                {state.word_length} harf
-                {state.word_category ? ` · ${categoryLabel(state.word_category)}` : ''}
-              </p>
-            </>
-          )}
-          {state.status === 'round_end' && (
-            <>
-              <p className="text-[10px] font-black uppercase tracking-wider theme-text-secondary">
-                {state.solved_by_name ? `${state.solved_by_name} buldu!` : 'Kimse bulamadı'}
-              </p>
-              <p className="text-2xl font-black theme-text-primary tracking-tight">
-                {state.revealed_word}
-              </p>
-            </>
+          <button
+            type="button"
+            onClick={handleNextRound}
+            disabled={isBusy || !enoughPlayers}
+            className="w-full py-3.5 bg-violet-600 hover:bg-violet-500 active:scale-98 text-white font-black rounded-2xl text-sm flex items-center justify-center gap-2 disabled:opacity-40 cursor-pointer"
+          >
+            {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            <span>Oyunu Başlat</span>
+          </button>
+          {!enoughPlayers && (
+            <p className="text-[11px] text-center text-white/45 font-bold">
+              Turun başlaması için en az {state.min_players} oyuncu odada olmalı.
+            </p>
           )}
         </div>
       )}
 
-      {/* Tuval + canlı tahmin overlay — tuval her zaman beyaz */}
-      {(state?.status === 'drawing' || state?.status === 'round_end') && (
-        <div className="md:grid md:grid-cols-[minmax(0,1fr)_240px] md:gap-3 md:items-stretch">
-          <div
-            className="relative rounded-3xl overflow-hidden border-2 border-gray-200 shadow-lg bg-white h-[38vh] min-h-[220px] max-h-[360px] md:h-auto md:min-h-[320px] md:max-h-none md:aspect-[4/3]"
-            style={{ backgroundColor: '#ffffff' }}
-          >
+      {isPlay && state && (
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          <div className="relative flex-1 min-h-0 bg-white">
             <DrawingCanvas
               ref={canvasRef}
               fillHeight
-              interactive={state.status === 'drawing' && isDrawer}
+              interactive={state.status === 'drawing' && isDrawer && !inCountdown}
               color={activeColor}
               width={activeWidth}
               onStrokeStart={handleStrokeStart}
               onLivePoints={handleLivePoints}
               onStrokeEnd={handleStrokeEnd}
             />
-            {recentGuesses.length > 0 && (
-              <div className="absolute top-2 right-2 left-[42%] md:hidden max-h-[46%] overflow-y-auto space-y-1 pointer-events-none">
-                {recentGuesses.slice(-5).map((guess) => (
+
+            {state.status === 'drawing' && !inCountdown && (
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 pointer-events-none">
+                <div className="px-3 py-1 rounded-full bg-[#120F1D]/80 text-white text-[11px] font-black shadow-lg">
+                  {isDrawer ? state.word : state.word_masked}
+                </div>
+              </div>
+            )}
+
+            {isDrawer && state.status === 'drawing' && !inCountdown && (
+              <>
+                <div className="absolute left-2 top-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1 px-1.5 py-2 rounded-full bg-[#1A1528]/92 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => setIsEraser(false)}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center cursor-pointer ${
+                      !isEraser ? 'bg-violet-600 text-white' : 'text-white/70'
+                    }`}
+                    aria-label="Kalem"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEraser(true)}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center cursor-pointer ${
+                      isEraser ? 'bg-violet-600 text-white' : 'text-white/70'
+                    }`}
+                    aria-label="Silgi"
+                  >
+                    <Eraser className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearCanvas}
+                    disabled={isBusy}
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-rose-300 cursor-pointer disabled:opacity-50"
+                    aria-label="Temizle"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-3 py-2 rounded-full bg-[#1A1528]/92 shadow-xl max-w-[92%]">
+                  {BRUSHES.map((brush) => (
+                    <button
+                      key={brush.width}
+                      type="button"
+                      onClick={() => setBrushWidth(brush.width)}
+                      className="flex items-center justify-center cursor-pointer"
+                      aria-label={brush.label}
+                    >
+                      <span
+                        className={`rounded-full ${brushWidth === brush.width ? 'ring-2 ring-violet-400' : 'ring-1 ring-white/20'}`}
+                        style={{
+                          width: 8 + brush.width / 28,
+                          height: 8 + brush.width / 28,
+                          backgroundColor: isEraser ? '#ffffff' : color,
+                        }}
+                      />
+                    </button>
+                  ))}
+                  <span className="w-px h-5 bg-white/15 mx-0.5" />
+                  {PALETTE.map((item) => (
+                    <button
+                      key={item.color}
+                      type="button"
+                      onClick={() => {
+                        setColor(item.color);
+                        setIsEraser(false);
+                      }}
+                      className={`w-6 h-6 rounded-full border-2 cursor-pointer ${
+                        !isEraser && color === item.color ? 'border-violet-400 scale-110' : 'border-white/20'
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      aria-label={item.label}
+                    />
+                  ))}
+                </div>
+
+                {guessToasts.length > 0 && (
+                  <div className="absolute top-12 right-2 z-20 w-[min(58%,13.5rem)] space-y-1.5 pointer-events-none">
+                    {guessToasts.map((guess) => (
+                      <div
+                        key={guess.id}
+                        className={`guess-toast-in px-2.5 py-1.5 rounded-xl text-[11px] shadow-lg ${
+                          guess.is_correct
+                            ? 'bg-emerald-500/90 text-white font-black'
+                            : 'bg-[#1A1528]/80 text-white/95'
+                        }`}
+                      >
+                        <span className="font-black opacity-80">{guess.name}: </span>
+                        <span>{guess.is_correct ? 'doğru!' : guess.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {!isDrawer && recentGuesses.length > 0 && (
+              <div className="absolute top-12 right-2 left-[38%] md:left-auto md:w-64 max-h-[42%] overflow-y-auto space-y-1 pointer-events-none">
+                {recentGuesses.slice(-6).map((guess) => (
                   <div
                     key={guess.id}
                     className={`px-2 py-1 rounded-xl text-[11px] shadow-sm ${
-                      guess.is_correct
-                        ? 'bg-emerald-500 text-white font-black'
-                        : 'bg-white/90 text-gray-800'
+                      guess.is_correct ? 'bg-emerald-500 text-white font-black' : 'bg-white/92 text-gray-800'
                     }`}
                   >
                     <span className="font-black opacity-70">{guess.name}: </span>
@@ -823,10 +863,20 @@ export const DrawGuessPage: React.FC = () => {
                 ))}
               </div>
             )}
-            {state.status === 'drawing' && !isDrawer && state.is_player && (
+
+            {isDrawer && inCountdown && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#120F1D]/78 pointer-events-none">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/45">Konu</p>
+                <p className="text-3xl font-black text-pink-400 mt-1">{state.word}</p>
+                <p className="text-6xl font-black text-white mt-6">{countdown}</p>
+                <p className="text-xs font-bold text-white/50 mt-2">Hazır olun!</p>
+              </div>
+            )}
+
+            {state.status === 'drawing' && !isDrawer && state.is_player && !inCountdown && (
               <form
                 onSubmit={handleGuess}
-                className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/35 to-transparent md:hidden"
+                className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/45 to-transparent"
               >
                 <div className="flex gap-2">
                   <input
@@ -837,12 +887,12 @@ export const DrawGuessPage: React.FC = () => {
                     maxLength={120}
                     autoComplete="off"
                     enterKeyHint="send"
-                    className="flex-1 px-3 py-2.5 bg-white border border-gray-200 rounded-2xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-fuchsia-500"
+                    className="flex-1 px-3 py-2.5 bg-white border border-gray-200 rounded-2xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500"
                   />
                   <button
                     type="submit"
                     disabled={!guessText.trim()}
-                    className="px-4 bg-fuchsia-600 hover:bg-fuchsia-700 active:scale-98 text-white font-black rounded-2xl text-sm disabled:opacity-50 cursor-pointer"
+                    className="px-4 bg-violet-600 hover:bg-violet-500 active:scale-98 text-white font-black rounded-2xl text-sm disabled:opacity-50 cursor-pointer"
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -851,230 +901,273 @@ export const DrawGuessPage: React.FC = () => {
             )}
           </div>
 
-          <div className="hidden md:flex flex-col rounded-3xl border theme-border theme-surface overflow-hidden min-h-[320px]">
-            <div className="px-3 py-2 border-b theme-border text-[10px] font-black uppercase tracking-wider theme-text-secondary">
-              Tahminler
+          {state.status === 'round_end' && (
+            <div className="flex-shrink-0 px-4 py-3 bg-emerald-500 text-white flex items-center justify-center gap-2 relative overflow-hidden">
+              <Trophy className="w-5 h-5" />
+              <p className="text-sm font-black">
+                {state.solved_by_name
+                  ? `Doğru tahmin! ${state.revealed_word}`
+                  : `Süre bitti · ${state.revealed_word}`}
+              </p>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-              {recentGuesses.length === 0 ? (
-                <p className="text-[11px] theme-text-secondary px-2 py-3">Henüz tahmin yok.</p>
-              ) : (
-                recentGuesses.map((guess) => (
-                  <div
-                    key={guess.id}
-                    className={`px-2.5 py-1.5 rounded-xl text-xs ${
-                      guess.is_correct
-                        ? 'bg-emerald-50 text-emerald-800 font-black'
-                        : 'theme-surface-secondary theme-text-primary'
-                    }`}
-                  >
-                    <span className="font-bold opacity-70">{guess.name}: </span>
-                    <span>{guess.is_correct ? 'doğru tahmin!' : guess.text}</span>
-                  </div>
-                ))
-              )}
+          )}
+        </div>
+      )}
+
+      {inCountdown && state && !isDrawer && (
+        <div className="absolute inset-0 z-30 flex flex-col" style={{ background: '#120F1D' }}>
+          <div
+            className="flex items-center gap-2 px-4 pb-2"
+            style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top, 0px))' }}
+          >
+            <button
+              type="button"
+              onClick={() => navigate('/games')}
+              className="w-9 h-9 rounded-2xl bg-white/8 flex items-center justify-center text-white/80 cursor-pointer"
+              aria-label="Oyunlara dön"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <p className="flex-1 text-center text-sm font-black truncate">{familyName}</p>
+            <div className="w-9 h-9 rounded-2xl bg-violet-600 text-white font-black flex items-center justify-center text-sm">
+              {selfInitial}
             </div>
-            {state.status === 'drawing' && !isDrawer && state.is_player && (
-              <form onSubmit={handleGuess} className="p-2 border-t theme-border flex gap-2">
-                <input
-                  type="text"
-                  value={guessText}
-                  onChange={(e) => setGuessText(e.target.value)}
-                  placeholder="Tahmin..."
-                  maxLength={120}
-                  autoComplete="off"
-                  className="flex-1 px-3 py-2 theme-surface-secondary border theme-border rounded-xl text-xs theme-text-primary focus:outline-none focus:ring-2 focus:ring-fuchsia-500"
-                />
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-3">
+            <LobbyChrome
+              poolSize={state.pool_size}
+              onLeave={state.is_player ? handleLeaveGame : undefined}
+              leaveBusy={isBusy}
+            />
+            {isDrawer && state.word && (
+              <div className="rounded-3xl bg-white/6 border border-white/8 p-5 text-center space-y-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Konu</p>
+                <p className="text-3xl font-black text-pink-400">{state.word}</p>
+                {state.word_category && (
+                  <p className="text-[11px] font-bold text-white/45">{categoryLabel(state.word_category)}</p>
+                )}
                 <button
-                  type="submit"
-                  disabled={!guessText.trim()}
-                  className="px-3 bg-fuchsia-600 text-white rounded-xl disabled:opacity-50 cursor-pointer"
+                  type="button"
+                  onClick={handleSkipWord}
+                  disabled={isBusy}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/8 text-[11px] font-bold text-white/70 cursor-pointer disabled:opacity-50"
                 >
-                  <Send className="w-3.5 h-3.5" />
+                  <Shuffle className="w-3.5 h-3.5" />
+                  Konuyu Değiştir
                 </button>
-              </form>
+              </div>
             )}
+            {!isDrawer && (
+              <div className="rounded-3xl bg-white/6 border border-white/8 p-5 text-center">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">Konu</p>
+                <p className="text-2xl font-black tracking-[0.2em] mt-2">{state.word_masked}</p>
+                <p className="text-[11px] text-white/45 mt-1">{state.drawer_name} çiziyor</p>
+              </div>
+            )}
+            <div className="rounded-3xl bg-white/6 border border-white/8 p-6 text-center space-y-3">
+              <p className="text-sm font-black text-white/80">Oyun başlıyor</p>
+              <div className="relative w-28 h-28 mx-auto">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36" aria-hidden>
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" />
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="15.5"
+                    fill="none"
+                    stroke="#A855F7"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeDasharray={`${((countdown || 0) / COUNTDOWN_SECONDS) * 97} 97`}
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-5xl font-black">
+                  {countdown}
+                </span>
+              </div>
+              <p className="text-xs font-bold text-white/50">Hazır olun!</p>
+              <div className="flex justify-center gap-1.5">
+                {[1, 2, 3].map((n) => (
+                  <span
+                    key={n}
+                    className={`w-2 h-2 rounded-full ${n <= (COUNTDOWN_SECONDS - (countdown || 0) + 1) ? 'bg-violet-500' : 'bg-white/15'}`}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="rounded-2xl bg-white/6 border border-white/8 px-3 py-2.5 flex items-center gap-2">
+              <Music2 className="w-4 h-4 text-violet-400 flex-shrink-0" />
+              <p className="text-[11px] font-bold text-white/70">Oyun başlıyor! Hazır olun, iyi eğlenceler!</p>
+            </div>
+            <PlayerSlots
+              players={state.players}
+              slotCount={slotCount}
+              userId={user?.id}
+              playerAvatar={playerAvatar}
+            />
           </div>
         </div>
       )}
 
-      {/* Çizen araç çubuğu */}
-      {state?.status === 'drawing' && isDrawer && (
-        <div className="theme-surface rounded-3xl p-3 border theme-border space-y-3">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {PALETTE.map((item) => (
-              <button
-                key={item.color}
-                type="button"
-                onClick={() => {
-                  setColor(item.color);
-                  setIsEraser(false);
-                }}
-                className={`w-8 h-8 rounded-xl border-2 transition active:scale-95 cursor-pointer ${
-                  !isEraser && color === item.color
-                    ? 'border-fuchsia-500 scale-110'
-                    : 'border-black/10'
-                }`}
-                style={{ backgroundColor: item.color }}
-                aria-label={item.label}
-                title={item.label}
-              />
-            ))}
-            <button
-              type="button"
-              onClick={() => setIsEraser((prev) => !prev)}
-              className={`w-8 h-8 rounded-xl border-2 flex items-center justify-center transition active:scale-95 cursor-pointer ${
-                isEraser ? 'border-fuchsia-500 bg-fuchsia-50 text-fuchsia-700' : 'border-black/10 theme-text-secondary'
-              }`}
-              aria-label="Silgi"
-              title="Silgi"
-            >
-              <Eraser className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <Brush className="w-4 h-4 theme-text-secondary flex-shrink-0" />
-            {BRUSHES.map((brush) => (
-              <button
-                key={brush.width}
-                type="button"
-                onClick={() => setBrushWidth(brush.width)}
-                className={`flex-1 py-2 rounded-xl text-[11px] font-bold transition cursor-pointer ${
-                  brushWidth === brush.width
-                    ? 'bg-fuchsia-600 text-white'
-                    : 'theme-surface-secondary theme-text-secondary'
-                }`}
-              >
-                {brush.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={handleClearCanvas}
-              disabled={isBusy}
-              className="py-2.5 theme-surface-secondary hover:opacity-80 theme-text-primary font-bold rounded-2xl text-[11px] flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Temizle</span>
-            </button>
+      {showDrawerMenu && isDrawer && (
+        <div className="absolute inset-0 z-40 bg-black/50 flex items-end" onClick={() => setShowDrawerMenu(false)}>
+          <div
+            className="w-full rounded-t-3xl bg-[#1A1528] border-t border-white/10 p-4 space-y-2"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-[10px] font-black uppercase tracking-wider text-white/40 px-1">Çizen menüsü</p>
             <button
               type="button"
               onClick={handleSkipWord}
               disabled={isBusy}
-              className="py-2.5 theme-surface-secondary hover:opacity-80 theme-text-primary font-bold rounded-2xl text-[11px] flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              className="w-full py-3 rounded-2xl bg-white/8 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <Shuffle className="w-3.5 h-3.5" />
-              <span>Kelimeyi Değiştir</span>
+              <Shuffle className="w-4 h-4" />
+              Kelimeyi değiştir
             </button>
             <button
               type="button"
               onClick={handlePassTurn}
               disabled={isBusy}
-              className="py-2.5 bg-fuchsia-50 hover:bg-fuchsia-100 text-fuchsia-800 font-bold rounded-2xl text-[11px] flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              className="w-full py-3 rounded-2xl bg-white/8 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <Undo2 className="w-3.5 h-3.5" />
-              <span>Turu Devret</span>
+              <Undo2 className="w-4 h-4" />
+              Turu devret
             </button>
             <button
               type="button"
               onClick={handleRevealRound}
               disabled={isBusy}
-              className="py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold rounded-2xl text-[11px] flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              className="w-full py-3 rounded-2xl bg-white/8 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Turu Bitir</span>
+              Turu bitir
+            </button>
+            <button
+              type="button"
+              onClick={handleFinishGame}
+              disabled={isBusy}
+              className="w-full py-3 rounded-2xl bg-rose-500/20 text-rose-200 text-sm font-bold cursor-pointer disabled:opacity-50"
+            >
+              Oyunu bitir
             </button>
           </div>
         </div>
       )}
 
-      {state?.status === 'round_end' && state.guesses.length > 0 && (
-        <div className="md:hidden theme-surface rounded-3xl p-3 border theme-border space-y-1.5 max-h-36 overflow-y-auto">
-          {state.guesses.slice(-8).map((guess) => (
-            <div
-              key={guess.id}
-              className={`flex items-center gap-2 px-3 py-2 rounded-2xl text-xs ${
-                guess.is_correct
-                  ? 'bg-emerald-50 text-emerald-800 font-black'
-                  : 'theme-surface-secondary theme-text-primary'
-              }`}
-            >
-              <span className="font-bold opacity-70 flex-shrink-0">{guess.name}:</span>
-              <span className="truncate">{guess.is_correct ? 'doğru tahmin!' : guess.text}</span>
-              {guess.is_correct && <Check className="w-3.5 h-3.5 ml-auto flex-shrink-0" />}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Tur sonu aksiyonları */}
       {state?.status === 'round_end' && (
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={handleNextRound}
-            disabled={isBusy}
-            className="py-3.5 bg-fuchsia-600 hover:bg-fuchsia-700 active:scale-98 text-white font-black rounded-2xl text-sm flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-          >
-            {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            <span>Yeni Tur</span>
-          </button>
+        <div className="absolute left-3 right-3 z-20 flex justify-center" style={{ bottom: 'max(4.5rem, calc(env(safe-area-inset-bottom, 0px) + 3.5rem))' }}>
           <button
             type="button"
             onClick={handleFinishGame}
             disabled={isBusy}
-            className="py-3.5 theme-surface-secondary hover:opacity-80 theme-text-primary font-bold rounded-2xl text-sm disabled:opacity-50 cursor-pointer"
+            className="px-4 py-2 rounded-full bg-[#120F1D]/80 text-[11px] font-bold text-white/70 cursor-pointer disabled:opacity-50"
           >
-            Oyunu Bitir
+            Oyunu bitir
           </button>
         </div>
-      )}
-
-      {/* Skor tablosu */}
-      {scoreboard.length > 0 && state?.status !== 'none' && (
-        <div className="theme-surface rounded-3xl p-4 border theme-border space-y-2">
-          <div className="flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-amber-500" />
-            <h3 className="text-xs font-black theme-text-primary uppercase tracking-wider">
-              Skor tablosu
-            </h3>
-          </div>
-          {scoreboard.map((player, index) => (
-            <div
-              key={player.user_id}
-              className="flex items-center gap-2 text-xs theme-text-primary"
-            >
-              <span className="w-5 font-black theme-text-secondary">{index + 1}.</span>
-              {playerAvatar(player) ? (
-                <img src={playerAvatar(player)!} alt="" className="w-6 h-6 rounded-full object-cover bg-white" />
-              ) : (
-                <div className="w-6 h-6 rounded-full bg-fuchsia-100 text-fuchsia-700 font-black flex items-center justify-center text-[10px]">
-                  {(player.name[0] || '?').toUpperCase()}
-                </div>
-              )}
-              <span className="font-bold truncate">{player.name}</span>
-              {state && player.user_id === state.drawer_user_id && state.status === 'drawing' && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-lg bg-fuchsia-100 text-fuchsia-700 font-black flex-shrink-0">
-                  çiziyor
-                </span>
-              )}
-              <span className="ml-auto font-black">{player.score}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {state && state.status !== 'none' && (
-        <p className="text-[10px] text-center theme-text-secondary">
-          Kelime havuzu: {state.pool_size} kelime · sana gösterilen: {state.my_words_seen}
-        </p>
       )}
     </div>
   );
 };
+
+const LobbyChrome: React.FC<{
+  poolSize: number;
+  onLeave?: () => void;
+  leaveBusy?: boolean;
+}> = ({ poolSize, onLeave, leaveBusy }) => (
+  <div className="rounded-3xl bg-white/6 border border-white/8 p-4 flex items-start gap-3">
+    <Logo size="md" className="flex-shrink-0" />
+    <div className="min-w-0 flex-1">
+      <h1 className="text-lg font-black">Çiz ve Tahmin Et</h1>
+      <p className="text-[11px] font-bold text-white/45">{poolSize} kelimelik havuz</p>
+    </div>
+    {onLeave && (
+      <button
+        type="button"
+        onClick={onLeave}
+        disabled={leaveBusy}
+        className="px-2.5 py-2 rounded-2xl bg-rose-500/15 text-rose-200 text-[11px] font-black flex items-center gap-1 disabled:opacity-50 cursor-pointer flex-shrink-0"
+      >
+        <LogOut className="w-3.5 h-3.5" />
+        Ayrıl
+      </button>
+    )}
+  </div>
+);
+
+const PlayerSlots: React.FC<{
+  players: DrawingPlayer[];
+  slotCount: number;
+  userId?: string;
+  playerAvatar: (player: DrawingPlayer) => string | null;
+}> = ({ players, slotCount, userId, playerAvatar }) => {
+  const slots: Array<DrawingPlayer | null> = [...players];
+  while (slots.length < slotCount) slots.push(null);
+  return (
+    <div className="rounded-3xl bg-white/6 border border-white/8 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Users className="w-4 h-4 text-violet-400" />
+        <h2 className="text-[10px] font-black uppercase tracking-wider text-white/45">
+          Oyuncular ({players.length}/{slotCount})
+        </h2>
+      </div>
+      <div className="space-y-2">
+        {slots.map((player, index) =>
+          player ? (
+            <div key={player.user_id} className="flex items-center gap-3">
+              <div className="relative">
+                {playerAvatar(player) ? (
+                  <img
+                    src={playerAvatar(player)!}
+                    alt=""
+                    className="w-10 h-10 rounded-full object-cover bg-white"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-violet-600/40 text-violet-100 font-black flex items-center justify-center">
+                    {(player.name[0] || '?').toUpperCase()}
+                  </div>
+                )}
+                {player.is_online !== false && (
+                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#1A1528]" />
+                )}
+              </div>
+              <span className="text-sm font-bold truncate flex-1">{player.name}</span>
+              {player.is_drawer && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300">
+                  Çizer
+                </span>
+              )}
+              {player.user_id === userId && !player.is_drawer && (
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-violet-500/20 text-violet-200">
+                  sen
+                </span>
+              )}
+            </div>
+          ) : (
+            <div key={`empty-${index}`} className="flex items-center gap-3 opacity-40">
+              <div className="w-10 h-10 rounded-full border border-dashed border-white/25" />
+              <span className="text-sm font-bold">Oyuncu bekleniyor...</span>
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+};
+
+const HowToPlay: React.FC = () => (
+  <div className="grid grid-cols-3 gap-2">
+    {[
+      { icon: Pencil, label: 'Kelimeyi çiz' },
+      { icon: MessageCircle, label: 'Diğerleri tahmin etsin' },
+      { icon: Trophy, label: 'Doğru = puan' },
+    ].map((item) => (
+      <div key={item.label} className="rounded-2xl bg-white/6 border border-white/8 p-3 text-center space-y-1.5">
+        <item.icon className="w-5 h-5 mx-auto text-violet-300" />
+        <p className="text-[10px] font-bold text-white/55 leading-tight">{item.label}</p>
+      </div>
+    ))}
+  </div>
+);
 
 export default DrawGuessPage;

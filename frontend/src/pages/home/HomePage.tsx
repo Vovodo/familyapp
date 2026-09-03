@@ -11,7 +11,6 @@ import {
   Plus,
   ArrowRight,
   Sparkles,
-  Loader2,
   Coffee,
   Car,
   Utensils,
@@ -26,6 +25,8 @@ import { useFamily } from '../../contexts/FamilyContext';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
 import { WeatherWidget } from '../../components/home/WeatherWidget';
 import { InviteQrScanner } from '../../components/family/InviteQrScanner';
+import { Logo } from '../../components/branding/Logo';
+import { BrandLoading } from '../../components/branding/BrandLoading';
 import { extractInviteCode, peekPendingInvite, takePendingInvite } from '../../utils/inviteCode';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
@@ -197,17 +198,7 @@ export const HomePage: React.FC = () => {
   // keeps the create/join onboarding below unreachable until the server has
   // confirmed the account really has no family.
   if (isLoading || (!currentFamily && !familiesLoaded)) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[70vh] space-y-3">
-        <div className="w-16 h-16 rounded-3xl bg-family-50 flex items-center justify-center text-family-600 shadow-inner">
-          <Heart className="w-8 h-8 fill-family-500 text-family-500 animate-pulse" />
-        </div>
-        <div className="flex items-center gap-2 text-xs font-bold text-gray-500">
-          <Loader2 className="w-4 h-4 animate-spin text-family-600" />
-          <span>Aile bilgileri yükleniyor...</span>
-        </div>
-      </div>
-    );
+    return <BrandLoading fullScreen={false} message="Aile bilgileri yükleniyor..." />;
   }
 
   // If user has NO family group yet, display Join / Create onboarding
@@ -215,9 +206,7 @@ export const HomePage: React.FC = () => {
     return (
       <div className="p-4 flex flex-col justify-center min-h-[80vh] space-y-6 max-w-md mx-auto">
         <div className="text-center space-y-3">
-          <div className="w-20 h-20 rounded-3xl bg-family-100 flex items-center justify-center text-family-600 mx-auto shadow-inner">
-            <Heart className="w-10 h-10 fill-family-500 text-family-500 animate-pulse" />
-          </div>
+          <Logo size="xl" pulse className="mx-auto" />
           <h1 className="text-2xl font-black text-gray-900 tracking-tight">
             Hoş Geldiniz, {user?.full_name || 'Aile Üyemiz'}!
           </h1>
@@ -486,8 +475,8 @@ export const HomePage: React.FC = () => {
     <div className="p-4 space-y-4 w-full max-w-full overflow-x-hidden box-border">
       {/* Warm Greeting Card (Aile Alanı Hero Card with Dynamic Theme Gradient) */}
       <div className="theme-hero-card rounded-3xl p-5 sm:p-6 text-white shadow-xl relative overflow-hidden transition-all duration-300">
-        <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 opacity-10 pointer-events-none">
-          <Heart className="w-40 h-40 sm:w-48 sm:h-48 fill-white" />
+        <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 opacity-15 pointer-events-none">
+          <Logo size="xl" className="w-40 h-40 sm:w-48 sm:h-48" />
         </div>
         <div className="relative z-10">
           <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider opacity-90">

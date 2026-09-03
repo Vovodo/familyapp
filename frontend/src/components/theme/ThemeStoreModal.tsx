@@ -1,6 +1,7 @@
 import React from 'react';
-import { X, Check, Sparkles, Heart, Info, Palette } from 'lucide-react';
-import { useTheme, THEMES, ThemeDefinition } from '../../contexts/ThemeContext';
+import { X, Check, Sparkles, Heart, Info } from 'lucide-react';
+import { useTheme, THEMES, DEFAULT_THEME_ID } from '../../contexts/ThemeContext';
+import { Logo } from '../branding/Logo';
 
 interface ThemeStoreModalProps {
   isOpen: boolean;
@@ -29,8 +30,8 @@ export const ThemeStoreModal: React.FC<ThemeStoreModalProps> = ({ isOpen, onClos
         {/* Modal Header */}
         <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-indigo-600 text-white flex items-center justify-center shadow-md">
-              <Palette className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-violet-600 to-pink-500 text-white flex items-center justify-center shadow-md overflow-hidden">
+              <Logo size="sm" className="!w-8 !h-8" />
             </div>
             <div>
               <h2 className="text-lg font-black text-gray-900 dark:text-white">Tema Mağazası</h2>
@@ -80,12 +81,16 @@ export const ThemeStoreModal: React.FC<ThemeStoreModalProps> = ({ isOpen, onClos
                       }}
                     >
                       <div className="flex items-center gap-1">
-                        <div
-                          className="w-2.5 h-2.5 rounded-full flex items-center justify-center"
-                          style={{ backgroundColor: theme.colors.accent }}
-                        >
-                          <Heart className="w-1.5 h-1.5 fill-white text-white" />
-                        </div>
+                        {theme.id === DEFAULT_THEME_ID ? (
+                          <Logo size="xs" className="!w-3 !h-3 rounded-[3px]" />
+                        ) : (
+                          <div
+                            className="w-2.5 h-2.5 rounded-full flex items-center justify-center"
+                            style={{ backgroundColor: theme.colors.accent }}
+                          >
+                            <Heart className="w-1.5 h-1.5 fill-white text-white" />
+                          </div>
+                        )}
                         <div
                           className="text-[7px] font-black truncate max-w-[60px]"
                           style={{ color: theme.colors.textPrimary }}
@@ -207,8 +212,13 @@ export const ThemeStoreModal: React.FC<ThemeStoreModalProps> = ({ isOpen, onClos
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h4 className="text-sm font-black text-gray-900 dark:text-white">
+                        <h4 className="text-sm font-black text-gray-900 dark:text-white flex items-center gap-1.5">
                           {theme.name}
+                          {theme.id === DEFAULT_THEME_ID && (
+                            <span className="text-[9px] font-bold uppercase tracking-wide text-white px-1.5 py-0.5 rounded-full bg-violet-600">
+                              Varsayılan
+                            </span>
+                          )}
                         </h4>
                         <p className="text-[11px] text-gray-500 dark:text-gray-400">
                           {theme.description}

@@ -2,7 +2,6 @@ import re
 import json
 import uuid
 import httpx
-import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -360,18 +359,16 @@ async def send_message(
 
             if active_tokens:
                 sender_display = member.nickname or current_user.full_name or "Aile Üyesi"
-                asyncio.create_task(
-                    push_service.send_chat_push(
-                        db=db,
-                        device_tokens=active_tokens,
-                        sender_name=sender_display,
-                        sender_id=current_user.id,
-                        family_id=member.family_id,
-                        message_id=msg.id,
-                        content=msg.content,
-                        media_type=msg.media_type,
-                        sender_avatar=current_user.avatar_url
-                    )
+                await push_service.send_chat_push(
+                    db=db,
+                    device_tokens=active_tokens,
+                    sender_name=sender_display,
+                    sender_id=current_user.id,
+                    family_id=member.family_id,
+                    message_id=msg.id,
+                    content=msg.content,
+                    media_type=msg.media_type,
+                    sender_avatar=current_user.avatar_url
                 )
     except Exception as e:
         logger.warning(f"Failed to schedule chat push notification: {e}")

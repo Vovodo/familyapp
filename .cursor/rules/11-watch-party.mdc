@@ -1,0 +1,47 @@
+---
+description: Seyir Partisi — senkron oda, playback, chat ve güvenlik kuralları
+globs: backend/app/api/v1/watchparty.py,backend/app/services/video_provider.py,backend/app/services/youtube_url.py,frontend/src/**/watchparty/**,frontend/src/services/watchPartySync.ts
+alwaysApply: false
+---
+
+# Seyir Partisi (Watch Party)
+
+Oynatma **sunucu otoriter**; canlı fan-out **Supabase broadcast** (`family-watch-{familyId}`). Backend SSE/WebSocket yok.
+
+## Playback
+
+- Konum: `position_ms + (now - position_updated_at) * rate` (playing iken)
+- Her kontrol `control_seq` artırır; istemci eski seq’i reddeder
+- İstemci `base_control_seq` gönderir; sunucu uyuşmazsa **409** + refetch
+- Drift: istemci önce rate nudge (400–1500ms), sonra seek (≥1500ms)
+- Yerel play anında; ağ diğer cihazları koordine eder
+
+## Chat ≠ playback
+
+- Chat REST + DB (`watch_room_messages`); broadcast yalnızca hız için
+- `video_position_ms` her mesajda saklanır (sahne yorumu)
+- `client_message_id` idempotent
+
+## Video sağlayıcı
+
+- `video_provider.py` registry; ilk sürüm YouTube embed id
+- Video indirme/proxy yok
+
+## Güvenlik
+
+- Tüm sorgular `family_id == member.family_id`
+- Kontrol/chat yazma: online katılımcı (`_require_participant`)
+- Oda kapatma: host veya `created_by`
+- Host transfer: yalnızca mevcut host, backend doğrular
+
+## Mobil
+
+- Arka plan: odadan **ayrılma** yalnızca unmount / explicit leave; `pagehide` ile leave yok
+- Heartbeat 8s; presence TTL 45s; GET resync 18s
+- Broadcast kopunca channel reconnect
+
+## Yapma
+
+- postgres_changes ile playback yazma
+- Host kontrolünü yalnızca UI’da gizleme
+- Milisaniye mükemmelliği için sürekli seek spam

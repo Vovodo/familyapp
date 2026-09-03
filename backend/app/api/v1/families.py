@@ -36,6 +36,7 @@ from backend.app.models.models import (
     WatchRoom,
     WatchRoomParticipant,
     WatchRoomMessage,
+    VoiceChannelParticipant,
 )
 from backend.app.schemas.schemas import (
     FamilyCreate,
@@ -82,6 +83,9 @@ def _purge_family_records(db: Session, family_id: str) -> None:
     db.query(WatchRoomMessage).filter(WatchRoomMessage.family_id == family_id).delete(synchronize_session=False)
     db.query(WatchRoomParticipant).filter(WatchRoomParticipant.family_id == family_id).delete(synchronize_session=False)
     db.query(WatchRoom).filter(WatchRoom.family_id == family_id).delete(synchronize_session=False)
+    db.query(VoiceChannelParticipant).filter(VoiceChannelParticipant.family_id == family_id).delete(
+        synchronize_session=False
+    )
 
     poll_ids = [row[0] for row in db.query(Poll.id).filter(Poll.family_id == family_id).all()]
     if poll_ids:

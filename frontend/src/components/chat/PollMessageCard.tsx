@@ -267,27 +267,26 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe,
 
   return (
     <div
-      className="w-full min-w-[250px] sm:min-w-[290px] max-w-sm select-none p-1 space-y-3"
+      className="w-full min-w-[220px] max-w-sm select-none space-y-1.5"
       onClick={(e) => e.stopPropagation()}
     >
       {/* Poll Header */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
           <div
-            className={`w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 ${
-              isMe ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-600'
+            className={`w-5 h-5 rounded-lg flex items-center justify-center flex-shrink-0 ${
+              isMe ? 'bg-white/20 text-white' : 'theme-text-primary'
             }`}
+            style={!isMe ? { backgroundColor: 'color-mix(in srgb, var(--theme-accent) 22%, transparent)' } : undefined}
           >
-            <BarChart3 className="w-4 h-4" />
+            <BarChart3 className="w-3.5 h-3.5" />
           </div>
-          <h4 className={`text-sm font-black leading-snug ${isMe ? 'text-white' : 'text-gray-900'}`}>
+          <h4 className={`text-[13px] font-black leading-tight ${isMe ? 'text-white' : 'theme-text-primary'}`}>
             {poll.question}
           </h4>
-        </div>
       </div>
 
       {/* Options List */}
-      <div className="space-y-2">
+      <div className="space-y-1">
         {poll.options.map((option, idx) => {
           const voteCount = Number(tallies[idx] ?? tallies[String(idx)] ?? 0);
           const percent = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
@@ -301,14 +300,14 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe,
               type="button"
               disabled={isExpired}
               onClick={(e) => handleVote(idx, e)}
-              className={`w-full relative overflow-hidden text-left p-2.5 rounded-2xl border transition-all duration-150 active:scale-[0.98] cursor-pointer disabled:cursor-default ${
+              className={`w-full relative overflow-hidden text-left py-1.5 px-2 rounded-xl border transition-all duration-150 active:scale-[0.98] cursor-pointer disabled:cursor-default ${
                 isSelected
                   ? isMe
-                    ? 'border-white/70 bg-white/25 shadow-sm'
-                    : 'border-family-500 bg-family-50/90 shadow-sm'
+                    ? 'border-red-200/50 bg-[#5C101C] shadow-sm'
+                    : 'border-red-400/70 bg-red-500/20 shadow-sm'
                   : isMe
                   ? 'border-white/20 bg-white/10 hover:bg-white/15'
-                  : 'border-gray-200/90 bg-gray-50/80 hover:bg-gray-100/90'
+                  : 'theme-border bg-black/20 hover:bg-black/30 border'
               }`}
             >
               {/* Animated Progress Fill Bar */}
@@ -316,11 +315,11 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe,
                 className={`absolute inset-y-0 left-0 transition-all duration-500 pointer-events-none rounded-xl ${
                   isSelected
                     ? isMe
-                      ? 'bg-white/35'
-                      : 'bg-family-200/90'
+                      ? 'bg-[#7A1A2A]'
+                      : 'bg-red-500/30'
                     : isMe
-                    ? 'bg-white/15'
-                    : 'bg-gray-200/75'
+                    ? 'bg-white/10'
+                    : 'bg-white/10'
                 }`}
                 style={{ width: `${percent}%` }}
               />
@@ -332,8 +331,8 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe,
                     className={`w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 transition-all ${
                       isSelected
                         ? isMe
-                          ? 'bg-white text-family-700 border-white shadow-xs'
-                          : 'bg-family-600 text-white border-family-600 shadow-xs'
+                          ? 'bg-[#E8C4C8] text-[#5C101C] border-[#E8C4C8] shadow-xs'
+                          : 'bg-red-600 text-white border-red-500 shadow-xs'
                         : isMe
                         ? 'border-white/40'
                         : 'border-gray-400'
@@ -343,7 +342,7 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe,
                   </div>
                   <span
                     className={`text-xs font-bold truncate ${
-                      isMe ? 'text-white' : 'text-gray-900'
+                      isMe ? 'text-white' : 'theme-text-primary'
                     }`}
                   >
                     {option}
@@ -358,14 +357,14 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe,
                   )}
                   <span
                     className={`text-[11px] font-black ${
-                      isMe ? 'text-white/95' : 'text-gray-700'
+                      isMe ? 'text-white/95' : 'theme-text-primary'
                     }`}
                   >
                     %{percent}
                   </span>
                   <span
                     className={`text-[10px] font-medium ${
-                      isMe ? 'text-white/75' : 'text-gray-400'
+                      isMe ? 'text-white/75' : 'theme-text-secondary'
                     }`}
                   >
                     ({voteCount})
@@ -375,7 +374,7 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe,
 
               {/* Voter Avatars Cluster */}
               {optionVoters.length > 0 && (
-                <div className="relative z-10 flex items-center gap-1.5 mt-1.5 pt-1 border-t border-black/5">
+                <div className="relative z-10 flex items-center gap-1 mt-1">
                   <div className="flex items-center -space-x-1.5 overflow-hidden">
                     {optionVoters.slice(0, 5).map((voter, vIdx) =>
                       voter.avatar ? (
@@ -404,7 +403,7 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe,
                   </div>
                   <span
                     className={`text-[9px] font-semibold truncate ${
-                      isMe ? 'text-white/80' : 'text-gray-500'
+                      isMe ? 'text-white/80' : 'theme-text-secondary'
                     }`}
                   >
                     {optionVoters.map((v) => v.name.split(' ')[0]).join(', ')}
@@ -418,8 +417,8 @@ export const PollMessageCard: React.FC<PollMessageCardProps> = ({ message, isMe,
 
       {/* Poll Footer */}
       <div
-        className={`flex items-center justify-between text-[10px] font-semibold pt-1 border-t ${
-          isMe ? 'border-white/20 text-white/80' : 'border-gray-200 text-gray-500'
+        className={`flex items-center justify-between text-[9px] font-semibold pt-0.5 pr-10 ${
+          isMe ? 'text-white/80' : 'theme-text-secondary'
         }`}
       >
         <div className="flex items-center gap-1">

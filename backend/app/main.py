@@ -113,6 +113,11 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(asyncio.to_thread(init_db_sync))
     # Launch automatic 14-day old message purge job in background
     asyncio.create_task(run_periodic_cleanup_job())
+    from backend.app.services.push_service import push_service
+    if push_service.is_initialized:
+        logger.info("FCM push notifications: enabled")
+    else:
+        logger.warning("FCM push notifications: disabled (check FIREBASE_CREDENTIALS_JSON or service account file)")
     yield
     # Shutdown
     logger.info("Shutting down Aile Uygulaması API...")

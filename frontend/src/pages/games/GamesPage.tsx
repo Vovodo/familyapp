@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Gamepad2, Palette, Users } from 'lucide-react';
+import { ArrowRight, Palette, Users } from 'lucide-react';
+import { Logo } from '../../components/branding/Logo';
 import { useFamily } from '../../contexts/FamilyContext';
 
 export const GamesPage: React.FC = () => {
@@ -13,7 +14,7 @@ export const GamesPage: React.FC = () => {
     <div className="p-4 space-y-4 w-full max-w-2xl mx-auto">
       <div className="theme-surface rounded-3xl p-5 border theme-border">
         <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-fuchsia-600">
-          <Gamepad2 className="w-4 h-4" />
+          <Logo size="xs" />
           <span>Aile Oyunları</span>
         </div>
         <h1 className="text-xl font-black theme-text-primary mt-1">Birlikte oynayın</h1>

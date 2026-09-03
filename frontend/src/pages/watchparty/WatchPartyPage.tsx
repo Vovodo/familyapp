@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clapperboard, Loader2, Plus, Users, Play } from 'lucide-react';
+import { Loader2, Plus, Users, Play } from 'lucide-react';
+import { Logo } from '../../components/branding/Logo';
 import { useFamily } from '../../contexts/FamilyContext';
 import { api } from '../../services/api';
 import { WatchRoomListItem } from '../../types';
@@ -64,7 +65,7 @@ export const WatchPartyPage: React.FC = () => {
     <div className="p-4 w-full max-w-2xl mx-auto space-y-4">
       <div className="theme-surface rounded-3xl p-5 border theme-border">
         <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-violet-600">
-          <Clapperboard className="w-4 h-4" />
+          <Logo size="xs" />
           <span>Seyir Partisi</span>
         </div>
         <h1 className="text-xl font-black theme-text-primary mt-1">Aileyle aynı anda izleyin</h1>

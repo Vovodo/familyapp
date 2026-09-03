@@ -8,7 +8,8 @@ import React, {
   useState,
 } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { LogOut, Palette, Timer } from 'lucide-react';
+import { LogOut, Timer } from 'lucide-react';
+import { Logo } from '../components/branding/Logo';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { useAuth } from './AuthContext';
@@ -195,9 +196,9 @@ export const DrawingGameProvider: React.FC<{ children: React.ReactNode }> = ({ c
       {showBar && (
         <div className="fixed left-3 right-3 z-50 safe-area-top" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 4.5rem)' }}>
           <div className="max-w-lg mx-auto theme-surface border theme-border shadow-lg rounded-2xl px-3 py-2 flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-fuchsia-100 text-fuchsia-700 flex items-center justify-center flex-shrink-0">
-              <Palette className="w-4 h-4" />
-            </div>
+          <div className="w-8 h-8 rounded-xl overflow-hidden flex-shrink-0">
+            <Logo size="xs" className="w-8 h-8" />
+          </div>
             <button
               type="button"
               onClick={() => navigate('/games/draw')}

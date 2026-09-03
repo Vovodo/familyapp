@@ -39,6 +39,8 @@ export const BottomNav: React.FC = () => {
                     style={{
                       backgroundColor: isActive ? 'var(--theme-surface-secondary)' : 'transparent',
                       color: isActive ? 'var(--theme-nav-active)' : 'var(--theme-nav-inactive)',
+                      boxShadow: 'none',
+                      border: 'none',
                     }}
                   >
                     <Icon className="w-5 h-5" />

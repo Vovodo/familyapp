@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Heart,
   Lock,
   Mail,
   User,
@@ -18,6 +17,7 @@ import {
   QrCode,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { Logo } from '../../components/branding/Logo';
 import { InviteQrScanner } from '../../components/family/InviteQrScanner';
 import { extractInviteCode, peekPendingInvite, takePendingInvite } from '../../utils/inviteCode';
 
@@ -121,12 +121,10 @@ export const RegisterPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-warm-50 flex flex-col justify-center px-4 sm:px-6 py-6 max-w-md mx-auto space-y-4">
+    <div className="min-h-screen theme-bg flex flex-col justify-center px-4 sm:px-6 py-6 max-w-md mx-auto space-y-4">
       {/* Header Logo */}
-      <div className="text-center space-y-1">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-family-100 text-family-600 shadow-md shadow-family-100 mb-1 animate-bounce">
-          <Heart className="w-8 h-8 fill-family-500 text-family-500" />
-        </div>
+      <div className="text-center space-y-2">
+        <Logo size="lg" pulse className="mx-auto mb-1" />
         <h1 className="text-2xl font-black text-gray-900 tracking-tight">Aile Hesabı Oluşturun</h1>
         <p className="text-xs font-medium text-gray-500">
           {step === 'info' ? 'Ailenize özel sıcak ve güvenli alanınızı başlatın' : 'E-posta adresinizi doğrulayın'}
@@ -319,7 +317,7 @@ export const RegisterPage: React.FC = () => {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3.5 bg-gradient-to-r from-family-600 to-rose-600 hover:from-family-700 hover:to-rose-700 active:scale-98 text-white font-bold rounded-2xl shadow-lg shadow-family-600/25 flex items-center justify-center gap-2 text-sm transition duration-150 disabled:opacity-50 mt-2 cursor-pointer"
+              className="w-full py-3.5 theme-cta hover:opacity-95 active:scale-98 text-white font-bold rounded-2xl flex items-center justify-center gap-2 text-sm transition duration-150 disabled:opacity-50 mt-2 cursor-pointer"
             >
               {isSubmitting ? (
                 <Loader2 className="w-5 h-5 animate-spin" />

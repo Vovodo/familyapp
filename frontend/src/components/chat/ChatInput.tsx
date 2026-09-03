@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Camera, Image as ImageIcon, Smile, Loader2, Plus, Mic, Trash2, StopCircle, BarChart2 } from 'lucide-react';
+import { Send, Camera, Image as ImageIcon, Smile, Loader2, Plus, Mic, Trash2, BarChart2 } from 'lucide-react';
 import { EmojiGifPicker } from './EmojiGifPicker';
 import { permissionService } from '../../services/permissionService';
 
@@ -239,7 +239,7 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
     };
 
     return (
-      <div className="bg-white/95 backdrop-blur-md border-t border-gray-200/80 p-2.5 sm:p-3 safe-area-bottom relative">
+      <div className="theme-nav border-t theme-border p-2 safe-area-bottom relative">
         {/* Error Toast */}
         {recordingError && (
           <div className="absolute bottom-full left-4 right-4 mb-2 p-2 bg-rose-600 text-white text-xs font-bold rounded-2xl shadow-lg text-center animate-in fade-in slide-in-from-bottom-2">
@@ -260,7 +260,7 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
 
         {/* Attachment Options Popup */}
         {showAttachMenu && (
-          <div className="absolute bottom-full left-4 mb-2 bg-white rounded-3xl shadow-xl border border-gray-100 p-2 flex items-center gap-2 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
+          <div className="absolute bottom-full left-3 mb-2 theme-surface rounded-2xl shadow-xl border theme-border p-2 flex items-center gap-2 z-50">
             <button
               type="button"
               onClick={() => {
@@ -355,11 +355,16 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
                 setShowEmojiPicker(false);
               }}
               disabled={disabled || isUploading}
-              className={`w-10 h-10 rounded-2xl flex items-center justify-center transition active:scale-95 flex-shrink-0 cursor-pointer ${
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition active:scale-95 flex-shrink-0 cursor-pointer ${
                 showAttachMenu
-                  ? 'bg-family-600 text-white rotate-45'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                  ? 'text-white'
+                  : 'theme-text-secondary'
               }`}
+              style={
+                showAttachMenu
+                  ? { background: 'var(--theme-hero-gradient)' }
+                  : { backgroundColor: 'var(--theme-surface-secondary)' }
+              }
               title="Medya Ekle"
             >
               <Plus className="w-5 h-5 transition-transform" />
@@ -373,11 +378,14 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
                 setShowAttachMenu(false);
               }}
               disabled={disabled}
-              className={`w-10 h-10 rounded-2xl flex items-center justify-center transition active:scale-95 flex-shrink-0 cursor-pointer ${
-                showEmojiPicker
-                  ? 'bg-family-100 text-family-700'
-                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition active:scale-95 flex-shrink-0 cursor-pointer ${
+                showEmojiPicker ? 'text-white' : 'theme-text-secondary'
               }`}
+              style={
+                showEmojiPicker
+                  ? { background: 'var(--theme-hero-gradient)' }
+                  : { backgroundColor: 'transparent' }
+              }
               title="Emoji ve GIF Seç"
             >
               <Smile className="w-5 h-5" />
@@ -393,7 +401,8 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
                 onKeyDown={handleKeyDown}
                 disabled={disabled}
                 placeholder="Bir mesaj yazın..."
-                className="w-full bg-gray-100 hover:bg-gray-200/70 focus:bg-white text-gray-900 placeholder:text-gray-400 text-sm sm:text-base px-4 py-2.5 rounded-2xl focus:outline-none focus:ring-2 focus:ring-family-600/30 transition-all border border-transparent focus:border-family-200"
+                className="w-full theme-text-primary placeholder:opacity-60 text-sm px-4 py-2.5 rounded-full focus:outline-none border theme-border"
+                style={{ backgroundColor: 'var(--theme-surface-secondary)' }}
               />
             </div>
 
@@ -402,7 +411,8 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
               <button
                 type="submit"
                 disabled={disabled || isUploading}
-                className="w-11 h-11 rounded-2xl flex items-center justify-center bg-gradient-to-tr from-family-600 to-family-500 hover:from-family-700 hover:to-family-600 text-white shadow-family-600/20 active:scale-95 cursor-pointer transition-all duration-150 flex-shrink-0"
+                className="w-11 h-11 rounded-full flex items-center justify-center text-white active:scale-95 cursor-pointer transition-all duration-150 flex-shrink-0"
+                style={{ background: 'var(--theme-hero-gradient)' }}
                 title="Gönder"
               >
                 {isUploading ? (
@@ -416,7 +426,8 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
                 type="button"
                 onClick={startRecording}
                 disabled={disabled || isUploading}
-                className="w-11 h-11 rounded-2xl flex items-center justify-center bg-family-600 hover:bg-family-700 text-white shadow-sm active:scale-95 cursor-pointer transition-all duration-150 flex-shrink-0"
+                className="w-11 h-11 rounded-full flex items-center justify-center text-white shadow-sm active:scale-95 cursor-pointer transition-all duration-150 flex-shrink-0"
+                style={{ background: '#7C3AED' }}
                 title="Ses Kaydet (Bas ve Konuş)"
               >
                 {isUploading ? (

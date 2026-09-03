@@ -20,6 +20,9 @@
     },
     "github": {
       "enabled": true
+    },
+    "firebase": {
+      "enabled": true
     }
   }
 }

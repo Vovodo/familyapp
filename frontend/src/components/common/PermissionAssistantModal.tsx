@@ -126,7 +126,7 @@ export const PermissionAssistantModal: React.FC<PermissionAssistantModalProps> =
 
         {/* Header */}
         <div className="text-center space-y-1.5 pt-1">
-          <div className="w-13 h-13 rounded-2xl bg-gradient-to-tr from-family-600 to-rose-600 text-white flex items-center justify-center mx-auto shadow-md shadow-family-600/25">
+          <div className="w-13 h-13 rounded-2xl theme-cta text-white flex items-center justify-center mx-auto">
             <ShieldCheck className="w-7 h-7" />
           </div>
           <div className="inline-flex items-center gap-1 text-[10px] font-black text-family-600 uppercase tracking-wider">
@@ -203,7 +203,7 @@ export const PermissionAssistantModal: React.FC<PermissionAssistantModalProps> =
             <button
               onClick={handleGrantAll}
               disabled={isProcessing}
-              className="w-full py-3 bg-gradient-to-r from-family-600 to-rose-600 hover:from-family-700 hover:to-rose-700 text-white font-bold rounded-2xl shadow-md shadow-family-600/25 flex items-center justify-center gap-2 text-xs transition active:scale-98 cursor-pointer disabled:opacity-50"
+              className="w-full py-3 theme-cta hover:opacity-95 text-white font-bold rounded-2xl flex items-center justify-center gap-2 text-xs transition active:scale-98 cursor-pointer disabled:opacity-50"
             >
               <span>{isProcessing ? 'İzinler İsteniyor...' : 'Tüm Eksik İzinleri Aç'}</span>
               <ArrowRight className="w-4 h-4" />

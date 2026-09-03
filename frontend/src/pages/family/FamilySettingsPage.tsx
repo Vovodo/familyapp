@@ -7,7 +7,6 @@ import {
   LogOut,
   UserCheck,
   Shield,
-  Heart,
   Edit3,
   Loader2,
   Trash2,
@@ -38,6 +37,7 @@ import { api } from '../../services/api';
 import { syncService } from '../../services/syncService';
 import { SyncStatus, StorageQuotaBreakdown } from '../../types';
 import { DownloadApkButton } from '../../components/common/DownloadApkButton';
+import { Logo } from '../../components/branding/Logo';
 import { PermissionAssistantModal } from '../../components/common/PermissionAssistantModal';
 import { CloudRestorePromptModal } from '../../components/common/CloudRestorePromptModal';
 import { ThemeStoreModal } from '../../components/theme/ThemeStoreModal';
@@ -289,8 +289,8 @@ export const FamilySettingsPage: React.FC = () => {
       <div className="bg-white rounded-3xl p-5 border border-gray-100 shadow-md space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-family-50 text-family-600 rounded-2xl flex items-center justify-center font-bold text-lg">
-              ❤️
+            <div className="w-12 h-12 rounded-2xl overflow-hidden flex items-center justify-center">
+              <Logo size="md" />
             </div>
             <div>
               <h2 className="text-lg font-black text-gray-900">{currentFamily?.name || 'Ailemiz'}</h2>
@@ -615,7 +615,7 @@ export const FamilySettingsPage: React.FC = () => {
               <h3 className="text-sm font-black text-gray-900 dark:text-white">Görünüm & Tema Mağazası</h3>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-xs text-gray-500">Aktif Tema:</span>
-                <span className="text-xs font-bold text-family-600">{currentTheme.name}</span>
+                <span className="text-xs font-bold" style={{ color: 'var(--theme-accent)' }}>{currentTheme.name}</span>
                 <div className="flex items-center -space-x-1 ml-1">
                   {currentTheme.palette.map((c, idx) => (
                     <div

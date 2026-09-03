@@ -40,6 +40,7 @@ router = APIRouter()
 
 MIN_PLAYERS = 2
 ROUND_SECONDS = 150
+COUNTDOWN_SECONDS = 3
 MAX_STROKES_PER_ROUND = 4000
 MAX_POINTS_PER_STROKE = 1200
 GUESS_HISTORY_LIMIT = 60
@@ -99,6 +100,7 @@ class DrawingStateOut(BaseModel):
     round_started_at: Optional[datetime] = None
     round_ends_at: Optional[datetime] = None
     seconds_left: Optional[int] = None
+    countdown_left: Optional[int] = None
     solved_by_user_id: Optional[str] = None
     solved_by_name: Optional[str] = None
     stroke_seq: int = 0
@@ -112,6 +114,7 @@ class DrawingStateOut(BaseModel):
     pool_size: int = POOL_SIZE
     my_words_seen: int = 0
     online_count: int = 0
+    started_round: bool = False
 
 
 class StrokePayload(BaseModel):
@@ -185,7 +188,25 @@ def _seconds_left(game: DrawingGame) -> Optional[int]:
     ends_at = _aware(game.round_ends_at)
     if not ends_at:
         return None
-    return max(0, int((ends_at - datetime.now(timezone.utc)).total_seconds()))
+    remaining = max(0, int((ends_at - datetime.now(timezone.utc)).total_seconds()))
+    countdown = _countdown_left(game) or 0
+    if countdown > 0:
+        return ROUND_SECONDS
+    return remaining
+
+
+def _countdown_left(game: DrawingGame) -> Optional[int]:
+    """Tur başındaki 3-2-1; çizim süresi bu bitince işler."""
+    if game.status != "drawing" or not game.round_started_at:
+        return None
+    started = _aware(game.round_started_at)
+    if not started:
+        return None
+    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+    left = COUNTDOWN_SECONDS - elapsed
+    if left <= 0:
+        return 0
+    return max(1, int(left + 0.999))
 
 
 def _is_online(player: DrawingGamePlayer, now: Optional[datetime] = None) -> bool:
@@ -262,13 +283,32 @@ def _pause_to_lobby(db: Session, game: DrawingGame) -> None:
     game.round_ends_at = None
 
 
+def _deactivate_empty_game(db: Session, game: DrawingGame) -> None:
+    """Odada kimse kalmadıysa oyunu kapatır; yeni oyun `start` ile açılır."""
+    db.query(DrawingStroke).filter(DrawingStroke.game_id == game.id).delete(synchronize_session=False)
+    game.status = "finished"
+    game.drawer_user_id = None
+    game.current_word = None
+    game.word_category = None
+    game.solved_by_user_id = None
+    game.solved_at = None
+    game.stroke_seq = 0
+    game.round_started_at = None
+    game.round_ends_at = None
+
+
+def _arm_round_clock(game: DrawingGame) -> None:
+    now = datetime.now(timezone.utc)
+    game.round_started_at = now
+    game.round_ends_at = now + timedelta(seconds=COUNTDOWN_SECONDS + ROUND_SECONDS)
+
+
 def _begin_round(db: Session, game: DrawingGame, drawer: DrawingGamePlayer) -> None:
     db.query(DrawingStroke).filter(DrawingStroke.game_id == game.id).delete(synchronize_session=False)
     game.round_number = (game.round_number or 0) + 1
     game.drawer_user_id = drawer.user_id
     game.status = "drawing"
-    game.round_started_at = datetime.now(timezone.utc)
-    game.round_ends_at = game.round_started_at + timedelta(seconds=ROUND_SECONDS)
+    _arm_round_clock(game)
     game.solved_by_user_id = None
     game.solved_at = None
     game.stroke_seq = 0
@@ -284,8 +324,7 @@ def _transfer_draw(
         game.round_number = (game.round_number or 0) + 1
     game.drawer_user_id = new_drawer.user_id
     game.status = "drawing"
-    game.round_started_at = datetime.now(timezone.utc)
-    game.round_ends_at = game.round_started_at + timedelta(seconds=ROUND_SECONDS)
+    _arm_round_clock(game)
     game.solved_by_user_id = None
     game.solved_at = None
     game.stroke_seq = 0
@@ -293,7 +332,7 @@ def _transfer_draw(
     _assign_word(db, game, new_drawer.user_id)
 
 
-def _prune_presence(db: Session, game: DrawingGame) -> None:
+def _prune_presence(db: Session, game: DrawingGame) -> bool:
     """Süresi dolan oyuncuları odadan düşürür; çizen gittiyse turu devreder."""
     now = datetime.now(timezone.utc)
     players = _list_players(db, game.id)
@@ -304,6 +343,15 @@ def _prune_presence(db: Session, game: DrawingGame) -> None:
             changed = True
 
     online = _online_players(players)
+    if not online:
+        if game.status != "finished":
+            _deactivate_empty_game(db, game)
+            _bump_revision(game)
+            changed = True
+        if changed:
+            db.flush()
+        return changed
+
     if game.status == "drawing" and game.drawer_user_id:
         drawer_online = any(p.user_id == game.drawer_user_id for p in online)
         if not drawer_online:
@@ -314,13 +362,9 @@ def _prune_presence(db: Session, game: DrawingGame) -> None:
                 _pause_to_lobby(db, game)
             changed = True
 
-    if game.status in ("lobby", "round_end", "drawing") and not online:
-        if game.status != "lobby":
-            _pause_to_lobby(db, game)
-            changed = True
-
     if changed:
         db.flush()
+    return changed
 
 
 def _words_seen_count(db: Session, user_id: str) -> int:
@@ -422,6 +466,7 @@ def _serialize_state(
         round_started_at=game.round_started_at,
         round_ends_at=game.round_ends_at,
         seconds_left=_seconds_left(game),
+        countdown_left=_countdown_left(game),
         solved_by_user_id=game.solved_by_user_id,
         solved_by_name=_display_name(solved_by, nicknames.get(game.solved_by_user_id or "")) if solved_by else None,
         stroke_seq=game.stroke_seq or 0,
@@ -563,8 +608,12 @@ def get_drawing_state(
     koptuktan sonra istemcinin toparlanma kaynağı budur.
     """
     game = _get_active_game(db, member.family_id)
-    if game and game.status == "finished":
-        game = None
+    if game:
+        if _prune_presence(db, game):
+            db.commit()
+            db.refresh(game)
+        if game.status == "finished":
+            game = None
     return _serialize_state(db, game, current_user, member)
 
 
@@ -655,7 +704,9 @@ def leave_drawing_game(
     _prune_presence(db, game)
     remaining = _online_players(_list_players(db, game.id))
 
-    if game.status == "drawing" and game.drawer_user_id == current_user.id:
+    if not remaining:
+        _deactivate_empty_game(db, game)
+    elif game.status == "drawing" and game.drawer_user_id == current_user.id:
         others = [p for p in remaining if p.user_id != current_user.id]
         if others:
             _transfer_draw(db, game, _pick_next_drawer(others, current_user.id), increment_round=False)
@@ -711,7 +762,9 @@ def start_next_round(
     logger.info(
         f"Çizim turu {game.round_number} başladı: aile {member.family_id}, çizen {drawer.user_id}"
     )
-    return _serialize_state(db, game, current_user, member)
+    state = _serialize_state(db, game, current_user, member)
+    state.started_round = True
+    return state
 
 
 @router.post("/drawing/round/skip-word", response_model=DrawingStateOut)

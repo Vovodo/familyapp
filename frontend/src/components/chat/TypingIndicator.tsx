@@ -31,15 +31,15 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = React.memo(
               className="w-7 h-7 rounded-full object-cover shadow-2xs"
             />
           ) : (
-            <div className="w-7 h-7 rounded-full bg-family-100 text-family-700 flex items-center justify-center font-bold text-xs shadow-2xs">
+            <div className="w-7 h-7 rounded-full text-white flex items-center justify-center font-bold text-xs" style={{ backgroundColor: 'var(--theme-accent)' }}>
               {displayName[0] || 'A'}
             </div>
           )}
         </div>
 
         {/* Typing bubble */}
-        <div className="bg-white px-3.5 py-2 rounded-2xl rounded-tl-xs shadow-xs border border-gray-100 flex items-center gap-2">
-          <span className="text-xs font-semibold text-gray-700">
+        <div className="theme-surface px-3.5 py-2 rounded-2xl rounded-tl-xs border theme-border flex items-center gap-2">
+          <span className="text-xs font-semibold theme-text-primary">
             {displayName} yazıyor
           </span>
           <div className="flex items-center gap-1 pt-0.5">

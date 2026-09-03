@@ -7,13 +7,24 @@ import android.media.AudioAttributes;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import com.aile.mobile.voice.VoiceChannelPlugin;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(VoiceChannelPlugin.class);
         super.onCreate(savedInstanceState);
         createNotificationChannels();
+    }
+
+    @Override
+    protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent != null && "com.aile.mobile.voice.RETURN".equals(intent.getAction())) {
+            VoiceChannelPlugin.emit("returnToApp");
+        }
     }
 
     private void createNotificationChannels() {

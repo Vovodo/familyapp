@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Heart, Users, ShieldCheck } from 'lucide-react';
+import { Users, ShieldCheck } from 'lucide-react';
+import { Logo } from '../branding/Logo';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 
@@ -24,9 +25,7 @@ export const Header: React.FC = () => {
     <header className="theme-header border-b px-4 py-3 sticky top-0 z-40 shadow-xs safe-area-top transition-colors duration-200">
       <div className="flex items-center justify-between max-w-lg mx-auto">
         <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-2xl theme-surface-secondary flex items-center justify-center text-family-600 shadow-inner">
-            <Heart className="w-6 h-6 fill-family-500 text-family-500 animate-pulse" />
-          </div>
+          <Logo size="sm" />
           <div>
             <div className="text-xs font-medium theme-text-secondary flex items-center gap-1">
               <span>{getGreeting()}</span>

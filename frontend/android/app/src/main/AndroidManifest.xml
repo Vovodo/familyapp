@@ -61,6 +61,21 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <service
+            android:name=".voice.VoiceForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone"
+            android:stopWithTask="true" />
+
+        <receiver
+            android:name=".voice.VoiceActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.aile.mobile.voice.MUTE" />
+                <action android:name="com.aile.mobile.voice.LEAVE" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->
@@ -76,5 +91,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
 </manifest>

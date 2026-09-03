@@ -521,3 +521,27 @@ def test_correct_guess_keeps_score_after_later_state_read(client):
     later_scores = {p["user_id"]: p["score"] for p in later["players"]}
     assert later_scores[body["solved_by_user_id"]] == 3
     assert later_scores[round_state["drawer_user_id"]] == 2
+
+
+def test_countdown_left_when_round_starts(client):
+    host, guest, _ = _family_with_two_players(client)
+    body = _start_round(client, host)
+    assert body["status"] == "drawing"
+    assert body["countdown_left"] in (2, 3)
+    assert body["seconds_left"] == 150
+
+
+def test_empty_room_deactivates_game_until_new_start(client):
+    host, guest, _ = _family_with_two_players(client)
+    assert client.post("/api/v1/games/drawing/leave", headers=guest).status_code == 200
+    assert _state(client, host)["status"] == "lobby"
+
+    left = client.post("/api/v1/games/drawing/leave", headers=host)
+    assert left.status_code == 200
+    assert left.json()["status"] == "none"
+    assert _state(client, host)["status"] == "none"
+    assert _state(client, guest)["status"] == "none"
+
+    restarted = client.post("/api/v1/games/drawing/start", headers=host)
+    assert restarted.status_code == 201
+    assert restarted.json()["status"] == "lobby"

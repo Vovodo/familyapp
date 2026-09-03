@@ -3,6 +3,7 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Camera as CapCamera } from '@capacitor/camera';
 import { App } from '@capacitor/app';
+import { notificationService } from './notificationService';
 
 export interface PermissionStatusReport {
   notifications: boolean;
@@ -143,7 +144,11 @@ class PermissionManagerService {
         try {
           const res = await PushNotifications.requestPermissions();
           const localRes = await LocalNotifications.requestPermissions();
-          return res.receive === 'granted' || localRes.display === 'granted';
+          const granted = res.receive === 'granted' || localRes.display === 'granted';
+          if (granted) {
+            await notificationService.ensurePushRegistered();
+          }
+          return granted;
         } catch {
           return false;
         }

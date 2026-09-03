@@ -70,6 +70,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const response = await api.get<User>('/auth/me');
           setUser(response.data);
           Sentry.setUser({ id: response.data.id });
+          await notificationService.syncPushRegistration();
         }
       } catch (error) {
         console.error('Session validation error:', error);
@@ -108,6 +109,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(access_token);
       setUser(registeredUser);
       Sentry.setUser({ id: registeredUser.id });
+      await notificationService.syncPushRegistration();
     } finally {
       setIsLoading(false);
     }
@@ -136,6 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(access_token);
       setUser(loggedUser);
       Sentry.setUser({ id: loggedUser.id });
+      await notificationService.syncPushRegistration();
     } finally {
       setIsLoading(false);
     }
@@ -179,6 +182,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(access_token);
       setUser(loggedUser);
       Sentry.setUser({ id: loggedUser.id });
+      await notificationService.syncPushRegistration();
     } finally {
       setIsLoading(false);
     }

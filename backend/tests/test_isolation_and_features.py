@@ -334,6 +334,7 @@ def test_close_family_purges_related_rows_and_leaves_other_family(client, db):
         TaskItem,
         WatchRoom,
         WatchRoomParticipant,
+        VoiceChannelParticipant,
     )
 
     host = client.post(
@@ -380,6 +381,7 @@ def test_close_family_purges_related_rows_and_leaves_other_family(client, db):
     assert client.post("/api/v1/games/drawing/start", headers=host_h).status_code == 201
     assert client.post("/api/v1/games/drawing/join", headers=guest_h).status_code == 200
     assert client.post("/api/v1/watch-party/rooms", json={"title": "Film"}, headers=host_h).status_code == 201
+    assert client.post("/api/v1/voice/join", headers=host_h).status_code == 200
     assert client.post("/api/v1/shopping/", json={"title": "Kalacak", "quantity": "1"}, headers=other_h).status_code == 201
 
     denied = client.post("/api/v1/families/close", json={"family_id": fam_id}, headers=guest_h)
@@ -402,6 +404,7 @@ def test_close_family_purges_related_rows_and_leaves_other_family(client, db):
     assert db.query(Poll).filter(Poll.family_id == fam_id).count() == 0
     assert db.query(WatchRoom).filter(WatchRoom.family_id == fam_id).count() == 0
     assert db.query(WatchRoomParticipant).filter(WatchRoomParticipant.family_id == fam_id).count() == 0
+    assert db.query(VoiceChannelParticipant).filter(VoiceChannelParticipant.family_id == fam_id).count() == 0
 
     leftover = client.get("/api/v1/families/my-families", headers=other_h).json()
     assert len(leftover) == 1
