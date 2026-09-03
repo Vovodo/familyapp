@@ -22,6 +22,7 @@ import { FamilySettingsPage } from './pages/family/FamilySettingsPage';
 import { GamesPage } from './pages/games/GamesPage';
 import { DrawGuessPage } from './pages/games/DrawGuessPage';
 import { WatchPartyPage } from './pages/watchparty/WatchPartyPage';
+import { WatchPartyRoomPage } from './pages/watchparty/WatchPartyRoomPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { liveUpdateService } from './services/liveUpdate';
 import { Loader2, Heart } from 'lucide-react';
@@ -140,6 +141,7 @@ export const App: React.FC = () => {
                   <Route path="/games" element={<GamesPage />} />
                   <Route path="/games/draw" element={<DrawGuessPage />} />
                   <Route path="/watch-party" element={<WatchPartyPage />} />
+                  <Route path="/watch-party/:roomId" element={<WatchPartyRoomPage />} />
                   <Route path="/family" element={<FamilySettingsPage />} />
                   <Route path="/admin" element={<AdminDashboardPage />} />
                 </Route>

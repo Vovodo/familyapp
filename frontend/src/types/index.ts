@@ -318,6 +318,66 @@ export interface DrawingGameState {
   online_count?: number;
 }
 
+export type WatchPlaybackState = 'idle' | 'playing' | 'paused' | 'ended';
+
+export interface WatchParticipant {
+  user_id: string;
+  name: string;
+  avatar_url?: string | null;
+  is_host: boolean;
+  is_online: boolean;
+}
+
+export interface WatchRoomState {
+  room_id: string;
+  title: string;
+  status: 'open' | 'ended' | string;
+  provider: string | null;
+  video_id: string | null;
+  video_url: string | null;
+  video_title: string | null;
+  duration_ms: number | null;
+  playback_state: WatchPlaybackState | string;
+  position_ms: number;
+  playback_rate: number;
+  control_seq: number;
+  host_user_id: string | null;
+  host_name: string | null;
+  created_by: string | null;
+  is_host: boolean;
+  can_control: boolean;
+  is_participant: boolean;
+  participants: WatchParticipant[];
+  online_count: number;
+  server_now: string;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface WatchRoomListItem {
+  room_id: string;
+  title: string;
+  status: string;
+  video_title: string | null;
+  video_id: string | null;
+  provider: string | null;
+  playback_state: string;
+  host_name: string | null;
+  online_count: number;
+  created_at: string;
+}
+
+export interface WatchChatMessage {
+  id: string;
+  room_id: string;
+  user_id: string;
+  name: string;
+  body: string;
+  video_position_ms: number | null;
+  client_message_id?: string | null;
+  created_at: string;
+}
+
 export interface DrawingStrokeRecord {
   seq: number;
   round_number: number;

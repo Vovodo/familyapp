@@ -17,6 +17,9 @@
     },
     "sentry": {
       "enabled": true
+    },
+    "github": {
+      "enabled": true
     }
   }
 }

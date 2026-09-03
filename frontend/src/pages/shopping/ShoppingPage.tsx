@@ -57,6 +57,11 @@ export const ShoppingPage: React.FC = () => {
   const applyDelta = useCallback((action: 'INSERT' | 'UPDATE' | 'DELETE', item?: ShoppingItem | null) => {
     if (!currentFamily || !item || !item.id) return;
 
+    // Skip remote events for items we're actively mutating locally
+    if (action !== 'DELETE' && pendingActionIds.current.has(item.id)) return;
+    // For DELETE, skip only if we already removed it (don't undo our own delete)
+    if (action === 'DELETE' && pendingActionIds.current.has(item.id)) return;
+
     const incomingCompleted = asCompletedFlag(item.is_completed);
     const intended = pendingCompletionRef.current.get(item.id);
     if (

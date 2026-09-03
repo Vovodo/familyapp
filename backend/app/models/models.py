@@ -529,3 +529,85 @@ class DrawingWordHistory(Base):
         Index("idx_drawing_word_history_user_word", "user_id", "word"),
     )
 
+
+class WatchRoom(Base):
+    """
+    Aile seyir odası. Oynatma konumu sunucuda çapadır: playing iken
+    gerçek konum = position_ms + (şimdi - position_updated_at).
+    Video dosyası saklanmaz; yalnızca sağlayıcı kimliği (ör. YouTube id).
+    """
+    __tablename__ = "watch_rooms"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    host_user_id = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    title = Column(String(120), nullable=False, default="Seyir Odası")
+    status = Column(String(20), nullable=False, default="open", index=True)  # open | ended
+
+    video_provider = Column(String(30), nullable=True)  # youtube | ...
+    video_id = Column(String(40), nullable=True)
+    video_url = Column(String(500), nullable=True)
+    video_title = Column(String(200), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+
+    playback_state = Column(String(20), nullable=False, default="idle")  # idle | playing | paused | ended
+    position_ms = Column(Integer, nullable=False, default=0)
+    position_updated_at = Column(DateTime(timezone=True), default=get_utc_now)
+    playback_rate = Column(Float, nullable=False, default=1.0)
+    control_seq = Column(Integer, nullable=False, default=0)
+    last_control_user_id = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_watch_rooms_family_status", "family_id", "status"),
+    )
+
+    family = relationship("Family", backref="watch_rooms")
+    participants = relationship("WatchRoomParticipant", back_populates="room", cascade="all, delete-orphan")
+    messages = relationship("WatchRoomMessage", back_populates="room", cascade="all, delete-orphan")
+
+
+class WatchRoomParticipant(Base):
+    __tablename__ = "watch_room_participants"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    room_id = Column(String(36), ForeignKey("watch_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    is_present = Column(Boolean, default=True)
+    last_seen_at = Column(DateTime(timezone=True), default=get_utc_now)
+    joined_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("room_id", "user_id", name="uq_watch_room_participant"),
+        Index("idx_watch_participants_room", "room_id", "is_present"),
+    )
+
+    room = relationship("WatchRoom", back_populates="participants")
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+
+
+class WatchRoomMessage(Base):
+    """Oda sohbeti. video_position_ms ileride sahne yorumları için saklanır."""
+    __tablename__ = "watch_room_messages"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    room_id = Column(String(36), ForeignKey("watch_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    body = Column(String(500), nullable=False)
+    video_position_ms = Column(Integer, nullable=True)
+    client_message_id = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_watch_messages_room_created", "room_id", "created_at"),
+        UniqueConstraint("room_id", "client_message_id", name="uq_watch_message_client_id"),
+    )
+
+    room = relationship("WatchRoom", back_populates="messages")
+    user = relationship("User", foreign_keys=[user_id], lazy="joined")
+

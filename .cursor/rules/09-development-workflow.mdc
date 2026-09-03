@@ -68,3 +68,29 @@ Yapma: eski APK’nın üzerine ek kopya yığmak; birden fazla `ailem.apk` bır
 - [ ] Secret `.env` / APK içine girmedi
 - [ ] Etkilenen testler geçti (full suite yalnız release / geniş çapraz etki)
 - [ ] Frontend değiştiyse `npm run build` geçti
+- [ ] **Commit/push öncesi APK güncellendi** (aşağıya bak)
+
+## ⚠️ ÖNEMLİ — Commit/push öncesi APK zorunluluğu
+
+Her `git commit` + `git push` öncesinde APK **mutlaka** yeniden paketlenmeli ve web indirme butonuna bağlanmalıdır.
+Bu adım atlanırsa canlıdaki **APK İndir** butonu eski sürümü verir.
+
+```bash
+cd frontend
+npm run build          # web build + OTA
+npx cap sync android   # web → Capacitor kopyala
+cd android
+.\gradlew.bat assembleDebug
+cd ..
+npm run apk:publish    # backend/app/static/ailem.apk'ya taşı
+```
+
+`npm run apk:publish` (`scripts/publish-apk.js`) şunları sırayla yapar:
+1. Eski `backend/app/static/ailem.apk`, `public/downloads/ailem.apk`, kök `ailem.apk` varsa **siler**
+2. Yeni `app-debug.apk`'yı `backend/app/static/ailem.apk` olarak yazar
+
+**Birden fazla `ailem.apk` kopyası bırakma; repo şişer, indirme tutarsız olur.**
+Bu dosya commite dahil edilmeli veya Coolify volume'una taşınmalı; aksi hâlde web indirmesi güncellenmez.
+
+Yapma: APK adımını atlayıp yalnızca web kodunu push'lamak.
+Yapma: eski APK'yı silmeden yenisini yazmak.

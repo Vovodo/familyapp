@@ -15,7 +15,10 @@ from backend.app.models.models import (
     DrawingGamePlayer,
     DrawingStroke,
     DrawingGuess,
-    DrawingWordHistory
+    DrawingWordHistory,
+    WatchRoom,
+    WatchRoomParticipant,
+    WatchRoomMessage,
 )
 
 __all__ = [
@@ -35,5 +38,8 @@ __all__ = [
     "DrawingGamePlayer",
     "DrawingStroke",
     "DrawingGuess",
-    "DrawingWordHistory"
+    "DrawingWordHistory",
+    "WatchRoom",
+    "WatchRoomParticipant",
+    "WatchRoomMessage",
 ]

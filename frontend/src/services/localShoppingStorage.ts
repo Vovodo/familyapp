@@ -32,19 +32,23 @@ export const localShoppingStorage = {
    */
   mergeItems(familyId: string, serverItems: ShoppingItem[]): ShoppingItem[] {
     const local = this.getItems(familyId);
-    const itemMap = new Map<string, ShoppingItem>();
-    const localList = Array.isArray(local) ? local : [];
     const serverList = Array.isArray(serverItems) ? serverItems : [];
+    const localList = Array.isArray(local) ? local : [];
 
-    for (const item of localList) {
-      if (item?.id && !isTempId(item.id)) itemMap.set(item.id, item);
-    }
+    // Server is the source of truth. Only keep local temp items not yet confirmed by server.
+    const pendingTemps = localList.filter(
+      (item) => item?.id && isTempId(item.id) &&
+        !serverList.some(
+          (s) => s.title === item.title && s.quantity === item.quantity && s.category === item.category
+        )
+    );
 
+    const itemMap = new Map<string, ShoppingItem>();
     for (const sItem of serverList) {
       if (sItem?.id) itemMap.set(sItem.id, sItem);
     }
 
-    const merged = Array.from(itemMap.values());
+    const merged = [...pendingTemps, ...Array.from(itemMap.values())];
     // Sort active first, then by created_at desc
     merged.sort((a, b) => {
       if (a.is_completed !== b.is_completed) {

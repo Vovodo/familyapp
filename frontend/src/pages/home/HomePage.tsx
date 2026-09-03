@@ -458,7 +458,7 @@ export const HomePage: React.FC = () => {
       bgColor: 'bg-violet-50/80',
       iconBg: 'bg-violet-600',
       textColor: 'text-violet-900',
-      badge: 'Yakında',
+      badge: 'Birlikte izle',
     },
     {
       title: 'Fotoğraf & Anılar',

@@ -120,7 +120,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
 
     return (
       <div
-        className={`flex items-center gap-2 ${
+        className={`flex items-start gap-2 ${
           isMe ? 'justify-end' : 'justify-start'
         } ${isLastInGroup ? 'mb-2' : 'mb-0.5'} group select-none transition-all duration-150`}
         onTouchStart={handleTouchStart}
@@ -136,8 +136,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
       >
         {/* Sender Avatar for incoming messages */}
         {!isMe && (
-          <div className="w-7 flex-shrink-0">
-            {isLastInGroup ? (
+          <div className="w-7 flex-shrink-0 self-start">
+            {isFirstInGroup ? (
               message.sender_avatar ? (
                 <img
                   src={message.sender_avatar}
