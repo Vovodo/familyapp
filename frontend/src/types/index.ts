@@ -226,6 +226,7 @@ export interface ShoppingItem {
   is_completed: boolean;
   completed_at?: string;
   created_at: string;
+  updated_at?: string;
   creator_name?: string;
   completed_by_name?: string;
 }
@@ -272,6 +273,7 @@ export interface NotificationItem {
 export interface DrawingPlayer {
   user_id: string;
   name: string;
+  avatar_url?: string | null;
   score: number;
   rounds_drawn: number;
   is_drawer: boolean;
@@ -308,10 +310,12 @@ export interface DrawingGameState {
   solved_by_user_id: string | null;
   solved_by_name: string | null;
   stroke_seq: number;
+  revision?: number;
   players: DrawingPlayer[];
   guesses: DrawingGuessItem[];
   is_player: boolean;
   min_players: number;
+  max_players?: number | null;
   family_member_count: number;
   pool_size: number;
   my_words_seen: number;

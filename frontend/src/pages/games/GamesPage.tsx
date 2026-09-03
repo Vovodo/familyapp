@@ -45,7 +45,7 @@ export const GamesPage: React.FC = () => {
             <div className="flex items-center gap-3 mt-2 text-[11px] font-bold text-fuchsia-800">
               <span className="flex items-center gap-1">
                 <Users className="w-3.5 h-3.5" />
-                En az 2 kişi
+                En az 2 kişi · üst sınır yok
               </span>
               <span>·</span>
               <span>{memberCount} aile üyesi</span>

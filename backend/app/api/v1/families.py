@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from backend.app.db.session import get_db
 from backend.app.models.models import (
@@ -20,7 +21,21 @@ from backend.app.models.models import (
     ShoppingItem,
     Media,
     Notification,
-    DeviceToken
+    DeviceToken,
+    TaskItem,
+    BudgetItem,
+    Poll,
+    PollVote,
+    StorageObject,
+    StorageCleanupJob,
+    DrawingGame,
+    DrawingGamePlayer,
+    DrawingStroke,
+    DrawingGuess,
+    DrawingWordHistory,
+    WatchRoom,
+    WatchRoomParticipant,
+    WatchRoomMessage,
 )
 from backend.app.schemas.schemas import (
     FamilyCreate,
@@ -46,6 +61,84 @@ _heart_lock = threading.Lock()
 def generate_invite_code(length: int = 6) -> str:
     digits = ''.join(random.choices(string.digits, k=length))
     return f"AILE-{digits}"
+
+
+class FamilyCloseRequest(BaseModel):
+    family_id: Optional[str] = None
+
+
+def _purge_family_records(db: Session, family_id: str) -> None:
+    """Aileye bağlı satırları FK sırasına göre siler. Canlı Postgres'te CASCADE eksik olsa da IntegrityError olmasın."""
+    game_ids = [row[0] for row in db.query(DrawingGame.id).filter(DrawingGame.family_id == family_id).all()]
+    if game_ids:
+        db.query(DrawingStroke).filter(DrawingStroke.game_id.in_(game_ids)).delete(synchronize_session=False)
+        db.query(DrawingGuess).filter(DrawingGuess.game_id.in_(game_ids)).delete(synchronize_session=False)
+        db.query(DrawingGamePlayer).filter(DrawingGamePlayer.game_id.in_(game_ids)).delete(synchronize_session=False)
+    db.query(DrawingGame).filter(DrawingGame.family_id == family_id).delete(synchronize_session=False)
+    db.query(DrawingWordHistory).filter(DrawingWordHistory.family_id == family_id).update(
+        {DrawingWordHistory.family_id: None}, synchronize_session=False
+    )
+
+    db.query(WatchRoomMessage).filter(WatchRoomMessage.family_id == family_id).delete(synchronize_session=False)
+    db.query(WatchRoomParticipant).filter(WatchRoomParticipant.family_id == family_id).delete(synchronize_session=False)
+    db.query(WatchRoom).filter(WatchRoom.family_id == family_id).delete(synchronize_session=False)
+
+    poll_ids = [row[0] for row in db.query(Poll.id).filter(Poll.family_id == family_id).all()]
+    if poll_ids:
+        db.query(PollVote).filter(PollVote.poll_id.in_(poll_ids)).delete(synchronize_session=False)
+    db.query(Poll).filter(Poll.family_id == family_id).delete(synchronize_session=False)
+
+    db.query(Notification).filter(Notification.family_id == family_id).delete(synchronize_session=False)
+    db.query(TaskItem).filter(TaskItem.family_id == family_id).delete(synchronize_session=False)
+    db.query(BudgetItem).filter(BudgetItem.family_id == family_id).delete(synchronize_session=False)
+    db.query(StorageObject).filter(StorageObject.family_id == family_id).delete(synchronize_session=False)
+    db.query(StorageCleanupJob).filter(StorageCleanupJob.family_id == family_id).delete(synchronize_session=False)
+
+    db.query(Message).filter(Message.family_id == family_id).delete(synchronize_session=False)
+    db.query(Note).filter(Note.family_id == family_id).delete(synchronize_session=False)
+    db.query(Reminder).filter(Reminder.family_id == family_id).delete(synchronize_session=False)
+    db.query(ShoppingItem).filter(ShoppingItem.family_id == family_id).delete(synchronize_session=False)
+    db.query(Media).filter(Media.family_id == family_id).delete(synchronize_session=False)
+    db.query(FamilyMember).filter(FamilyMember.family_id == family_id).delete(synchronize_session=False)
+
+
+def _assert_can_close_family(family: Family, current_user: User) -> None:
+    is_creator = (
+        family.created_by == current_user.id
+        or (family.created_by is None and current_user.role == "admin")
+        or current_user.role == "admin"
+    )
+    if not is_creator:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu aile grubunu yalnızca grubu kuran kurucu üye kapatabilir.",
+        )
+
+
+def _close_family_group(db: Session, family: Family, current_user: User) -> dict:
+    family_id = family.id
+    _assert_can_close_family(family, current_user)
+    try:
+        _purge_family_records(db, family_id)
+        db.query(Family).filter(Family.id == family_id).delete(synchronize_session=False)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.exception(f"Aile silinemedi (FK): {family_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Aile grubu silinirken bir veritabanı hatası oluştu. Lütfen tekrar deneyin.",
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(f"Aile silinemedi: {family_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Aile grubu silinemedi. Lütfen tekrar deneyin.",
+        )
+
+    logger.info(f"Family {family_id} deleted by creator {current_user.id}")
+    return {"message": "Aile grubu ve tüm verileri kalıcı olarak silindi."}
 
 
 @router.post("/", response_model=FamilyResponse, status_code=status.HTTP_201_CREATED)
@@ -275,12 +368,9 @@ def transfer_family_ownership(
     Grup kurucusu sahipliği başka bir üyeye aktarır. Aktarımdan sonra
     eski kurucu üye olarak kalır ve gruptan ayrılıp yeni aile kurabilir.
     """
-    family = (
-        db.query(Family)
-        .filter(Family.id == member.family_id)
-        .with_for_update()
-        .first()
-    )
+    # Family.members lazy="joined". Postgres'te FOR UPDATE + OUTER JOIN
+    # "nullable side of an outer join" hatası verir; PgBouncer ile de kilitlenir.
+    family = db.query(Family).filter(Family.id == member.family_id).first()
     if not family:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Aile bulunamadı.")
 
@@ -313,12 +403,40 @@ def transfer_family_ownership(
     target.role = "admin"
     member.role = "member"
 
-    db.commit()
-    db.refresh(family)
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(f"Sahiplik aktarılamadı: aile {member.family_id}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Sahiplik aktarılamadı. Lütfen tekrar deneyin.",
+        )
+
+    family = db.query(Family).filter(Family.id == member.family_id).first()
     logger.info(
         f"Aile sahipliği aktarıldı: aile {family.id}, {current_user.id} -> {target.user_id}"
     )
     return family
+
+
+@router.post("/close", status_code=status.HTTP_200_OK)
+def close_family(
+    payload: Optional[FamilyCloseRequest] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    member: FamilyMember = Depends(get_current_family_member),
+):
+    """Aktif aileyi kapatır. DELETE yerine POST: bazı proxy'ler boş gövdeli DELETE'i düşürür."""
+    if payload and payload.family_id and payload.family_id != member.family_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aktif aile ile kapatılacak aile eşleşmiyor. Ayarlar sayfasını yenileyip tekrar deneyin.",
+        )
+    family = db.query(Family).filter(Family.id == member.family_id).first()
+    if not family:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Aile grubu bulunamadı.")
+    return _close_family_group(db, family, current_user)
 
 
 @router.delete("/{family_id}", status_code=status.HTTP_200_OK)
@@ -338,27 +456,7 @@ def delete_family(
             detail="Aile grubu bulunamadı."
         )
 
-    # Strict Permission Check: Only the creator of the family (or admin if created_by is None) can delete the group
-    is_creator = (family.created_by == current_user.id) or (family.created_by is None and current_user.role == "admin") or current_user.role == "admin"
-    if not is_creator:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bu aile grubunu yalnızca grubu kuran kurucu üye kapatabilir."
-        )
-
-    # Cascade delete data for this specific family
-    db.query(Message).filter(Message.family_id == family_id).delete(synchronize_session=False)
-    db.query(Note).filter(Note.family_id == family_id).delete(synchronize_session=False)
-    db.query(Reminder).filter(Reminder.family_id == family_id).delete(synchronize_session=False)
-    db.query(ShoppingItem).filter(ShoppingItem.family_id == family_id).delete(synchronize_session=False)
-    db.query(Media).filter(Media.family_id == family_id).delete(synchronize_session=False)
-    db.query(FamilyMember).filter(FamilyMember.family_id == family_id).delete(synchronize_session=False)
-
-    db.delete(family)
-    db.commit()
-
-    logger.info(f"Family {family_id} deleted by creator {current_user.id}")
-    return {"message": "Aile grubu ve tüm verileri kalıcı olarak silindi."}
+    return _close_family_group(db, family, current_user)
 
 
 @router.post("/heart", response_model=HeartEventResponse, status_code=status.HTTP_200_OK)

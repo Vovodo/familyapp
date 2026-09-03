@@ -57,6 +57,7 @@ SCORE_DRAWER_SOLVED = 2
 class DrawingPlayerOut(BaseModel):
     user_id: str
     name: str
+    avatar_url: Optional[str] = None
     score: int
     rounds_drawn: int
     is_drawer: bool
@@ -101,10 +102,12 @@ class DrawingStateOut(BaseModel):
     solved_by_user_id: Optional[str] = None
     solved_by_name: Optional[str] = None
     stroke_seq: int = 0
+    revision: int = 0
     players: List[DrawingPlayerOut] = []
     guesses: List[DrawingGuessOut] = []
     is_player: bool = False
     min_players: int = MIN_PLAYERS
+    max_players: Optional[int] = None
     family_member_count: int = 0
     pool_size: int = POOL_SIZE
     my_words_seen: int = 0
@@ -208,6 +211,17 @@ def _lock_game(db: Session, game: DrawingGame) -> DrawingGame:
 def _touch_player(player: DrawingGamePlayer) -> None:
     player.is_present = True
     player.last_seen_at = datetime.now(timezone.utc)
+
+
+def _bump_revision(game: DrawingGame) -> None:
+    game.revision = (game.revision or 0) + 1
+    game.updated_at = datetime.now(timezone.utc)
+
+
+def _avatar_url(user: Optional[User]) -> Optional[str]:
+    if user and user.avatar_url:
+        return user.avatar_url
+    return None
 
 
 def _touch_current_if_present(db: Session, game: DrawingGame, user_id: str) -> None:
@@ -332,6 +346,7 @@ def _serialize_state(
     game: Optional[DrawingGame],
     current_user: User,
     member: FamilyMember,
+    include_word_stats: bool = True,
 ) -> DrawingStateOut:
     family_member_count = (
         db.query(func.count(FamilyMember.id))
@@ -339,7 +354,7 @@ def _serialize_state(
         .scalar()
         or 0
     )
-    words_seen = _words_seen_count(db, current_user.id)
+    words_seen = _words_seen_count(db, current_user.id) if include_word_stats else 0
 
     if not game:
         return DrawingStateOut(
@@ -352,6 +367,22 @@ def _serialize_state(
     nicknames = _nicknames_for_family(db, member.family_id)
     all_players = _list_players(db, game.id)
     online = _online_players(all_players)
+    online_ids = {p.user_id for p in online}
+
+    # Lobi: yalnızca odadakiler. Oyun içinde skorları kaybetmemek için
+    # puanı olan / çizen / kazanan oyuncular da listede kalır.
+    if game.status == "lobby":
+        visible_players = online
+    else:
+        visible_ids = set(online_ids)
+        if game.drawer_user_id:
+            visible_ids.add(game.drawer_user_id)
+        if game.solved_by_user_id:
+            visible_ids.add(game.solved_by_user_id)
+        visible_players = [
+            p for p in all_players
+            if p.user_id in visible_ids or (p.score or 0) > 0
+        ]
 
     # Çizen yalnızca odada olan bir oyuncu olabilir; aksi halde isim/araçlar kayar.
     drawer_id = game.drawer_user_id if game.status == "drawing" else None
@@ -394,6 +425,7 @@ def _serialize_state(
         solved_by_user_id=game.solved_by_user_id,
         solved_by_name=_display_name(solved_by, nicknames.get(game.solved_by_user_id or "")) if solved_by else None,
         stroke_seq=game.stroke_seq or 0,
+        revision=game.revision or 0,
         is_player=any(p.user_id == current_user.id for p in online),
         family_member_count=family_member_count,
         my_words_seen=words_seen,
@@ -402,12 +434,16 @@ def _serialize_state(
             DrawingPlayerOut(
                 user_id=p.user_id,
                 name=_display_name(p.user, nicknames.get(p.user_id)),
+                avatar_url=_avatar_url(p.user),
                 score=p.score or 0,
                 rounds_drawn=p.rounds_drawn or 0,
                 is_drawer=bool(drawer_id) and p.user_id == drawer_id,
-                is_online=True,
+                is_online=p.user_id in online_ids,
             )
-            for p in sorted(online, key=lambda p: (-(p.score or 0), p.joined_at or datetime.now(timezone.utc)))
+            for p in sorted(
+                visible_players,
+                key=lambda p: (-(p.score or 0), p.joined_at or datetime.now(timezone.utc)),
+            )
         ],
         guesses=[
             DrawingGuessOut(
@@ -527,13 +563,8 @@ def get_drawing_state(
     koptuktan sonra istemcinin toparlanma kaynağı budur.
     """
     game = _get_active_game(db, member.family_id)
-    if game:
-        _touch_current_if_present(db, game, current_user.id)
-        _prune_presence(db, game)
-        db.commit()
-        db.refresh(game)
-        if game.status == "finished":
-            game = None
+    if game and game.status == "finished":
+        game = None
     return _serialize_state(db, game, current_user, member)
 
 
@@ -562,9 +593,10 @@ def start_drawing_game(
 
     _ensure_player(db, game, current_user.id)
     _prune_presence(db, game)
+    _bump_revision(game)
     db.commit()
     db.refresh(game)
-    return _serialize_state(db, game, current_user, member)
+    return _serialize_state(db, game, current_user, member, include_word_stats=False)
 
 
 @router.post("/drawing/join", response_model=DrawingStateOut)
@@ -573,13 +605,14 @@ def join_drawing_game(
     current_user: User = Depends(get_current_user),
     member: FamilyMember = Depends(get_current_family_member),
 ):
-    """Aktif oyuna oyuncu olarak katılır."""
+    """Aktif oyuna oyuncu olarak katılır. Üst sınır yoktur."""
     game = _require_active_game(db, member.family_id)
     _prune_presence(db, game)
     _ensure_player(db, game, current_user.id)
+    _bump_revision(game)
     db.commit()
     db.refresh(game)
-    return _serialize_state(db, game, current_user, member)
+    return _serialize_state(db, game, current_user, member, include_word_stats=False)
 
 
 @router.post("/drawing/heartbeat", response_model=DrawingStateOut)
@@ -596,7 +629,7 @@ def drawing_heartbeat(
     _prune_presence(db, game)
     db.commit()
     db.refresh(game)
-    return _serialize_state(db, game, current_user, member)
+    return _serialize_state(db, game, current_user, member, include_word_stats=False)
 
 
 @router.post("/drawing/leave", response_model=DrawingStateOut)
@@ -631,8 +664,11 @@ def leave_drawing_game(
     elif game.status != "lobby" and len(remaining) < MIN_PLAYERS:
         _pause_to_lobby(db, game)
 
+    _bump_revision(game)
     db.commit()
-    return _serialize_state(db, None if game.status == "finished" else game, current_user, member)
+    return _serialize_state(
+        db, None if game.status == "finished" else game, current_user, member, include_word_stats=False
+    )
 
 
 @router.post("/drawing/round/next", response_model=DrawingStateOut)
@@ -668,6 +704,7 @@ def start_next_round(
 
     drawer = _pick_next_drawer(online, game.drawer_user_id)
     _begin_round(db, game, drawer)
+    _bump_revision(game)
 
     db.commit()
     db.refresh(game)
@@ -699,6 +736,7 @@ def skip_current_word(
     db.query(DrawingStroke).filter(DrawingStroke.game_id == game.id).delete(synchronize_session=False)
     game.stroke_seq = 0
     _assign_word(db, game, current_user.id)
+    _bump_revision(game)
     db.commit()
     db.refresh(game)
     return _serialize_state(db, game, current_user, member)
@@ -732,6 +770,7 @@ def pass_drawing_turn(
         )
 
     _transfer_draw(db, game, _pick_next_drawer(others, current_user.id), increment_round=False)
+    _bump_revision(game)
     db.commit()
     db.refresh(game)
     return _serialize_state(db, game, current_user, member)
@@ -751,6 +790,7 @@ def reveal_round(
     game.status = "round_end"
     game.solved_by_user_id = None
     game.solved_at = None
+    _bump_revision(game)
     db.commit()
     db.refresh(game)
     return _serialize_state(db, game, current_user, member)
@@ -768,6 +808,7 @@ def finish_drawing_game(
     game.status = "finished"
     game.current_word = None
     game.drawer_user_id = None
+    _bump_revision(game)
     db.commit()
     return _serialize_state(db, None, current_user, member)
 
@@ -783,7 +824,7 @@ def submit_guess(
     Tahmin gönderir. Doğruluk kontrolü yalnızca sunucuda yapılır; istemciye
     kelime gitmediği için tahmin de istemcide doğrulanamaz.
     """
-    game = _require_active_game(db, member.family_id)
+    game = _lock_game(db, _require_active_game(db, member.family_id))
     if game.status != "drawing":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -795,7 +836,7 @@ def submit_guess(
             detail="Çizen oyuncu tahmin yapamaz.",
         )
 
-    _ensure_player(db, game, current_user.id)
+    guesser = _ensure_player(db, game, current_user.id)
 
     text = payload.text.strip()
     is_correct = bool(game.current_word) and normalize_guess(text) == normalize_guess(game.current_word)
@@ -813,16 +854,15 @@ def submit_guess(
         game.status = "round_end"
         game.solved_by_user_id = current_user.id
         game.solved_at = datetime.now(timezone.utc)
-
-        guesser = _ensure_player(db, game, current_user.id)
         guesser.score = (guesser.score or 0) + SCORE_CORRECT_GUESS
         if game.drawer_user_id:
             drawer = _ensure_player(db, game, game.drawer_user_id)
             drawer.score = (drawer.score or 0) + SCORE_DRAWER_SOLVED
 
+    _bump_revision(game)
     db.commit()
     db.refresh(game)
-    return _serialize_state(db, game, current_user, member)
+    return _serialize_state(db, game, current_user, member, include_word_stats=False)
 
 
 @router.get("/drawing/strokes", response_model=StrokesOut)

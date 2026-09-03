@@ -44,6 +44,8 @@ interface DrawingCanvasProps {
   onLivePoints?: (strokeId: string, points: number[]) => void;
   onStrokeEnd?: (strokeId: string, stroke: NormalizedStroke) => void;
   className?: string;
+  /** Mobilde oran yerine ebeveyn yüksekliğini doldurur. */
+  fillHeight?: boolean;
 }
 
 interface RuntimeStroke {
@@ -57,7 +59,7 @@ interface RuntimeStroke {
 const clampCoord = (value: number) => Math.max(0, Math.min(COORD_SPACE, Math.round(value)));
 
 export const DrawingCanvas = React.forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
-  ({ interactive, color, width, onStrokeStart, onLivePoints, onStrokeEnd, className }, ref) => {
+  ({ interactive, color, width, onStrokeStart, onLivePoints, onStrokeEnd, className, fillHeight }, ref) => {
     const wrapperRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -145,7 +147,8 @@ export const DrawingCanvas = React.forwardRef<DrawingCanvasHandle, DrawingCanvas
       const ctx = ctxRef.current;
       if (!ctx) return;
       const { cssWidth, cssHeight } = sizeRef.current;
-      ctx.clearRect(0, 0, cssWidth, cssHeight);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, cssWidth, cssHeight);
 
       historyRef.current.forEach((stroke) => {
         renderStrokeFrom({ stroke, rendered: 0, lastMidX: 0, lastMidY: 0 });
@@ -385,16 +388,21 @@ export const DrawingCanvas = React.forwardRef<DrawingCanvasHandle, DrawingCanvas
     return (
       <div
         ref={wrapperRef}
-        className={`relative w-full overflow-hidden bg-white ${className || ''}`}
-        style={{ aspectRatio: '4 / 3', touchAction: 'none' }}
+        className={`relative w-full overflow-hidden bg-white ${fillHeight ? 'h-full' : ''} ${className || ''}`}
+        style={{
+          aspectRatio: fillHeight ? undefined : '4 / 3',
+          touchAction: 'none',
+          backgroundColor: '#ffffff',
+        }}
       >
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 block"
+          className="absolute inset-0 block bg-white"
           style={{
             touchAction: 'none',
             cursor: interactive ? 'crosshair' : 'default',
             userSelect: 'none',
+            backgroundColor: '#ffffff',
           }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}

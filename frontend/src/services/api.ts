@@ -5,6 +5,7 @@ export const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://familyapi.r
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 45000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -84,6 +85,13 @@ api.interceptors.request.use(async (config) => {
     console.error('Error in request interceptor:', err);
   }
 
+  const method = (config.method || 'get').toLowerCase();
+  const hasBody = config.data !== undefined && config.data !== null && config.data !== '';
+  if (['get', 'head', 'delete'].includes(method) && !hasBody) {
+    delete config.headers['Content-Type'];
+    delete config.headers['content-type'];
+  }
+
   return config;
 });
 
@@ -115,9 +123,13 @@ api.interceptors.response.use(
         message = 'Bu işlem için yetkiniz bulunmuyor.';
       } else if (error.response.status === 404) {
         message = 'İstenen kayıt bulunamadı.';
+      } else if ([502, 503, 504].includes(error.response.status)) {
+        message = 'Sunucu geçici olarak yanıt veremedi. Lütfen birkaç saniye sonra tekrar deneyin.';
       }
+    } else if (error.code === 'ECONNABORTED') {
+      message = 'İstek zaman aşımına uğradı. Lütfen tekrar deneyin.';
     } else if (error.request) {
-      message = 'Sunucuya ulaşılamıyor. Lütfen internet bağlantınızı kontrol edin.';
+      message = 'Sunucu yanıt vermedi. İnternetiniz olsa da sunucu isteği tamamlayamamış olabilir; birkaç saniye sonra tekrar deneyin.';
     }
 
     const requestUrl: string = error.config?.url || '';

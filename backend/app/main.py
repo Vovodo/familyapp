@@ -47,6 +47,7 @@ def run_safe_migrations():
                 "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS phone VARCHAR(30);",
                 "ALTER TABLE drawing_game_players ADD COLUMN IF NOT EXISTS is_present BOOLEAN DEFAULT TRUE;",
                 "ALTER TABLE drawing_game_players ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP WITH TIME ZONE;",
+                "ALTER TABLE drawing_games ADD COLUMN IF NOT EXISTS revision INTEGER DEFAULT 0;",
                 "UPDATE drawing_game_players SET last_seen_at = CURRENT_TIMESTAMP WHERE last_seen_at IS NULL AND is_present IS NOT FALSE;",
             ]
             for sql in migrations:
@@ -152,8 +153,11 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 # Global Exception Handler for friendly error responses
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    import sentry_sdk
-    sentry_sdk.capture_exception(exc)
+    try:
+        import sentry_sdk
+        sentry_sdk.capture_exception(exc)
+    except Exception:
+        pass
     logger.error(f"Unhandled exception on {request.url.path}: {exc}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

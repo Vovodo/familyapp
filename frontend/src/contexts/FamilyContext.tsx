@@ -174,7 +174,9 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const deleteFamily = async (familyId: string) => {
     setIsLoading(true);
     try {
-      await api.delete(`/families/${familyId}`);
+      await api.post('/families/close', { family_id: familyId }, {
+        headers: { 'x-family-id': familyId },
+      });
 
       try {
         localStorage.removeItem(`ailem_msgs_${familyId}`);

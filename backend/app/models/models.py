@@ -435,6 +435,8 @@ class DrawingGame(Base):
 
     # Çizim olaylarının sırası ve yeniden bağlanma sonrası fark alma için sayaç
     stroke_seq = Column(Integer, default=0)
+    # İstemcinin eski heartbeat/state yanıtını yeni skorun üzerine yazmasını engeller
+    revision = Column(Integer, default=0, nullable=False)
 
     created_at = Column(DateTime(timezone=True), default=get_utc_now)
     updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)

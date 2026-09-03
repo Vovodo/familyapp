@@ -475,3 +475,49 @@ def test_left_player_does_not_reappear_without_join(client):
     heartbeat = client.post("/api/v1/games/drawing/heartbeat", headers=guest)
     assert heartbeat.status_code == 200
     assert heartbeat.json()["is_player"] is False
+
+
+def test_more_than_four_players_can_join_lobby(client):
+    host, guest, family = _family_with_two_players(client)
+    extras = []
+    for index in range(4):
+        extra = _register(client, f"Oyuncu{index + 3}")
+        joined = client.post(
+            "/api/v1/families/join",
+            json={"invite_code": family["invite_code"], "nickname": f"Oyuncu{index + 3}"},
+            headers=extra,
+        )
+        assert joined.status_code == 200, joined.text
+        extra["x-family-id"] = family["id"]
+        assert client.post("/api/v1/games/drawing/join", headers=extra).status_code == 200
+        extras.append(extra)
+
+    lobby = _state(client, host)
+    assert lobby["max_players"] is None
+    assert lobby["min_players"] == 2
+    assert len(lobby["players"]) == 6
+
+
+def test_correct_guess_keeps_score_after_later_state_read(client):
+    host, guest, _ = _family_with_two_players(client)
+    round_state = _start_round(client, host)
+    drawer_headers = host if round_state["is_drawer"] else guest
+    guesser_headers = guest if round_state["is_drawer"] else host
+    secret = _state(client, drawer_headers)["word"]
+
+    before = _state(client, guesser_headers)
+    solved = client.post(
+        "/api/v1/games/drawing/guess", json={"text": secret}, headers=guesser_headers
+    )
+    assert solved.status_code == 200, solved.text
+    body = solved.json()
+    assert body["revision"] > (before.get("revision") or 0)
+    assert body["solved_by_user_id"]
+    scores = {p["user_id"]: p["score"] for p in body["players"]}
+    assert scores[body["solved_by_user_id"]] == 3
+    assert scores[round_state["drawer_user_id"]] == 2
+
+    later = _state(client, host)
+    later_scores = {p["user_id"]: p["score"] for p in later["players"]}
+    assert later_scores[body["solved_by_user_id"]] == 3
+    assert later_scores[round_state["drawer_user_id"]] == 2

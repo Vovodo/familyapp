@@ -353,6 +353,7 @@ class ShoppingItemResponse(ShoppingItemBase):
     is_completed: bool
     completed_at: Optional[datetime] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     creator_name: Optional[str] = None
     completed_by_name: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)

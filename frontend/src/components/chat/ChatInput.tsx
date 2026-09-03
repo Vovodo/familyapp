@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Camera, Image as ImageIcon, Smile, Loader2, Plus, Mic, Trash2, StopCircle, BarChart2 } from 'lucide-react';
 import { EmojiGifPicker } from './EmojiGifPicker';
+import { permissionService } from '../../services/permissionService';
 
 interface ChatInputProps {
   onSend: (text: string) => void;
@@ -104,6 +105,7 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
         recorder.start(150); // Collect slices every 150ms
         setIsRecording(true);
         setRecordingTime(0);
+        permissionService.markMicrophoneGranted();
 
         if (navigator.vibrate) navigator.vibrate(30);
 
@@ -112,6 +114,11 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
         }, 1000);
       } catch (err: any) {
         console.warn('Microphone permission or record error:', err);
+        const denied =
+          err?.name === 'NotAllowedError' ||
+          err?.name === 'PermissionDeniedError' ||
+          /denied|permission/i.test(String(err?.message || ''));
+        if (denied) permissionService.markMicrophoneDenied();
         setRecordingError('Mikrofona erişilemedi. Lütfen izinleri kontrol edin.');
         setTimeout(() => setRecordingError(null), 4000);
       }

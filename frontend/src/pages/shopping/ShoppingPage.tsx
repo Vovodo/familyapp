@@ -13,7 +13,15 @@ import { ShoppingItem } from '../../types';
 import { api } from '../../services/api';
 import { supabase } from '../../services/supabase';
 import { localShoppingStorage } from '../../services/localShoppingStorage';
-import { commitTempItem, dedupeById, isTempId, reconcileRemoteInsert } from '../../services/listSync';
+import {
+  asCompletedFlag,
+  commitTempItem,
+  dedupeById,
+  isTempId,
+  rebaseShoppingFromServer,
+  reconcileRemoteInsert,
+  sortShoppingItems,
+} from '../../services/listSync';
 
 const CATEGORY_STYLES: Record<string, { bg: string; text: string; border: string; activeBg: string }> = {
   Market: { bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-200', activeBg: 'bg-emerald-600' },
@@ -26,13 +34,6 @@ const CATEGORY_STYLES: Record<string, { bg: string; text: string; border: string
 
 const CATEGORIES = Object.keys(CATEGORY_STYLES);
 
-function asCompletedFlag(value: unknown): boolean | undefined {
-  if (value === true || value === false) return value;
-  if (value === 'true' || value === 't' || value === 1 || value === '1') return true;
-  if (value === 'false' || value === 'f' || value === 0 || value === '0') return false;
-  return undefined;
-}
-
 export const ShoppingPage: React.FC = () => {
   const { user } = useAuth();
   const { currentFamily } = useFamily();
@@ -43,128 +44,132 @@ export const ShoppingPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
 
-  const pendingActionIds = useRef<Set<string>>(new Set());
   const pendingCompletionRef = useRef<Map<string, boolean>>(new Map());
+  const tombstonesRef = useRef<Set<string>>(new Set());
+  const appliedAtRef = useRef<Map<string, number>>(new Map());
   const isAddingRef = useRef(false);
   const channelRef = useRef<any>(null);
+  const familyIdRef = useRef<string | undefined>(currentFamily?.id);
+  familyIdRef.current = currentFamily?.id;
 
   const persistItems = (familyId: string, next: ShoppingItem[]) => {
-    const deduped = dedupeById(next.filter(Boolean));
+    const deduped = sortShoppingItems(dedupeById(next.filter(Boolean)));
     localShoppingStorage.saveItems(familyId, deduped);
     return deduped;
   };
 
-  const applyDelta = useCallback((action: 'INSERT' | 'UPDATE' | 'DELETE', item?: ShoppingItem | null) => {
-    if (!currentFamily || !item || !item.id) return;
+  const applyDelta = useCallback((action: 'INSERT' | 'UPDATE' | 'DELETE', item?: ShoppingItem | null, eventAt?: number) => {
+    const familyId = familyIdRef.current;
+    if (!familyId || !item || !item.id) return;
 
-    // Skip remote events for items we're actively mutating locally
-    if (action !== 'DELETE' && pendingActionIds.current.has(item.id)) return;
-    // For DELETE, skip only if we already removed it (don't undo our own delete)
-    if (action === 'DELETE' && pendingActionIds.current.has(item.id)) return;
+    const at = eventAt ?? Date.now();
+    const previousApplied = appliedAtRef.current.get(item.id) ?? 0;
+    if (at < previousApplied) return;
+
+    if (action === 'DELETE') {
+      tombstonesRef.current.add(item.id);
+      pendingCompletionRef.current.delete(item.id);
+      appliedAtRef.current.set(item.id, at);
+      setItems((prev) => persistItems(familyId, prev.filter((i) => i.id !== item.id)));
+      return;
+    }
+
+    if (tombstonesRef.current.has(item.id)) return;
 
     const incomingCompleted = asCompletedFlag(item.is_completed);
     const intended = pendingCompletionRef.current.get(item.id);
-    if (
-      intended !== undefined &&
-      (action === 'UPDATE' || action === 'INSERT') &&
-      incomingCompleted !== undefined &&
-      incomingCompleted !== intended
-    ) {
+    if (intended !== undefined && incomingCompleted !== undefined && incomingCompleted !== intended) {
       return;
     }
+
+    appliedAtRef.current.set(item.id, at);
 
     setItems((prev) => {
       const safePrev = Array.isArray(prev) ? prev.filter(Boolean) : [];
       let next: ShoppingItem[] = safePrev;
       if (action === 'INSERT') {
-        next = reconcileRemoteInsert(safePrev, item, (local, incoming) =>
+        next = reconcileRemoteInsert(safePrev, {
+          ...item,
+          is_completed: intended ?? incomingCompleted ?? !!item.is_completed,
+        }, (local, incoming) =>
           local.title === incoming.title &&
           local.quantity === incoming.quantity &&
           local.category === incoming.category &&
           !local.is_completed
         );
-      } else if (action === 'UPDATE') {
-        next = safePrev.map((i) => {
-          if (i.id !== item.id) return i;
-          const completed =
-            incomingCompleted !== undefined ? incomingCompleted : i.is_completed;
-          return {
-            ...i,
+      } else {
+        const exists = safePrev.some((i) => i.id === item.id);
+        if (!exists) {
+          next = [{
             ...item,
-            is_completed: completed,
-            creator_name: item.creator_name || i.creator_name,
-            completed_by_name: completed
-              ? item.completed_by_name || i.completed_by_name || user?.full_name || 'Alındı'
-              : undefined,
-          };
-        });
-      } else if (action === 'DELETE') {
-        next = safePrev.filter((i) => i.id !== item.id);
+            is_completed: intended ?? incomingCompleted ?? !!item.is_completed,
+          }, ...safePrev];
+        } else {
+          next = safePrev.map((i) => {
+            if (i.id !== item.id) return i;
+            const completed = intended ?? incomingCompleted ?? i.is_completed;
+            return {
+              ...i,
+              ...item,
+              is_completed: completed,
+              creator_name: item.creator_name || i.creator_name,
+              completed_by_name: completed
+                ? item.completed_by_name || i.completed_by_name || user?.full_name || 'Alındı'
+                : undefined,
+            };
+          });
+        }
       }
 
-      return persistItems(currentFamily.id, next);
+      return persistItems(familyId, next);
     });
-  }, [currentFamily, user?.full_name]);
+  }, [user?.full_name]);
 
-  // 1. Initial 0ms Instant Load + Background Fetch
+  const fetchFromServer = useCallback(async () => {
+    const familyId = familyIdRef.current;
+    if (!familyId) return;
+    const snapshotStartedAt = Date.now();
+    try {
+      const res = await api.get<ShoppingItem[]>('/shopping/');
+      const data = Array.isArray(res.data) ? res.data : [];
+      setItems((prev) =>
+        persistItems(
+          familyId,
+          rebaseShoppingFromServer(data, prev, {
+            tombstones: tombstonesRef.current,
+            completions: pendingCompletionRef.current,
+            appliedAt: appliedAtRef.current,
+            snapshotStartedAt,
+          })
+        )
+      );
+    } catch (err) {
+      console.error('Shopping background sync failed:', err);
+    }
+  }, []);
+
+  // 1. Instant local paint, then server is the source of truth.
   useEffect(() => {
     if (!currentFamily) return;
 
-    // A. 0ms Instant Local Cache
+    tombstonesRef.current = new Set();
+    pendingCompletionRef.current = new Map();
+    appliedAtRef.current = new Map();
+
     const cached = localShoppingStorage.getItems(currentFamily.id);
     if (Array.isArray(cached) && cached.length > 0) {
-      const real = cached.filter((item) => item && !isTempId(item.id));
-      const temps = cached.filter((item) =>
-        item &&
-        isTempId(item.id) &&
-        !real.some(
-          (serverItem) =>
-            serverItem.title === item.title &&
-            serverItem.quantity === item.quantity &&
-            serverItem.category === item.category
-        )
-      );
-      setItems(persistItems(currentFamily.id, [...temps, ...real]));
+      setItems(persistItems(currentFamily.id, cached.filter((item) => item && !isTempId(item.id))));
       setIsLoading(false);
+    } else {
+      setItems([]);
+      setIsLoading(true);
     }
 
-    api.get<ShoppingItem[]>('/shopping/')
-      .then((res) => {
-        const data = Array.isArray(res.data) ? res.data : [];
-        const merged = localShoppingStorage.mergeItems(currentFamily.id, data);
-        setItems((prev) => {
-          const pending = pendingCompletionRef.current;
-          const mergedList = Array.isArray(merged) ? merged.filter(Boolean) : [];
-          const pendingTemps = prev.filter((item) =>
-            isTempId(item.id) &&
-            !mergedList.some(
-              (serverItem) =>
-                serverItem.title === item.title &&
-                serverItem.quantity === item.quantity &&
-                serverItem.category === item.category
-            )
-          );
-          const next = dedupeById([...pendingTemps, ...mergedList]).map((item) => {
-            const intended = pending.get(item.id);
-            if (intended === undefined) return item;
-            const local = prev.find((p) => p.id === item.id);
-            if (item.is_completed === intended) return item;
-            return local
-              ? { ...item, is_completed: intended, completed_by_name: local.completed_by_name }
-              : { ...item, is_completed: intended };
-          });
-          return persistItems(currentFamily.id, next);
-        });
-      })
-      .catch((err) => {
-        console.error('Shopping background sync failed:', err);
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
-  }, [currentFamily?.id]);
+    fetchFromServer().finally(() => setIsLoading(false));
+  }, [currentFamily?.id, fetchFromServer]);
 
-  // 2. Granular Realtime WebSocket Stream (Zero Race Condition)
+  // 2. Broadcast for instant cross-device updates. No postgres_changes:
+  // partial replica rows were flipping "alındı" back to open.
   useEffect(() => {
     if (!currentFamily || !supabase) return;
 
@@ -175,50 +180,24 @@ export const ShoppingPage: React.FC = () => {
 
       channel.on('broadcast', { event: 'shopping_delta' }, (payload) => {
         const data = payload.payload;
-        if (!data?.item) return;
-        applyDelta(data.action, data.item);
+        if (!data?.item || !data?.action) return;
+        applyDelta(data.action, data.item, typeof data.at === 'number' ? data.at : Date.now());
       });
-
-      channel.on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'shopping_items',
-          filter: `family_id=eq.${currentFamily.id}`,
-        },
-        (payload) => applyDelta('INSERT', payload.new as ShoppingItem)
-      );
-
-      channel.on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'shopping_items',
-          filter: `family_id=eq.${currentFamily.id}`,
-        },
-        (payload) => applyDelta('UPDATE', payload.new as ShoppingItem)
-      );
-
-      channel.on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'shopping_items',
-          filter: `family_id=eq.${currentFamily.id}`,
-        },
-        (payload) => applyDelta('DELETE', payload.old as ShoppingItem)
-      );
 
       channel.subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           channelRef.current = channel;
+          void fetchFromServer();
         }
       });
 
+      const onVisible = () => {
+        if (document.visibilityState === 'visible') void fetchFromServer();
+      };
+      document.addEventListener('visibilitychange', onVisible);
+
       return () => {
+        document.removeEventListener('visibilitychange', onVisible);
         supabase.removeChannel(channel);
         channelRef.current = null;
       };
@@ -226,14 +205,16 @@ export const ShoppingPage: React.FC = () => {
       console.warn('Shopping realtime channel failed:', err);
       return undefined;
     }
-  }, [currentFamily?.id, applyDelta]);
+  }, [currentFamily?.id, applyDelta, fetchFromServer]);
 
   const broadcastDelta = (action: 'INSERT' | 'UPDATE' | 'DELETE', item: ShoppingItem) => {
+    const at = Date.now();
+    if (item.id) appliedAtRef.current.set(item.id, at);
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
         event: 'shopping_delta',
-        payload: { action, item },
+        payload: { action, item, at },
       });
     }
   };
@@ -274,12 +255,13 @@ export const ShoppingPage: React.FC = () => {
         category,
       });
 
-      setItems((prev) =>
-        persistItems(currentFamily.id, commitTempItem(prev, tempId, {
-          ...res.data,
-          creator_name: res.data.creator_name || user.full_name,
-        }))
-      );
+      const saved = {
+        ...res.data,
+        creator_name: res.data.creator_name || user.full_name,
+      };
+      tombstonesRef.current.delete(saved.id);
+      setItems((prev) => persistItems(currentFamily.id, commitTempItem(prev, tempId, saved)));
+      broadcastDelta('INSERT', saved);
     } catch (err: any) {
       alert('Ürün eklenemedi: ' + err.message);
       setItems((prev) => persistItems(currentFamily.id, prev.filter((i) => i.id !== tempId)));
@@ -291,8 +273,7 @@ export const ShoppingPage: React.FC = () => {
 
   const handleToggle = async (item: ShoppingItem) => {
     if (!currentFamily) return;
-    if (pendingActionIds.current.has(item.id) || pendingCompletionRef.current.has(item.id)) return;
-    pendingActionIds.current.add(item.id);
+    if (isTempId(item.id) || pendingCompletionRef.current.has(item.id)) return;
 
     try {
       Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
@@ -307,28 +288,30 @@ export const ShoppingPage: React.FC = () => {
     };
 
     setItems((prev) => persistItems(currentFamily.id, prev.map((i) => (i.id === item.id ? updatedItem : i))));
-
     broadcastDelta('UPDATE', updatedItem);
 
     try {
-      await api.patch(`/shopping/${item.id}`, { is_completed: nextState });
+      const res = await api.patch<ShoppingItem>(`/shopping/${item.id}`, { is_completed: nextState });
+      const confirmed: ShoppingItem = {
+        ...updatedItem,
+        ...res.data,
+        is_completed: asCompletedFlag(res.data.is_completed) ?? nextState,
+        completed_by_name: nextState
+          ? res.data.completed_by_name || updatedItem.completed_by_name
+          : undefined,
+      };
+      pendingCompletionRef.current.set(item.id, confirmed.is_completed);
+      applyDelta('UPDATE', confirmed, Date.now());
+      pendingCompletionRef.current.delete(item.id);
     } catch (err) {
       pendingCompletionRef.current.delete(item.id);
+      appliedAtRef.current.set(item.id, Date.now());
       setItems((prev) => persistItems(currentFamily.id, prev.map((i) => (i.id === item.id ? item : i))));
-    } finally {
-      pendingActionIds.current.delete(item.id);
-      window.setTimeout(() => {
-        pendingCompletionRef.current.delete(item.id);
-      }, 2000);
     }
   };
 
-  // 5. Delete Item (Instant Delta)
   const handleDelete = async (itemId: string) => {
     if (!currentFamily) return;
-    if (pendingActionIds.current.has(itemId)) return;
-    pendingActionIds.current.add(itemId);
-
     const itemToDelete = items.find((i) => i.id === itemId);
     if (!itemToDelete) return;
 
@@ -336,20 +319,19 @@ export const ShoppingPage: React.FC = () => {
       Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
     } catch {}
 
+    tombstonesRef.current.add(itemId);
+    pendingCompletionRef.current.delete(itemId);
     setItems((prev) => persistItems(currentFamily.id, prev.filter((i) => i.id !== itemId)));
-
     broadcastDelta('DELETE', itemToDelete);
+
+    if (isTempId(itemId)) return;
 
     try {
       await api.delete(`/shopping/${itemId}`);
     } catch (err) {
-      if (itemToDelete) {
-        setItems((prev) => persistItems(currentFamily.id, [itemToDelete, ...prev]));
-      }
-    } finally {
-      setTimeout(() => {
-        pendingActionIds.current.delete(itemId);
-      }, 300);
+      tombstonesRef.current.delete(itemId);
+      appliedAtRef.current.set(itemId, Date.now());
+      setItems((prev) => persistItems(currentFamily.id, [itemToDelete, ...prev]));
     }
   };
 
@@ -358,12 +340,19 @@ export const ShoppingPage: React.FC = () => {
     const completedItems = items.filter((i) => i.is_completed);
     if (completedItems.length === 0) return;
 
+    completedItems.forEach((item) => {
+      tombstonesRef.current.add(item.id);
+      pendingCompletionRef.current.delete(item.id);
+      appliedAtRef.current.set(item.id, Date.now());
+    });
     setItems((prev) => persistItems(currentFamily.id, prev.filter((i) => !i.is_completed)));
+    completedItems.forEach((item) => broadcastDelta('DELETE', item));
 
     try {
-      await Promise.all(completedItems.map((i) => api.delete(`/shopping/${i.id}`)));
+      await Promise.all(completedItems.filter((i) => !isTempId(i.id)).map((i) => api.delete(`/shopping/${i.id}`)));
     } catch (err) {
       console.error('Clear completed failed:', err);
+      void fetchFromServer();
     }
   };
 

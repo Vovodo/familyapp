@@ -23,14 +23,14 @@ import { useFamily } from '../../contexts/FamilyContext';
 import { useDrawingGameOptional } from '../../contexts/DrawingGameContext';
 import { api } from '../../services/api';
 import { DrawingSyncChannel, StrokeDeltaPayload } from '../../services/drawingSync';
-import { playApplauseSound, playGuessBlobSound } from '../../services/soundService';
+import { playApplauseSound, playGuessBlobSound, playLobbyJoinSound, playLobbyLeaveSound } from '../../services/soundService';
 import {
   DrawingCanvas,
   DrawingCanvasHandle,
   NormalizedStroke,
 } from '../../components/games/DrawingCanvas';
 import { DrawingConfetti } from '../../components/games/DrawingConfetti';
-import { DrawingGameState, DrawingGuessItem, DrawingStrokesResponse } from '../../types';
+import { DrawingGameState, DrawingGuessItem, DrawingPlayer, DrawingStrokesResponse } from '../../types';
 
 const PALETTE = [
   { color: '#111827', label: 'Siyah' },
@@ -74,6 +74,42 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const categoryLabel = (key?: string | null) => (key ? CATEGORY_LABELS[key] || key : '');
 
+const PlayerFace: React.FC<{
+  name: string;
+  avatarUrl?: string | null;
+  size?: 'sm' | 'md';
+  badge?: string;
+}> = ({ name, avatarUrl, size = 'md', badge }) => {
+  const dim = size === 'sm' ? 'w-9 h-9 text-[11px]' : 'w-14 h-14 text-base';
+  return (
+    <div className="flex flex-col items-center gap-1 min-w-[3.5rem] max-w-[4.5rem]">
+      <div className="relative">
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={name}
+            className={`${dim} rounded-full object-cover border-2 border-white shadow-md bg-white`}
+          />
+        ) : (
+          <div
+            className={`${dim} rounded-full bg-fuchsia-100 text-fuchsia-700 font-black flex items-center justify-center border-2 border-white shadow-md`}
+          >
+            {(name[0] || '?').toUpperCase()}
+          </div>
+        )}
+        {badge && (
+          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-[8px] font-black px-1.5 py-px rounded-md bg-fuchsia-600 text-white whitespace-nowrap">
+            {badge}
+          </span>
+        )}
+      </div>
+      <span className="text-[11px] font-bold theme-text-primary truncate w-full text-center leading-tight">
+        {name}
+      </span>
+    </div>
+  );
+};
+
 export const DrawGuessPage: React.FC = () => {
   const { user } = useAuth();
   const { currentFamily } = useFamily();
@@ -86,9 +122,11 @@ export const DrawGuessPage: React.FC = () => {
   const stateRef = useRef<DrawingGameState | null>(null);
   const revealSentRef = useRef(false);
   const seenGuessIdsRef = useRef<Set<string>>(new Set());
+  const pendingJoinRef = useRef(false);
+  const sendingGuessRef = useRef(false);
 
-  const [state, setState] = useState<DrawingGameState | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [state, setState] = useState<DrawingGameState | null>(drawingSession?.state ?? null);
+  const [isLoading, setIsLoading] = useState(!drawingSession?.state);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [guessText, setGuessText] = useState('');
@@ -108,11 +146,52 @@ export const DrawGuessPage: React.FC = () => {
   const applyState = useCallback(
     (next: DrawingGameState) => {
       next.guesses.forEach((item) => seenGuessIdsRef.current.add(item.id));
-      setState(next);
+      setState((prev) => {
+        if (prev && (next.revision ?? 0) < (prev.revision ?? 0)) return prev;
+        let merged: DrawingGameState = next;
+        if (pendingJoinRef.current && user?.id && !next.is_player && next.status !== 'none') {
+          const self = prev?.players.find((p) => p.user_id === user.id);
+          merged = {
+            ...next,
+            is_player: true,
+            players:
+              self && !next.players.some((p) => p.user_id === user.id)
+                ? [...next.players, self]
+                : next.players,
+          };
+        }
+        if (prev && (next.revision ?? 0) === (prev.revision ?? 0)) {
+          const olderScores = new Map(prev.players.map((p) => [p.user_id, p.score]));
+          merged = {
+            ...merged,
+            players: merged.players.map((p) => ({
+              ...p,
+              score: Math.max(p.score, olderScores.get(p.user_id) ?? 0),
+            })),
+          };
+        }
+        return merged;
+      });
       reportState?.(next);
     },
-    [reportState]
+    [reportState, user?.id]
   );
+
+  const mergePlayers = useCallback((incoming: DrawingPlayer[]) => {
+    setState((prev) => {
+      if (!prev) return prev;
+      const map = new Map(prev.players.map((p) => [p.user_id, p]));
+      incoming.forEach((p) => {
+        const existing = map.get(p.user_id);
+        map.set(p.user_id, {
+          ...existing,
+          ...p,
+          score: Math.max(existing?.score ?? 0, p.score),
+        });
+      });
+      return { ...prev, players: Array.from(map.values()), online_count: incoming.length };
+    });
+  }, []);
 
   const celebrateCorrect = useCallback(() => {
     setShowConfetti(true);
@@ -129,7 +208,16 @@ export const DrawGuessPage: React.FC = () => {
       setState((prev) => {
         if (!prev) return prev;
         if (prev.guesses.some((item) => item.id === guess.id)) return prev;
-        return { ...prev, guesses: [...prev.guesses, guess] };
+        const withoutTempDup = prev.guesses.filter(
+          (item) =>
+            !(
+              item.id.startsWith('temp-guess-') &&
+              item.user_id === guess.user_id &&
+              item.text === guess.text
+            )
+        );
+        if (withoutTempDup.some((item) => item.id === guess.id)) return prev;
+        return { ...prev, guesses: [...withoutTempDup, guess] };
       });
       if (guess.is_correct) celebrateCorrect();
     },
@@ -167,7 +255,7 @@ export const DrawGuessPage: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setIsLoading(true);
+      if (!stateRef.current) setIsLoading(true);
       const loaded = await fetchState();
       if (!cancelled && loaded?.status === 'drawing') {
         await resyncCanvas();
@@ -202,6 +290,28 @@ export const DrawGuessPage: React.FC = () => {
       onCanvasCleared: () => canvasRef.current?.clearAll(),
       onGameEvent: (event, payload) => {
         const rawGuess = payload?.guess as DrawingGuessItem | undefined;
+        const snapshot = payload?.players as DrawingPlayer[] | undefined;
+        const single = payload?.player as DrawingPlayer | undefined;
+
+        if (snapshot?.length) {
+          mergePlayers(snapshot);
+        } else if (single?.user_id && event === 'player_joined') {
+          mergePlayers([single]);
+        } else if (event === 'player_left' && payload?.uid) {
+          setState((prev) =>
+            prev
+              ? { ...prev, players: prev.players.filter((p) => p.user_id !== payload.uid) }
+              : prev
+          );
+        }
+
+        if (event === 'player_joined' && payload?.uid !== user.id) {
+          playLobbyJoinSound();
+        }
+        if (event === 'player_left' && payload?.uid !== user.id) {
+          playLobbyLeaveSound();
+        }
+
         if (rawGuess?.id) {
           ingestGuess(rawGuess, payload?.uid !== user.id);
         }
@@ -210,17 +320,13 @@ export const DrawGuessPage: React.FC = () => {
           canvasRef.current?.clearAll();
         }
 
-        // Tahmin geldiğinde REST beklemeden listede görünür; skor için doğruysa tazele.
-        if (event === 'guess' && rawGuess && !rawGuess.is_correct) {
+        if (event === 'player_joined' || event === 'player_left' || (event === 'guess' && rawGuess && !rawGuess.is_correct)) {
           return;
         }
 
         void fetchState().then((next) => {
           const iAmDrawer = !!user?.id && next?.drawer_user_id === user.id;
-          if (next?.status === 'drawing' && event === 'round_started' && !iAmDrawer) {
-            void resyncCanvas();
-          }
-          if (next?.status === 'drawing' && event === 'turn_passed' && !iAmDrawer) {
+          if (next?.status === 'drawing' && (event === 'round_started' || event === 'turn_passed') && !iAmDrawer) {
             void resyncCanvas();
           }
         });
@@ -240,7 +346,7 @@ export const DrawGuessPage: React.FC = () => {
       sync.disconnect();
       syncRef.current = null;
     };
-  }, [currentFamily?.id, user?.id, handleStrokeDelta, fetchState, resyncCanvas, ingestGuess]);
+  }, [currentFamily?.id, user?.id, handleStrokeDelta, fetchState, resyncCanvas, ingestGuess, mergePlayers]);
 
   useEffect(() => {
     syncRef.current?.setRoundNumber(
@@ -306,18 +412,51 @@ export const DrawGuessPage: React.FC = () => {
     runAction(async () => {
       const res = await api.post<DrawingGameState>('/games/drawing/start');
       applyState(res.data);
-      syncRef.current?.broadcastGameEvent('lobby_opened');
+      syncRef.current?.broadcastGameEvent('lobby_opened', { players: res.data.players });
     });
 
-  const handleJoinGame = () =>
-    runAction(async () => {
-      const res = await api.post<DrawingGameState>('/games/drawing/join');
-      applyState(res.data);
-      syncRef.current?.broadcastGameEvent('player_joined');
+  const handleJoinGame = () => {
+    if (!user || !currentFamily || pendingJoinRef.current) return;
+    pendingJoinRef.current = true;
+    const selfPlayer: DrawingPlayer = {
+      user_id: user.id,
+      name: user.full_name?.split(' ')[0] || 'Ben',
+      avatar_url: user.avatar_url,
+      score: 0,
+      rounds_drawn: 0,
+      is_drawer: false,
+      is_online: true,
+    };
+    setState((prev) => {
+      if (!prev) return prev;
+      if (prev.players.some((p) => p.user_id === user.id)) {
+        return { ...prev, is_player: true };
+      }
+      return { ...prev, is_player: true, players: [...prev.players, selfPlayer] };
     });
+    playLobbyJoinSound();
+    syncRef.current?.broadcastGameEvent('player_joined', { player: selfPlayer });
+    void api
+      .post<DrawingGameState>('/games/drawing/join')
+      .then((res) => {
+        pendingJoinRef.current = false;
+        applyState(res.data);
+        syncRef.current?.broadcastGameEvent('player_joined', { players: res.data.players });
+      })
+      .catch((err: any) => {
+        pendingJoinRef.current = false;
+        setError(err?.response?.data?.detail || err?.message || 'Katılamadı.');
+        setState((prev) =>
+          prev
+            ? { ...prev, is_player: false, players: prev.players.filter((p) => p.user_id !== user.id) }
+            : prev
+        );
+      });
+  };
 
   const handleLeaveGame = () =>
     runAction(async () => {
+      playLobbyLeaveSound();
       const res = await api.post<DrawingGameState>('/games/drawing/leave');
       applyState(res.data);
       canvasRef.current?.clearAll();
@@ -381,18 +520,35 @@ export const DrawGuessPage: React.FC = () => {
   const handleGuess = async (event: React.FormEvent) => {
     event.preventDefault();
     const text = guessText.trim();
-    if (!text || isBusy) return;
+    if (!text || sendingGuessRef.current || !user) return;
     setGuessText('');
-    await runAction(async () => {
+    sendingGuessRef.current = true;
+
+    const optimistic: DrawingGuessItem = {
+      id: `temp-guess-${Date.now()}`,
+      user_id: user.id,
+      name: user.full_name?.split(' ')[0] || 'Ben',
+      text,
+      is_correct: false,
+      created_at: new Date().toISOString(),
+    };
+    ingestGuess(optimistic, true);
+    syncRef.current?.broadcastGameEvent('guess', { guess: optimistic });
+
+    try {
       const res = await api.post<DrawingGameState>('/games/drawing/guess', { text });
       const latest = res.data.guesses[res.data.guesses.length - 1];
-      ingestGuess(latest, true);
+      ingestGuess(latest, false);
       applyState(res.data);
       syncRef.current?.broadcastGameEvent(
         res.data.status === 'round_end' ? 'round_solved' : 'guess',
-        latest ? { guess: latest } : {}
+        latest ? { guess: latest, players: res.data.players, revision: res.data.revision } : {}
       );
-    });
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || err?.message || 'Tahmin gönderilemedi.');
+    } finally {
+      sendingGuessRef.current = false;
+    }
   };
 
   // ------------------------------------------------------------ çizim köprüsü
@@ -419,8 +575,22 @@ export const DrawGuessPage: React.FC = () => {
     [state?.players]
   );
 
+  const avatarByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+    currentFamily?.members?.forEach((member) => {
+      const url = member.user?.avatar_url;
+      if (member.user_id && url) map.set(member.user_id, url);
+    });
+    if (user?.id && user.avatar_url) map.set(user.id, user.avatar_url);
+    return map;
+  }, [currentFamily?.members, user?.id, user?.avatar_url]);
+
+  const playerAvatar = (player: DrawingPlayer) =>
+    player.avatar_url || avatarByUserId.get(player.user_id) || null;
+
   const enoughPlayers = (state?.players.length || 0) >= (state?.min_players || 2);
   const enoughFamilyMembers = (state?.family_member_count || 0) >= (state?.min_players || 2);
+  const recentGuesses = (state?.guesses || []).slice(-8);
 
   if (isLoading) {
     return (
@@ -514,34 +684,42 @@ export const DrawGuessPage: React.FC = () => {
       {/* Lobi */}
       {state?.status === 'lobby' && (
         <div className="theme-surface rounded-3xl p-5 border theme-border space-y-4">
-          <div className="flex items-center gap-2">
-            <Users className="w-4 h-4 text-fuchsia-600" />
-            <h2 className="text-sm font-black theme-text-primary">
-              Oyuncular ({state.players.length}/{state.family_member_count})
-            </h2>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-fuchsia-600" />
+              <h2 className="text-sm font-black theme-text-primary">
+                Odadaki oyuncular ({state.players.length})
+              </h2>
+            </div>
+            <span className="text-[10px] font-bold theme-text-secondary">
+              En az {state.min_players} · üst sınır yok
+            </span>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {state.players.map((player) => (
-              <span
-                key={player.user_id}
-                className="px-3 py-1.5 rounded-2xl theme-surface-secondary text-xs font-bold theme-text-primary"
-              >
-                {player.name}
-              </span>
-            ))}
+          <div className="flex flex-row flex-wrap justify-center gap-3 py-1">
+            {state.players.length === 0 ? (
+              <p className="text-xs theme-text-secondary">Henüz kimse yok. İlk sen katıl.</p>
+            ) : (
+              state.players.map((player) => (
+                <PlayerFace
+                  key={player.user_id}
+                  name={player.name}
+                  avatarUrl={playerAvatar(player)}
+                  badge={player.user_id === user?.id ? 'sen' : undefined}
+                />
+              ))
+            )}
           </div>
-          <p className="text-xs theme-text-secondary leading-relaxed">
+          <p className="text-xs theme-text-secondary leading-relaxed text-center">
             {enoughPlayers
               ? 'Herkes hazır. Turu başlattığınızda sistem çizecek kişiyi ve kelimeyi seçer.'
-              : `Turun başlaması için en az ${state.min_players} oyuncu gerekiyor. Diğer üyeler bu sayfadan "Oyuna Katıl" demeli.`}
+              : `Turun başlaması için en az ${state.min_players} oyuncu gerekiyor. Diğer üyeler bu sayfadan katılmalı.`}
           </p>
           <div className="grid grid-cols-2 gap-2">
             {!state.is_player && (
               <button
                 type="button"
                 onClick={handleJoinGame}
-                disabled={isBusy}
-                className="py-3 theme-surface-secondary hover:opacity-80 theme-text-primary font-bold rounded-2xl text-xs disabled:opacity-50 cursor-pointer"
+                className="py-3 theme-surface-secondary hover:opacity-80 theme-text-primary font-bold rounded-2xl text-xs cursor-pointer"
               >
                 Oyuna Katıl
               </button>
@@ -560,9 +738,7 @@ export const DrawGuessPage: React.FC = () => {
               type="button"
               onClick={handleNextRound}
               disabled={isBusy || !enoughPlayers}
-              className={`py-3 font-black rounded-2xl text-xs flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer ${
-                !state.is_player ? '' : ''
-              } ${!state.is_player && !enoughPlayers ? 'col-span-1' : ''} bg-fuchsia-600 hover:bg-fuchsia-700 text-white`}
+              className="py-3 font-black rounded-2xl text-xs flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer bg-fuchsia-600 hover:bg-fuchsia-700 text-white"
             >
               <Play className="w-4 h-4" />
               <span>Turu Başlat</span>
@@ -573,7 +749,7 @@ export const DrawGuessPage: React.FC = () => {
 
       {/* Kelime şeridi */}
       {(state?.status === 'drawing' || state?.status === 'round_end') && (
-        <div className="theme-surface rounded-3xl p-4 border theme-border text-center space-y-1">
+        <div className="theme-surface rounded-3xl px-4 py-3 border theme-border text-center space-y-0.5">
           {state.status === 'drawing' && isDrawer && (
             <>
               <p className="text-[10px] font-black uppercase tracking-wider text-fuchsia-600">
@@ -613,18 +789,112 @@ export const DrawGuessPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tuval */}
+      {/* Tuval + canlı tahmin overlay — tuval her zaman beyaz */}
       {(state?.status === 'drawing' || state?.status === 'round_end') && (
-        <div className="rounded-3xl overflow-hidden border-2 theme-border shadow-lg bg-white">
-          <DrawingCanvas
-            ref={canvasRef}
-            interactive={state.status === 'drawing' && isDrawer}
-            color={activeColor}
-            width={activeWidth}
-            onStrokeStart={handleStrokeStart}
-            onLivePoints={handleLivePoints}
-            onStrokeEnd={handleStrokeEnd}
-          />
+        <div className="md:grid md:grid-cols-[minmax(0,1fr)_240px] md:gap-3 md:items-stretch">
+          <div
+            className="relative rounded-3xl overflow-hidden border-2 border-gray-200 shadow-lg bg-white h-[38vh] min-h-[220px] max-h-[360px] md:h-auto md:min-h-[320px] md:max-h-none md:aspect-[4/3]"
+            style={{ backgroundColor: '#ffffff' }}
+          >
+            <DrawingCanvas
+              ref={canvasRef}
+              fillHeight
+              interactive={state.status === 'drawing' && isDrawer}
+              color={activeColor}
+              width={activeWidth}
+              onStrokeStart={handleStrokeStart}
+              onLivePoints={handleLivePoints}
+              onStrokeEnd={handleStrokeEnd}
+            />
+            {recentGuesses.length > 0 && (
+              <div className="absolute top-2 right-2 left-[42%] md:hidden max-h-[46%] overflow-y-auto space-y-1 pointer-events-none">
+                {recentGuesses.slice(-5).map((guess) => (
+                  <div
+                    key={guess.id}
+                    className={`px-2 py-1 rounded-xl text-[11px] shadow-sm ${
+                      guess.is_correct
+                        ? 'bg-emerald-500 text-white font-black'
+                        : 'bg-white/90 text-gray-800'
+                    }`}
+                  >
+                    <span className="font-black opacity-70">{guess.name}: </span>
+                    <span>{guess.is_correct ? 'doğru!' : guess.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {state.status === 'drawing' && !isDrawer && state.is_player && (
+              <form
+                onSubmit={handleGuess}
+                className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/35 to-transparent md:hidden"
+              >
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={guessText}
+                    onChange={(e) => setGuessText(e.target.value)}
+                    placeholder="Tahminini yaz..."
+                    maxLength={120}
+                    autoComplete="off"
+                    enterKeyHint="send"
+                    className="flex-1 px-3 py-2.5 bg-white border border-gray-200 rounded-2xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-fuchsia-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!guessText.trim()}
+                    className="px-4 bg-fuchsia-600 hover:bg-fuchsia-700 active:scale-98 text-white font-black rounded-2xl text-sm disabled:opacity-50 cursor-pointer"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+
+          <div className="hidden md:flex flex-col rounded-3xl border theme-border theme-surface overflow-hidden min-h-[320px]">
+            <div className="px-3 py-2 border-b theme-border text-[10px] font-black uppercase tracking-wider theme-text-secondary">
+              Tahminler
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+              {recentGuesses.length === 0 ? (
+                <p className="text-[11px] theme-text-secondary px-2 py-3">Henüz tahmin yok.</p>
+              ) : (
+                recentGuesses.map((guess) => (
+                  <div
+                    key={guess.id}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs ${
+                      guess.is_correct
+                        ? 'bg-emerald-50 text-emerald-800 font-black'
+                        : 'theme-surface-secondary theme-text-primary'
+                    }`}
+                  >
+                    <span className="font-bold opacity-70">{guess.name}: </span>
+                    <span>{guess.is_correct ? 'doğru tahmin!' : guess.text}</span>
+                  </div>
+                ))
+              )}
+            </div>
+            {state.status === 'drawing' && !isDrawer && state.is_player && (
+              <form onSubmit={handleGuess} className="p-2 border-t theme-border flex gap-2">
+                <input
+                  type="text"
+                  value={guessText}
+                  onChange={(e) => setGuessText(e.target.value)}
+                  placeholder="Tahmin..."
+                  maxLength={120}
+                  autoComplete="off"
+                  className="flex-1 px-3 py-2 theme-surface-secondary border theme-border rounded-xl text-xs theme-text-primary focus:outline-none focus:ring-2 focus:ring-fuchsia-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!guessText.trim()}
+                  className="px-3 bg-fuchsia-600 text-white rounded-xl disabled:opacity-50 cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       )}
 
@@ -722,48 +992,24 @@ export const DrawGuessPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tahmin alanı */}
-      {state?.status === 'drawing' && !isDrawer && state.is_player && (
-        <form onSubmit={handleGuess} className="flex gap-2">
-          <input
-            type="text"
-            value={guessText}
-            onChange={(e) => setGuessText(e.target.value)}
-            placeholder="Tahminini yaz..."
-            maxLength={120}
-            autoComplete="off"
-            className="flex-1 px-4 py-3 theme-surface border theme-border rounded-2xl text-sm theme-text-primary focus:outline-none focus:ring-2 focus:ring-fuchsia-500"
-          />
-          <button
-            type="submit"
-            disabled={isBusy || !guessText.trim()}
-            className="px-5 bg-fuchsia-600 hover:bg-fuchsia-700 active:scale-98 text-white font-black rounded-2xl text-sm flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
+      {state?.status === 'round_end' && state.guesses.length > 0 && (
+        <div className="md:hidden theme-surface rounded-3xl p-3 border theme-border space-y-1.5 max-h-36 overflow-y-auto">
+          {state.guesses.slice(-8).map((guess) => (
+            <div
+              key={guess.id}
+              className={`flex items-center gap-2 px-3 py-2 rounded-2xl text-xs ${
+                guess.is_correct
+                  ? 'bg-emerald-50 text-emerald-800 font-black'
+                  : 'theme-surface-secondary theme-text-primary'
+              }`}
+            >
+              <span className="font-bold opacity-70 flex-shrink-0">{guess.name}:</span>
+              <span className="truncate">{guess.is_correct ? 'doğru tahmin!' : guess.text}</span>
+              {guess.is_correct && <Check className="w-3.5 h-3.5 ml-auto flex-shrink-0" />}
+            </div>
+          ))}
+        </div>
       )}
-
-      {/* Tahminler */}
-      {(state?.status === 'drawing' || state?.status === 'round_end') &&
-        state.guesses.length > 0 && (
-          <div className="theme-surface rounded-3xl p-3 border theme-border space-y-1.5 max-h-52 overflow-y-auto">
-            {state.guesses.map((guess) => (
-              <div
-                key={guess.id}
-                className={`flex items-center gap-2 px-3 py-2 rounded-2xl text-xs ${
-                  guess.is_correct
-                    ? 'bg-emerald-50 text-emerald-800 font-black'
-                    : 'theme-surface-secondary theme-text-primary'
-                }`}
-              >
-                <span className="font-bold opacity-70 flex-shrink-0">{guess.name}:</span>
-                <span className="truncate">{guess.is_correct ? 'doğru tahmin!' : guess.text}</span>
-                {guess.is_correct && <Check className="w-3.5 h-3.5 ml-auto flex-shrink-0" />}
-              </div>
-            ))}
-          </div>
-        )}
 
       {/* Tur sonu aksiyonları */}
       {state?.status === 'round_end' && (
@@ -803,6 +1049,13 @@ export const DrawGuessPage: React.FC = () => {
               className="flex items-center gap-2 text-xs theme-text-primary"
             >
               <span className="w-5 font-black theme-text-secondary">{index + 1}.</span>
+              {playerAvatar(player) ? (
+                <img src={playerAvatar(player)!} alt="" className="w-6 h-6 rounded-full object-cover bg-white" />
+              ) : (
+                <div className="w-6 h-6 rounded-full bg-fuchsia-100 text-fuchsia-700 font-black flex items-center justify-center text-[10px]">
+                  {(player.name[0] || '?').toUpperCase()}
+                </div>
+              )}
               <span className="font-bold truncate">{player.name}</span>
               {state && player.user_id === state.drawer_user_id && state.status === 'drawing' && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded-lg bg-fuchsia-100 text-fuchsia-700 font-black flex-shrink-0">

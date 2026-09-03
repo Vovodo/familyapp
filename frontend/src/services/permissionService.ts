@@ -21,7 +21,68 @@ export interface PermissionDetail {
   critical: boolean;
 }
 
+const MIC_GRANTED_KEY = 'ailem_mic_granted';
+
 class PermissionManagerService {
+  private microphoneGrantedThisSession = false;
+
+  public markMicrophoneGranted(): void {
+    this.microphoneGrantedThisSession = true;
+    try {
+      localStorage.setItem(MIC_GRANTED_KEY, '1');
+    } catch {
+      // ignore
+    }
+  }
+
+  public markMicrophoneDenied(): void {
+    this.microphoneGrantedThisSession = false;
+    try {
+      localStorage.removeItem(MIC_GRANTED_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Android WebView'de navigator.permissions.query('microphone') native
+   * RECORD_AUDIO verilmiş olsa bile çoğu zaman prompt/denied döner.
+   * Sohbet kaydı getUserMedia ile çalışır; UI o yüzden yalan kırmızı gösteriyordu.
+   */
+  private async checkMicrophonePermission(): Promise<boolean> {
+    if (this.microphoneGrantedThisSession) return true;
+
+    try {
+      const devices = await navigator.mediaDevices?.enumerateDevices();
+      if (devices?.some((d) => d.kind === 'audioinput' && d.label)) {
+        this.markMicrophoneGranted();
+        return true;
+      }
+    } catch {
+      // continue
+    }
+
+    try {
+      if (navigator.permissions?.query) {
+        const micPerm = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        if (micPerm.state === 'granted') {
+          this.markMicrophoneGranted();
+          return true;
+        }
+      }
+    } catch {
+      // WebView bu adı desteklemez; yok say
+    }
+
+    try {
+      if (localStorage.getItem(MIC_GRANTED_KEY) === '1') return true;
+    } catch {
+      // ignore
+    }
+
+    return false;
+  }
+
   /**
    * Scans all Android / Web permissions dynamically
    */
@@ -50,22 +111,7 @@ class PermissionManagerService {
         camera = false;
       }
 
-      // 3. Microphone Check
-      try {
-        if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
-          // If query supported
-          if (navigator.permissions && navigator.permissions.query) {
-            const micPerm = await navigator.permissions.query({ name: 'microphone' as any });
-            microphone = micPerm.state === 'granted';
-          } else {
-            microphone = true;
-          }
-        } else {
-          microphone = true;
-        }
-      } catch {
-        microphone = false;
-      }
+      microphone = await this.checkMicrophonePermission();
     } else {
       // Web platform check
       if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -127,9 +173,11 @@ class PermissionManagerService {
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           stream.getTracks().forEach((t) => t.stop());
+          this.markMicrophoneGranted();
           return true;
         }
       } catch {
+        this.markMicrophoneDenied();
         return false;
       }
     }

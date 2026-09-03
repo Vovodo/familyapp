@@ -322,3 +322,90 @@ def test_transfer_ownership_rejects_spoofed_family(client):
     assert client.get("/api/v1/families/me", headers=owner_h).json()["created_by"] == owner.json()["user"]["id"]
     assert outsider_fam["id"] != fam["id"]
 
+
+def test_close_family_purges_related_rows_and_leaves_other_family(client, db):
+    from backend.app.models.models import (
+        BudgetItem,
+        DrawingGame,
+        Family,
+        FamilyMember,
+        Poll,
+        ShoppingItem,
+        TaskItem,
+        WatchRoom,
+        WatchRoomParticipant,
+    )
+
+    host = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Kapatan", "email": "close_host@test.com", "password": "passwordA123"},
+    )
+    host_h = {"Authorization": f"Bearer {host.json()['access_token']}"}
+    fam = client.post("/api/v1/families/", json={"name": "Kapanacak Aile"}, headers=host_h).json()
+    fam_id = fam["id"]
+    host_h["x-family-id"] = fam_id
+
+    guest = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Uye", "email": "close_guest@test.com", "password": "passwordB123"},
+    )
+    guest_h = {"Authorization": f"Bearer {guest.json()['access_token']}"}
+    assert client.post(
+        "/api/v1/families/join",
+        json={"invite_code": fam["invite_code"], "nickname": "Uye"},
+        headers=guest_h,
+    ).status_code == 200
+    guest_h["x-family-id"] = fam_id
+
+    other = client.post(
+        "/api/v1/auth/register",
+        json={"full_name": "Baska", "email": "close_other@test.com", "password": "passwordC123"},
+    )
+    other_h = {"Authorization": f"Bearer {other.json()['access_token']}"}
+    other_fam = client.post("/api/v1/families/", json={"name": "Dokunulmayan"}, headers=other_h).json()
+    other_h["x-family-id"] = other_fam["id"]
+
+    assert client.post("/api/v1/shopping/", json={"title": "Ekmek", "quantity": "1"}, headers=host_h).status_code == 201
+    assert client.post("/api/v1/tasks/", json={"title": "Cam sil"}, headers=host_h).status_code == 201
+    assert client.post(
+        "/api/v1/budget/",
+        json={"type": "expense", "amount": 12.5, "category": "Market", "title": "Süt"},
+        headers=host_h,
+    ).status_code == 201
+    assert client.post(
+        "/api/v1/messages/poll",
+        json={"question": "Ne yiyelim?", "options": ["Çorba", "Makarna"], "duration_hours": 12},
+        headers=host_h,
+    ).status_code == 200
+    assert client.post("/api/v1/games/drawing/start", headers=host_h).status_code == 201
+    assert client.post("/api/v1/games/drawing/join", headers=guest_h).status_code == 200
+    assert client.post("/api/v1/watch-party/rooms", json={"title": "Film"}, headers=host_h).status_code == 201
+    assert client.post("/api/v1/shopping/", json={"title": "Kalacak", "quantity": "1"}, headers=other_h).status_code == 201
+
+    denied = client.post("/api/v1/families/close", json={"family_id": fam_id}, headers=guest_h)
+    assert denied.status_code == 403
+
+    spoofed = {**host_h, "x-family-id": other_fam["id"]}
+    spoof = client.post("/api/v1/families/close", json={"family_id": other_fam["id"]}, headers=spoofed)
+    assert spoof.status_code == 403
+    assert client.get("/api/v1/families/my-families", headers=other_h).json()[0]["id"] == other_fam["id"]
+
+    closed = client.post("/api/v1/families/close", json={"family_id": fam_id}, headers=host_h)
+    assert closed.status_code == 200, closed.text
+
+    db.expire_all()
+    assert db.query(Family).filter(Family.id == fam_id).first() is None
+    assert db.query(FamilyMember).filter(FamilyMember.family_id == fam_id).count() == 0
+    assert db.query(ShoppingItem).filter(ShoppingItem.family_id == fam_id).count() == 0
+    assert db.query(TaskItem).filter(TaskItem.family_id == fam_id).count() == 0
+    assert db.query(BudgetItem).filter(BudgetItem.family_id == fam_id).count() == 0
+    assert db.query(Poll).filter(Poll.family_id == fam_id).count() == 0
+    assert db.query(WatchRoom).filter(WatchRoom.family_id == fam_id).count() == 0
+    assert db.query(WatchRoomParticipant).filter(WatchRoomParticipant.family_id == fam_id).count() == 0
+
+    leftover = client.get("/api/v1/families/my-families", headers=other_h).json()
+    assert len(leftover) == 1
+    assert leftover[0]["id"] == other_fam["id"]
+    assert client.get("/api/v1/shopping/", headers=other_h).json()[0]["title"] == "Kalacak"
+    assert client.get("/api/v1/families/my-families", headers=host_h).json() == []
+

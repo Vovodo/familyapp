@@ -14,6 +14,24 @@ from backend.app.api.deps import get_current_user, get_current_family_member
 router = APIRouter()
 
 
+def _serialize(item: ShoppingItem, creator: Optional[User], completed_user: Optional[User]) -> ShoppingItemResponse:
+    return ShoppingItemResponse(
+        id=item.id,
+        family_id=item.family_id,
+        created_by=item.created_by,
+        completed_by=item.completed_by,
+        title=item.title,
+        quantity=item.quantity,
+        category=item.category,
+        is_completed=bool(item.is_completed),
+        completed_at=item.completed_at,
+        created_at=item.created_at,
+        updated_at=item.updated_at or item.created_at,
+        creator_name=creator.full_name if creator else "Aile Üyesi",
+        completed_by_name=completed_user.full_name if completed_user else None,
+    )
+
+
 @router.get("/", response_model=List[ShoppingItemResponse])
 def get_shopping_items(
     db: Session = Depends(get_db),
@@ -29,27 +47,17 @@ def get_shopping_items(
         .all()
     )
 
-    results = []
-    for item in items:
-        creator = db.query(User).filter(User.id == item.created_by).first()
-        completed_user = db.query(User).filter(User.id == item.completed_by).first() if item.completed_by else None
-        results.append(
-            ShoppingItemResponse(
-                id=item.id,
-                family_id=item.family_id,
-                created_by=item.created_by,
-                completed_by=item.completed_by,
-                title=item.title,
-                quantity=item.quantity,
-                category=item.category,
-                is_completed=item.is_completed,
-                completed_at=item.completed_at,
-                created_at=item.created_at,
-                creator_name=creator.full_name if creator else "Aile Üyesi",
-                completed_by_name=completed_user.full_name if completed_user else None
-            )
-        )
-    return results
+    user_ids = {item.created_by for item in items}
+    user_ids.update(item.completed_by for item in items if item.completed_by)
+    users = {
+        user.id: user
+        for user in db.query(User).filter(User.id.in_(user_ids)).all()
+    } if user_ids else {}
+
+    return [
+        _serialize(item, users.get(item.created_by), users.get(item.completed_by) if item.completed_by else None)
+        for item in items
+    ]
 
 
 @router.post("/", response_model=ShoppingItemResponse, status_code=status.HTTP_201_CREATED)
@@ -62,31 +70,21 @@ def create_shopping_item(
     """
     Adds a new item to the family shopping list.
     """
+    now = datetime.now(timezone.utc)
     item = ShoppingItem(
         family_id=member.family_id,
         created_by=current_user.id,
         title=item_in.title,
         quantity=item_in.quantity,
-        category=item_in.category
+        category=item_in.category,
+        is_completed=False,
+        created_at=now,
+        updated_at=now,
     )
     db.add(item)
     db.commit()
     db.refresh(item)
-
-    return ShoppingItemResponse(
-        id=item.id,
-        family_id=item.family_id,
-        created_by=item.created_by,
-        completed_by=None,
-        title=item.title,
-        quantity=item.quantity,
-        category=item.category,
-        is_completed=item.is_completed,
-        completed_at=None,
-        created_at=item.created_at,
-        creator_name=current_user.full_name,
-        completed_by_name=None
-    )
+    return _serialize(item, current_user, None)
 
 
 @router.patch("/{item_id}", response_model=ShoppingItemResponse)
@@ -115,7 +113,7 @@ def update_shopping_item(
     if item_in.category is not None:
         item.category = item_in.category
     if item_in.is_completed is not None:
-        item.is_completed = item_in.is_completed
+        item.is_completed = bool(item_in.is_completed)
         if item.is_completed:
             item.completed_by = current_user.id
             item.completed_at = datetime.now(timezone.utc)
@@ -123,26 +121,13 @@ def update_shopping_item(
             item.completed_by = None
             item.completed_at = None
 
+    item.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(item)
 
     creator = db.query(User).filter(User.id == item.created_by).first()
     completed_user = db.query(User).filter(User.id == item.completed_by).first() if item.completed_by else None
-
-    return ShoppingItemResponse(
-        id=item.id,
-        family_id=item.family_id,
-        created_by=item.created_by,
-        completed_by=item.completed_by,
-        title=item.title,
-        quantity=item.quantity,
-        category=item.category,
-        is_completed=item.is_completed,
-        completed_at=item.completed_at,
-        created_at=item.created_at,
-        creator_name=creator.full_name if creator else "Aile Üyesi",
-        completed_by_name=completed_user.full_name if completed_user else None
-    )
+    return _serialize(item, creator, completed_user)
 
 
 @router.delete("/completed")

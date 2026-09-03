@@ -2,6 +2,13 @@ export function isTempId(id?: string | null): boolean {
   return typeof id === 'string' && id.startsWith('temp-');
 }
 
+export function asCompletedFlag(value: unknown): boolean | undefined {
+  if (value === true || value === false) return value;
+  if (value === 'true' || value === 't' || value === 1 || value === '1') return true;
+  if (value === 'false' || value === 'f' || value === 0 || value === '0') return false;
+  return undefined;
+}
+
 export function dedupeById<T extends { id: string }>(items: T[]): T[] {
   const seen = new Set<string>();
   const result: T[] = [];
@@ -57,4 +64,99 @@ export function prependUnique<T extends { id: string }>(prev: T[], item: T): T[]
     return prev.map((existing) => (existing.id === item.id ? { ...existing, ...item } : existing));
   }
   return [item, ...prev];
+}
+
+type Completable = {
+  id: string;
+  title?: string;
+  quantity?: string;
+  category?: string;
+  is_completed: boolean;
+  completed_by_name?: string;
+  created_at?: string;
+};
+
+export function sortShoppingItems<T extends Completable>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    if (a.is_completed !== b.is_completed) return a.is_completed ? 1 : -1;
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return bTime - aTime;
+  });
+}
+
+/**
+ * Sunucu listesini yerel in-flight işlemlerin üzerine oturtur.
+ * Eski GET yanıtı, henüz onaylanmamış silme/işaretlemeyi geri alamaz.
+ */
+export function rebaseShoppingFromServer<T extends Completable>(
+  serverItems: T[],
+  prev: T[],
+  pending: {
+    tombstones: Set<string>;
+    completions: Map<string, boolean>;
+    appliedAt: Map<string, number>;
+    snapshotStartedAt: number;
+  }
+): T[] {
+  const serverList = Array.isArray(serverItems) ? serverItems.filter((item) => item?.id) : [];
+  const serverIds = new Set(serverList.map((item) => item.id));
+
+  for (const id of [...pending.tombstones]) {
+    const applied = pending.appliedAt.get(id) ?? 0;
+    if (!serverIds.has(id) && applied <= pending.snapshotStartedAt) {
+      pending.tombstones.delete(id);
+    }
+  }
+
+  const temps = prev.filter(
+    (item) =>
+      isTempId(item.id) &&
+      !serverList.some(
+        (server) =>
+          server.title === item.title &&
+          server.quantity === item.quantity &&
+          server.category === item.category
+      )
+  );
+
+  const next = serverList
+    .filter((item) => {
+      if (!pending.tombstones.has(item.id)) return true;
+      const deletedAt = pending.appliedAt.get(item.id) ?? 0;
+      return deletedAt < pending.snapshotStartedAt;
+    })
+    .map((item) => {
+      const intended = pending.completions.get(item.id);
+      const applied = pending.appliedAt.get(item.id) ?? 0;
+      const completed = asCompletedFlag(item.is_completed);
+      const serverItem = {
+        ...item,
+        is_completed: completed ?? !!item.is_completed,
+      };
+      const local = prev.find((p) => p.id === item.id);
+
+      if (intended !== undefined) {
+        return {
+          ...serverItem,
+          is_completed: intended,
+          completed_by_name: intended
+            ? local?.completed_by_name || serverItem.completed_by_name
+            : undefined,
+        };
+      }
+
+      if (applied >= pending.snapshotStartedAt && local) {
+        return {
+          ...serverItem,
+          is_completed: local.is_completed,
+          completed_by_name: local.is_completed
+            ? local.completed_by_name || serverItem.completed_by_name
+            : undefined,
+        };
+      }
+      return serverItem;
+    });
+
+  return sortShoppingItems(dedupeById([...temps, ...next]));
 }

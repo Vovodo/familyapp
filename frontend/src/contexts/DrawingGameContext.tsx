@@ -16,7 +16,7 @@ import { useFamily } from './FamilyContext';
 import { api, API_BASE_URL, storage } from '../services/api';
 import { DrawingGameState } from '../types';
 
-const HEARTBEAT_MS = 8000;
+const HEARTBEAT_MS = 4000;
 
 interface DrawingGameContextType {
   state: DrawingGameState | null;
@@ -62,20 +62,44 @@ export const DrawingGameProvider: React.FC<{ children: React.ReactNode }> = ({ c
   stateRef.current = state;
   isPlayerRef.current = !!state?.is_player;
 
-  const reportState = useCallback((next: DrawingGameState | null) => {
-    setState(next);
+  const applyIncoming = useCallback((next: DrawingGameState | null) => {
+    if (!next) {
+      setState(null);
+      return;
+    }
+    setState((prev) => {
+      if (prev && (next.revision ?? 0) < (prev.revision ?? 0)) return prev;
+      if (prev && (next.revision ?? 0) === (prev.revision ?? 0) && prev.players.length) {
+        const incomingScores = new Map(next.players.map((p) => [p.user_id, p.score]));
+        const mergedPlayers = next.players.map((p) => {
+          const older = prev.players.find((x) => x.user_id === p.user_id);
+          return older && older.score > p.score ? { ...p, score: older.score } : p;
+        });
+        for (const older of prev.players) {
+          if (!incomingScores.has(older.user_id) && older.score > 0) {
+            mergedPlayers.push(older);
+          }
+        }
+        return { ...next, players: mergedPlayers };
+      }
+      return next;
+    });
   }, []);
+
+  const reportState = useCallback((next: DrawingGameState | null) => {
+    applyIncoming(next);
+  }, [applyIncoming]);
 
   const refreshState = useCallback(async (): Promise<DrawingGameState | null> => {
     if (!currentFamily?.id || !user) return null;
     try {
       const res = await api.get<DrawingGameState>('/games/drawing/state');
-      setState(res.data);
+      applyIncoming(res.data);
       return res.data;
     } catch {
       return null;
     }
-  }, [currentFamily?.id, user]);
+  }, [currentFamily?.id, user, applyIncoming]);
 
   const leaveGame = useCallback(async () => {
     isPlayerRef.current = false;
@@ -105,14 +129,14 @@ export const DrawingGameProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const beat = () => {
       void api
         .post<DrawingGameState>('/games/drawing/heartbeat')
-        .then((res) => setState(res.data))
+        .then((res) => applyIncoming(res.data))
         .catch(() => {});
     };
 
     beat();
     const timer = window.setInterval(beat, HEARTBEAT_MS);
     return () => window.clearInterval(timer);
-  }, [state?.is_player, currentFamily?.id]);
+  }, [state?.is_player, currentFamily?.id, applyIncoming]);
 
   useEffect(() => {
     if (state?.status !== 'drawing' || state.seconds_left === null) {
@@ -145,7 +169,7 @@ export const DrawingGameProvider: React.FC<{ children: React.ReactNode }> = ({ c
     let remove: (() => void) | undefined;
     CapApp.addListener('appStateChange', (appState) => {
       if (appState.isActive && isPlayerRef.current) {
-        void api.post<DrawingGameState>('/games/drawing/heartbeat').then((res) => setState(res.data));
+        void api.post<DrawingGameState>('/games/drawing/heartbeat').then((res) => applyIncoming(res.data));
       }
     })
       .then((listener) => {
