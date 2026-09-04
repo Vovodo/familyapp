@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -29,6 +30,7 @@ public class VoiceForegroundService extends Service {
     public static final String ACTION_RETURN = "com.aile.mobile.voice.RETURN";
 
     private PowerManager.WakeLock wakeLock;
+    private AudioManager audioManager;
     private String title = "Ses Kanalı";
     private String text = "Bağlı";
     private boolean muted = false;
@@ -42,6 +44,7 @@ public class VoiceForegroundService extends Service {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ailem:voice");
             wakeLock.setReferenceCounted(false);
         }
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
     }
 
     @Override
@@ -90,6 +93,7 @@ public class VoiceForegroundService extends Service {
         if (wakeLock != null && !wakeLock.isHeld()) {
             wakeLock.acquire();
         }
+        applyCallAudio();
         return START_STICKY;
     }
 
@@ -109,10 +113,29 @@ public class VoiceForegroundService extends Service {
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }
+        restoreAudio();
         stopForeground(true);
         NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (manager != null) {
             manager.cancel(NOTIFICATION_ID);
+        }
+    }
+
+    private void applyCallAudio() {
+        if (audioManager == null) return;
+        try {
+            audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            audioManager.setSpeakerphoneOn(true);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void restoreAudio() {
+        if (audioManager == null) return;
+        try {
+            audioManager.setSpeakerphoneOn(false);
+            audioManager.setMode(AudioManager.MODE_NORMAL);
+        } catch (Exception ignored) {
         }
     }
 

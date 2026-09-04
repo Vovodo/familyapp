@@ -16,6 +16,22 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(VoiceChannelPlugin.class);
         super.onCreate(savedInstanceState);
         createNotificationChannels();
+        unlockWebViewAudio();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        unlockWebViewAudio();
+    }
+
+    private void unlockWebViewAudio() {
+        try {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                getBridge().getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false);
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     @Override

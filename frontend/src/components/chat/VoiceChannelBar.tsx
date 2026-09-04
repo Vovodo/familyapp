@@ -44,6 +44,7 @@ export const VoiceChannelBar: React.FC = () => {
     isJoined,
     isMuted,
     isConnecting,
+    linkState,
     join,
     leave,
     toggleMute,
@@ -56,11 +57,15 @@ export const VoiceChannelBar: React.FC = () => {
   const subtitle = isConnecting
     ? 'Bağlanıyor...'
     : isJoined
-      ? speakingCount > 0
-        ? `${speakingCount} kişi aktif konuşuyor`
-        : participantCount <= 1
-          ? 'Kanalda yalnızsınız'
-          : `${participantCount} kişi kanalda`
+      ? participantCount > 1 && linkState === 'connecting'
+        ? 'Ses bağlantısı kuruluyor...'
+        : participantCount > 1 && linkState === 'failed'
+          ? 'Ses bağlanamadı — kanaldan çıkıp tekrar katılın'
+        : speakingCount > 0
+          ? `${speakingCount} kişi aktif konuşuyor`
+          : participantCount <= 1
+            ? 'Kanalda yalnızsınız'
+            : `${participantCount} kişi kanalda`
       : participantCount > 0
         ? `${participantCount} kişi içeride — katılmak için dokunun`
         : 'Katılmak için dokunun';

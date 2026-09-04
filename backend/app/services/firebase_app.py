@@ -91,7 +91,7 @@ def ice_servers_payload() -> List[Dict[str, Any]]:
             "urls": [
                 "stun:stun.l.google.com:19302",
                 "stun:stun1.l.google.com:19302",
-                "stun:stun2.l.google.com:19302",
+                "stun:stun.cloudflare.com:3478",
             ]
         }
     ]
@@ -102,6 +102,19 @@ def ice_servers_payload() -> List[Dict[str, Any]]:
                 "urls": urls,
                 "username": settings.TURN_USERNAME,
                 "credential": settings.TURN_CREDENTIAL,
+            }
+        )
+    else:
+        # Mobil (CGNAT) ↔ ev Wi‑Fi tarayıcısı için STUN yetmez; geçici açık röle.
+        servers.append(
+            {
+                "urls": [
+                    "turn:openrelay.metered.ca:80",
+                    "turn:openrelay.metered.ca:443",
+                    "turns:openrelay.metered.ca:443",
+                ],
+                "username": "openrelayproject",
+                "credential": "openrelayproject",
             }
         )
     return servers

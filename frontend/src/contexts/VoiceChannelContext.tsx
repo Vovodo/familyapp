@@ -13,7 +13,7 @@ import { useFamily } from './FamilyContext';
 import { voiceChannelApi } from '../services/voiceChannelApi';
 import { voiceChannelNative } from '../services/voiceChannelNative';
 import { firebaseVoiceSignaling } from '../services/voiceSignaling';
-import { voiceMesh } from '../services/voiceMesh';
+import { unlockAudioPlayback, voiceMesh, VoiceLinkState } from '../services/voiceMesh';
 import { permissionService } from '../services/permissionService';
 import { playLobbyJoinSound, playLobbyLeaveSound } from '../services/soundService';
 import { VoiceChannelState, VoiceParticipant } from '../types';
@@ -28,6 +28,7 @@ interface VoiceChannelContextType {
   isJoined: boolean;
   isMuted: boolean;
   isConnecting: boolean;
+  linkState: VoiceLinkState;
   familyName: string;
   join: () => Promise<void>;
   leave: () => Promise<void>;
@@ -57,6 +58,7 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [isJoined, setIsJoined] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [linkState, setLinkState] = useState<VoiceLinkState>('idle');
 
   const joinedRef = useRef(false);
   const mutedRef = useRef(false);
@@ -121,6 +123,7 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
     joinedRef.current = false;
     setIsJoined(false);
     setIsMuted(false);
+    setLinkState('idle');
     mutedRef.current = false;
     stopLocalMedia();
     await firebaseVoiceSignaling.disconnect();
@@ -149,6 +152,7 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
       });
       localStreamRef.current = stream;
       permissionService.markMicrophoneGranted();
+      const playbackEl = await unlockAudioPlayback();
 
       const res = await voiceChannelApi.join();
       applyState(res.data);
@@ -160,9 +164,19 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
       setIsJoined(true);
       setIsMuted(false);
       mutedRef.current = false;
+      setLinkState('connecting');
       playLobbyJoinSound();
 
-      voiceMesh.attach(stream, user.id, res.data.ice_servers || [], firebaseVoiceSignaling);
+      voiceMesh.attach(
+        stream,
+        user.id,
+        res.data.ice_servers || [],
+        firebaseVoiceSignaling,
+        playbackEl,
+        (state) => {
+          if (joinedRef.current) setLinkState(state);
+        },
+      );
 
       await firebaseVoiceSignaling.connect(
         currentFamily.id,
@@ -203,6 +217,7 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
               ];
             });
             voiceMesh.ensurePeer(peerId);
+            voiceMesh.kickNegotiate(peerId);
           },
           onPeerLeft: (peerId) => {
             if (peerId === user.id) return;
@@ -231,14 +246,15 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
       );
 
       for (const peer of res.data.participants) {
-        if (peer.user_id !== user.id) voiceMesh.ensurePeer(peer.user_id);
+        if (peer.user_id !== user.id) voiceMesh.kickNegotiate(peer.user_id);
       }
 
       const copy = notificationCopy(res.data.participants, false);
       await voiceChannelNative.start(copy.title, copy.text, false);
 
+      const probe = stream.clone();
       const audioCtx = new AudioContext();
-      const source = audioCtx.createMediaStreamSource(stream);
+      const source = audioCtx.createMediaStreamSource(probe);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 512;
       source.connect(analyser);
@@ -272,6 +288,7 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }, 180);
       speakingStopRef.current = () => {
         window.clearInterval(timer);
+        probe.getTracks().forEach((track) => track.stop());
         audioCtx.close().catch(() => {});
       };
     } catch (err: any) {
@@ -279,6 +296,7 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
       await firebaseVoiceSignaling.disconnect();
       joinedRef.current = false;
       setIsJoined(false);
+      setLinkState('idle');
       const denied =
         err?.name === 'NotAllowedError' ||
         err?.name === 'PermissionDeniedError' ||
@@ -416,6 +434,7 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
       isJoined,
       isMuted,
       isConnecting,
+      linkState,
       familyName: familyName || currentFamily?.name || 'Aile',
       join,
       leave,
@@ -427,6 +446,7 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
       isConnecting,
       isJoined,
       isMuted,
+      linkState,
       join,
       leave,
       participants,
