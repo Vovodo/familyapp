@@ -34,7 +34,10 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   // Initialize Standalone Notification Service & Channels
   useEffect(() => {
     notificationService.init();
-  }, []);
+    return notificationService.subscribeChatOpen((messageId) => {
+      navigate(messageId ? `/chat?m=${encodeURIComponent(messageId)}` : '/chat');
+    });
+  }, [navigate]);
 
   // Android Back Button Handler
   useEffect(() => {

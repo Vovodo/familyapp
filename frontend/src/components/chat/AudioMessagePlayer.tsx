@@ -4,6 +4,7 @@ import { localMediaVault } from '../../services/localMediaVault';
 
 interface AudioMessagePlayerProps {
   audioUrl: string;
+  localPath?: string;
   isMe: boolean;
 }
 
@@ -41,28 +42,45 @@ const waveformBars = (seed: string): number[] => {
   });
 };
 
-export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl, isMe }) => {
-  const [playableSrc, setPlayableSrc] = useState<string>(() => resolveAudioUrl(audioUrl));
+export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl, localPath, isMe }) => {
+  const [playableSrc, setPlayableSrc] = useState<string>(() => resolveAudioUrl(localPath || audioUrl));
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState<1 | 1.5 | 2>(1);
+  const retriedRef = useRef(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
 
-  // 0ms Local-First Disk Cache Check
   useEffect(() => {
     let isSubscribed = true;
-    localMediaVault.getMediaUrl(audioUrl, 'audio').then((localSrc) => {
-      if (isSubscribed && localSrc) {
-        setPlayableSrc(localSrc);
+    retriedRef.current = false;
+
+    const hydrate = async () => {
+      if (localPath) {
+        const fromVault = await localMediaVault.getMediaUrl(localPath, 'audio');
+        if (isSubscribed && fromVault) {
+          setPlayableSrc(fromVault);
+          return;
+        }
       }
-    });
+      if (audioUrl) {
+        const cached = await localMediaVault.ensureCached(audioUrl, 'audio');
+        if (isSubscribed && cached) {
+          setPlayableSrc(cached);
+          return;
+        }
+        const streamed = await localMediaVault.getMediaUrl(audioUrl, 'audio');
+        if (isSubscribed && streamed) setPlayableSrc(streamed);
+      }
+    };
+
+    void hydrate();
     return () => {
       isSubscribed = false;
     };
-  }, [audioUrl]);
+  }, [audioUrl, localPath]);
 
   // Format seconds to mm:ss
   const formatTime = (secs: number) => {
@@ -209,6 +227,12 @@ export const AudioMessagePlayer: React.FC<AudioMessagePlayerProps> = ({ audioUrl
         onPlay={() => setIsPlaying(true)}
         onError={(e) => {
           console.warn('[AudioPlayer] Playback error:', (e.target as HTMLAudioElement).error?.message, 'src:', playableSrc);
+          if (retriedRef.current || !audioUrl) return;
+          retriedRef.current = true;
+          void localMediaVault.ensureCached(audioUrl, 'audio').then((src) => {
+            if (src && src !== playableSrc) setPlayableSrc(src);
+            else setPlayableSrc(resolveAudioUrl(audioUrl));
+          });
         }}
       />
 

@@ -28,6 +28,8 @@ export interface StrokeDeltaPayload {
   c?: string;
   /** kalınlık (yalnızca çizginin ilk mesajında) */
   w?: number;
+  /** şekil / kova */
+  k?: NormalizedStroke['k'];
   /** yeni noktalar [x,y,...] */
   p: number[];
   /** çizgi bu mesajla tamamlandı mı */
@@ -46,6 +48,7 @@ export interface DrawingSyncHandlers {
 interface PendingStroke {
   color: string;
   width: number;
+  kind?: NormalizedStroke['k'];
   points: number[];
   headerSent: boolean;
   ended: boolean;
@@ -154,10 +157,11 @@ export class DrawingSyncChannel {
   }
 
   /** Yeni çizgi başladı; renk/kalınlık ilk mesajda taşınır. */
-  beginStroke(strokeId: string, color: string, width: number): void {
+  beginStroke(strokeId: string, color: string, width: number, kind?: NormalizedStroke['k']): void {
     this.pending.set(strokeId, {
       color,
       width,
+      kind,
       points: [],
       headerSent: false,
       ended: false,
@@ -201,6 +205,7 @@ export class DrawingSyncChannel {
       if (!entry.headerSent) {
         payload.c = entry.color;
         payload.w = entry.width;
+        if (entry.kind) payload.k = entry.kind;
         entry.headerSent = true;
       }
       if (isFinal) {
@@ -235,7 +240,7 @@ export class DrawingSyncChannel {
     try {
       await api.post('/games/drawing/strokes', {
         round_number: this.roundNumber,
-        strokes: batch.map((s) => ({ color: s.c, width: s.w, points: s.p })),
+        strokes: batch.map((s) => ({ color: s.c, width: s.w, points: s.p, kind: s.k })),
       });
     } catch (err) {
       // Tur değiştiyse eski çizgileri tekrar denemenin anlamı yok.

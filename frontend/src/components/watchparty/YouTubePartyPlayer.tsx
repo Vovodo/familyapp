@@ -331,6 +331,7 @@ export const YouTubePartyPlayer: React.FC<YouTubePartyPlayerProps> = ({
             playsinline: 1,
             rel: 0,
             modestbranding: 1,
+            fs: 0,
             origin: window.location.origin,
             enablejsapi: 1,
           },
@@ -488,7 +489,7 @@ export const YouTubePartyPlayer: React.FC<YouTubePartyPlayerProps> = ({
   const showPlayOverlay = !loading && !playerError && !syncing && playbackState !== 'playing' && canControl;
 
   return (
-    <div className="relative w-full aspect-video min-h-[200px] bg-black overflow-hidden md:rounded-2xl">
+    <div className="relative w-full h-full min-h-[200px] bg-black overflow-hidden">
       <div ref={hostRef} className="absolute inset-0 w-full h-full min-h-[220px]" />
       {loading && !playerError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0c0b18] text-white z-10">

@@ -70,7 +70,7 @@ export const InAppNotificationBanner: React.FC = () => {
           title: senderName,
           body: bodyText,
           avatarUrl,
-          link: '/chat',
+          link: msg.id ? `/chat?m=${encodeURIComponent(msg.id)}` : '/chat',
         });
       }
     );

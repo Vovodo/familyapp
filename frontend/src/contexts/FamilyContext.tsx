@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Family, FamilyMember } from '../types';
+import { Family, FamilyMember, Message } from '../types';
 import { api, storage } from '../services/api';
 import { syncService } from '../services/syncService';
-import { localChatStorage } from '../services/localChatStorage';
+import { localChatStorage, reconcileMessages } from '../services/localChatStorage';
+import { localMediaVault } from '../services/localMediaVault';
+import { supabase } from '../services/supabase';
 import { CloudRestorePromptModal } from '../components/common/CloudRestorePromptModal';
 import { useAuth } from './AuthContext';
 
@@ -59,6 +61,79 @@ export const FamilyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     }
   }, [currentFamily?.id, currentFamily?.cloud_chat_backup_enabled]);
+
+  // WhatsApp-style inbox: cache stays warm even when /chat is closed.
+  // Own channel name so ChatPage's family-chat subscription is not torn down.
+  useEffect(() => {
+    if (!currentFamily?.id || !user?.id) return;
+    const familyId = currentFamily.id;
+
+    const ingest = async (incoming: Message) => {
+      const local = await localChatStorage.getMessages(familyId);
+      const merged = reconcileMessages(local, [incoming]);
+      await localChatStorage.saveMessages(familyId, merged);
+      if (incoming.media_type === 'audio' && incoming.media_url) {
+        void localMediaVault.ensureCached(incoming.media_url, 'audio');
+      }
+    };
+
+    const warmInbox = async () => {
+      try {
+        const res = await api.get<Message[]>('/messages/', { params: { limit: 40 } });
+        const local = await localChatStorage.getMessages(familyId);
+        const merged = reconcileMessages(local, res.data);
+        await localChatStorage.saveMessages(familyId, merged);
+        res.data.forEach((msg) => {
+          if (msg.media_type === 'audio' && msg.media_url) {
+            void localMediaVault.ensureCached(msg.media_url, 'audio');
+          }
+        });
+      } catch {
+        await localChatStorage.getMessages(familyId);
+      }
+    };
+
+    void warmInbox();
+
+    const channel = supabase.channel(`family-inbox-${familyId}`);
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `family_id=eq.${familyId}`,
+        },
+        (payload) => {
+          const row = payload.new as Partial<Message> & { id?: string };
+          if (!row?.id) return;
+          void ingest({
+            id: row.id,
+            family_id: familyId,
+            sender_id: row.sender_id || '',
+            content: row.content,
+            media_url: row.media_url,
+            media_thumbnail_url: row.media_thumbnail_url,
+            media_type: row.media_type,
+            is_edited: Boolean(row.is_edited),
+            created_at: row.created_at || new Date().toISOString(),
+            client_message_id: row.client_message_id,
+          });
+        }
+      )
+      .subscribe();
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void warmInbox();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      channel.unsubscribe();
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [currentFamily?.id, user?.id]);
 
   const fetchFamilies = useCallback(async () => {
     if (!user) {

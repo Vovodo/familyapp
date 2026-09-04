@@ -3,10 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   Activity,
   ArrowLeft,
+  DoorClosed,
   Loader2,
   LogOut,
+  Maximize2,
+  Minimize2,
   Radio,
-  UserPlus,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
@@ -61,6 +63,8 @@ export const WatchPartyRoomPage: React.FC = () => {
   const [reactionBursts, setReactionBursts] = useState<WatchReactionBurst[]>([]);
   const [reactionCounts, setReactionCounts] = useState<Record<string, number>>({});
   const [liveMs, setLiveMs] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const videoShellRef = useRef<HTMLDivElement | null>(null);
 
   const bumpReaction = useCallback((emoji: string) => {
     setReactionCounts((prev) => ({ ...prev, [emoji]: (prev[emoji] || 0) + 1 }));
@@ -288,6 +292,44 @@ export const WatchPartyRoomPage: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [room?.position_ms, room?.playback_state, room?.control_seq]);
 
+  useEffect(() => {
+    const syncFs = () => {
+      const doc = document as Document & { webkitFullscreenElement?: Element | null };
+      const active = document.fullscreenElement || doc.webkitFullscreenElement || null;
+      setIsFullscreen(!!active && (active === videoShellRef.current || !!videoShellRef.current?.contains(active)));
+    };
+    document.addEventListener('fullscreenchange', syncFs);
+    document.addEventListener('webkitfullscreenchange', syncFs);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFs);
+      document.removeEventListener('webkitfullscreenchange', syncFs);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const el = videoShellRef.current as (HTMLElement & {
+      webkitRequestFullscreen?: () => void;
+    }) | null;
+    if (!el) return;
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      webkitExitFullscreen?: () => void;
+    };
+    const active = document.fullscreenElement || doc.webkitFullscreenElement;
+    try {
+      if (active) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else doc.webkitExitFullscreen?.();
+      } else if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else {
+        el.webkitRequestFullscreen?.();
+      }
+    } catch {
+      // WebView / iOS bazı durumlarda native fullscreen vermez
+    }
+  };
+
   const avatarByUserId = useMemo(() => {
     const map = new Map<string, string>();
     currentFamily?.members?.forEach((member) => {
@@ -352,18 +394,6 @@ export const WatchPartyRoomPage: React.FC = () => {
     });
     queuedControlRef.current = { action, positionMs: rounded, durationMs, gen };
     void flushControl();
-  };
-
-  const handleTransferHost = async (userId: string) => {
-    if (!roomId || !room?.is_host) return;
-    try {
-      const res = await api.post<WatchRoomState>(`/watch-party/rooms/${roomId}/host`, { user_id: userId });
-      applyState(res.data);
-      channelRef.current?.sendPresence(roomId);
-    } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(detail || 'Ev sahibi aktarılamadı.');
-    }
   };
 
   const handleSeekFromChat = (positionMs: number) => {
@@ -524,6 +554,16 @@ export const WatchPartyRoomPage: React.FC = () => {
           <div className="text-[10px] font-black uppercase tracking-wider text-violet-400">Seyir Partisi</div>
           <h1 className="text-sm font-black truncate">{room.title}</h1>
         </div>
+        {room.is_host && (
+          <button
+            type="button"
+            onClick={() => void handleEnd()}
+            className="px-3 py-2 rounded-xl bg-white/10 text-[11px] font-bold flex items-center gap-1"
+          >
+            <DoorClosed className="w-3.5 h-3.5" />
+            Kapat
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void handleLeave()}
@@ -540,10 +580,31 @@ export const WatchPartyRoomPage: React.FC = () => {
         </p>
       )}
 
-      <div className="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-[minmax(0,1fr)_20.5rem] md:gap-3 md:px-3 md:pb-3">
-        <div className="flex flex-col min-h-0 md:overflow-y-auto">
-          {room.video_id ? (
-            <div className="relative shrink-0">
+      {room.can_control && (
+        <form onSubmit={handleSetVideo} className="flex gap-2 px-3 pb-2 shrink-0">
+          <input
+            value={videoInput}
+            onChange={(e) => setVideoInput(e.target.value)}
+            placeholder="YouTube bağlantısı yapıştırın"
+            className="flex-1 px-3 py-2 rounded-xl bg-white/10 border border-white/10 text-xs text-white placeholder:text-violet-300/40 focus:outline-none focus:ring-2 focus:ring-violet-500"
+          />
+          <button
+            type="submit"
+            disabled={savingVideo}
+            className="px-3 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-50"
+          >
+            {savingVideo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Yükle'}
+          </button>
+        </form>
+      )}
+
+      <div className="flex-1 min-h-0 flex flex-col md:px-3 md:pb-3">
+        <div className="shrink-0">
+          <div
+            ref={videoShellRef}
+            className="relative w-full aspect-video max-h-[38vh] min-h-[160px] bg-black overflow-hidden md:rounded-2xl [&:fullscreen]:max-h-none [&:fullscreen]:aspect-auto [&:fullscreen]:h-full [&:fullscreen]:rounded-none"
+          >
+            {room.video_id ? (
               <YouTubePartyPlayer
                 videoId={room.video_id}
                 playbackState={room.playback_state}
@@ -567,122 +628,78 @@ export const WatchPartyRoomPage: React.FC = () => {
                 }}
                 onPlayerError={(message) => setError(message)}
               />
-              <div className="pointer-events-none absolute inset-0 overflow-hidden z-20">
-                <div className="absolute top-2 left-2 right-14 flex items-start gap-2">
-                  <div className="flex -space-x-2">
-                    {faces.slice(0, 5).map((person) => (
-                      <WatchPartyAvatar
-                        key={person.user_id}
-                        name={person.name}
-                        avatarUrl={avatarByUserId.get(person.user_id) || person.avatar_url}
-                        size="xs"
-                        online={person.is_online}
-                      />
-                    ))}
-                  </div>
-                  <div className="mt-0.5 px-2 py-1 rounded-full bg-black/55 backdrop-blur-sm text-[10px] font-bold">
-                    {faces.length} kişi izliyor
-                  </div>
-                </div>
-                {reactionBursts.map((burst) => (
-                  <span
-                    key={burst.id}
-                    className="absolute bottom-[22%] text-2xl md:text-3xl animate-watch-float drop-shadow-lg"
-                    style={{ left: `${burst.x * 100}%` }}
-                    title={burst.name}
-                  >
-                    {burst.emoji}
-                  </span>
-                ))}
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-sm font-bold text-violet-200 bg-[#16132a]">
+                Video bekleniyor
               </div>
-            </div>
-          ) : (
-            <div className="aspect-video min-h-[200px] bg-[#16132a] flex items-center justify-center text-sm font-bold text-violet-200">
-              Video bekleniyor
-            </div>
-          )}
+            )}
 
-          <div className="px-3 pt-2.5 space-y-2.5 shrink-0">
-            <div>
-              <div className="text-[10px] font-black uppercase tracking-wider text-violet-300/80 mb-1.5">Odadakiler</div>
-              <div className="flex gap-2.5 overflow-x-auto pb-0.5">
-                {faces.map((person) => (
-                  <button
-                    key={person.user_id}
-                    type="button"
-                    disabled={!room.is_host || person.user_id === user?.id}
-                    onClick={() => {
-                      if (!room.is_host || person.user_id === user?.id) return;
-                      if (window.confirm(`${person.name} ev sahibi yapılsın mı?`)) {
-                        void handleTransferHost(person.user_id);
-                      }
-                    }}
-                    className="flex flex-col items-center gap-1 min-w-[3.1rem] max-w-[3.8rem] disabled:cursor-default"
-                  >
+            <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden">
+              <div className="absolute top-2 left-2 flex items-start gap-2">
+                <div className="flex -space-x-2">
+                  {faces.slice(0, 5).map((person) => (
                     <WatchPartyAvatar
+                      key={person.user_id}
                       name={person.name}
                       avatarUrl={avatarByUserId.get(person.user_id) || person.avatar_url}
-                      size="sm"
+                      size="xs"
                       online={person.is_online}
-                      host={person.is_host}
                     />
-                    <span className="text-[10px] font-bold text-violet-100 truncate w-full text-center leading-tight">
-                      {person.name}
-                    </span>
-                  </button>
-                ))}
+                  ))}
+                </div>
+                <div className="mt-0.5 px-2 py-1 rounded-full bg-black/55 backdrop-blur-sm text-[10px] font-bold">
+                  {faces.length} kişi izliyor
+                </div>
+              </div>
+
+              <div className="absolute top-2 right-2 flex items-center gap-1.5 pointer-events-auto">
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold backdrop-blur-sm ${
+                    synced ? 'bg-emerald-400/20 text-emerald-300' : 'bg-black/55 text-violet-100'
+                  }`}
+                >
+                  <Radio className={`w-3 h-3 ${synced ? 'animate-watch-live' : ''}`} />
+                  {synced ? 'Senkronize' : 'Duraklatıldı'}
+                </span>
+                <span className="px-2 py-1 rounded-full bg-black/55 backdrop-blur-sm text-[10px] font-bold tabular-nums">
+                  {formatWatchTime(liveMs)}
+                  {room.duration_ms ? ` / ${formatWatchTime(room.duration_ms)}` : ''}
+                </span>
                 <button
                   type="button"
-                  onClick={() => navigate('/family')}
-                  className="flex flex-col items-center gap-1 min-w-[3.1rem]"
+                  onClick={() => void toggleFullscreen()}
+                  className="p-1.5 rounded-full bg-black/55 text-white backdrop-blur-sm cursor-pointer"
+                  title={isFullscreen ? 'Tam ekrandan çık' : 'Tam ekran'}
                 >
-                  <div className="w-10 h-10 rounded-full border border-dashed border-violet-400/50 bg-white/5 flex items-center justify-center text-violet-300">
-                    <UserPlus className="w-4 h-4" />
-                  </div>
-                  <span className="text-[10px] font-bold text-violet-300">Davet</span>
+                  {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                 </button>
               </div>
-            </div>
 
-            {room.video_id ? <WatchPartyReactions onPick={handleReaction} counts={reactionCounts} /> : null}
-
-            <div className="flex items-center gap-2 text-[11px] font-bold text-violet-200">
-              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full ${synced ? 'bg-emerald-400/15 text-emerald-300' : 'bg-white/10 text-violet-200'}`}>
-                <Radio className={`w-3 h-3 ${synced ? 'animate-watch-live' : ''}`} />
-                {synced ? 'Senkronize' : 'Duraklatıldı'}
-              </span>
-              <span className="tabular-nums text-violet-100">
-                {formatWatchTime(liveMs)}
-                {room.duration_ms ? ` / ${formatWatchTime(room.duration_ms)}` : ''}
-              </span>
-            </div>
-
-            {room.can_control && (
-              <form onSubmit={handleSetVideo} className="flex gap-2">
-                <input
-                  value={videoInput}
-                  onChange={(e) => setVideoInput(e.target.value)}
-                  placeholder="YouTube bağlantısı yapıştırın"
-                  className="flex-1 px-3 py-2 rounded-xl bg-white/10 border border-white/10 text-xs text-white placeholder:text-violet-300/40 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                />
-                <button
-                  type="submit"
-                  disabled={savingVideo}
-                  className="px-3 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-50"
+              {reactionBursts.map((burst) => (
+                <span
+                  key={burst.id}
+                  className="absolute bottom-[28%] text-2xl md:text-3xl animate-watch-float drop-shadow-lg"
+                  style={{ left: `${burst.x * 100}%` }}
+                  title={burst.name}
                 >
-                  {savingVideo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Yükle'}
-                </button>
-              </form>
-            )}
-            {room.is_host && (
-              <button type="button" onClick={() => void handleEnd()} className="text-[11px] font-bold text-rose-400">
-                Odayı kapat
-              </button>
+                  {burst.emoji}
+                </span>
+              ))}
+            </div>
+
+            {isFullscreen && room.video_id && (
+              <div className="absolute bottom-4 left-0 right-0 z-30 px-3">
+                <WatchPartyReactions onPick={handleReaction} counts={reactionCounts} overlay />
+              </div>
             )}
           </div>
+
+          {!isFullscreen && room.video_id ? (
+            <WatchPartyReactions onPick={handleReaction} counts={reactionCounts} />
+          ) : null}
         </div>
 
-        <div className="flex-1 min-h-[12rem] mt-2 md:mt-0 mx-3 md:mx-0 mb-2 md:mb-0 rounded-3xl bg-white/5 border border-white/10 p-3 flex flex-col">
+        <div className="flex-1 min-h-0 mt-2 md:mt-0 mx-3 md:mx-0 mb-2 md:mb-0 rounded-3xl bg-white/5 border border-white/10 p-3 flex flex-col">
           <div className="flex items-center justify-between mb-2 shrink-0">
             <div className="text-[10px] font-black uppercase tracking-wider text-violet-300">Sohbet</div>
             <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-300">

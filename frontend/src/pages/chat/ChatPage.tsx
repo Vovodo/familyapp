@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Trash2, Loader2, MoreVertical, AlertCircle } from 'lucide-react';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { isSameDay } from 'date-fns';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -30,9 +30,15 @@ export const ChatPage: React.FC = () => {
   const { currentFamily, activeMember } = useFamily();
   const { currentTheme } = useTheme();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusMessageId = searchParams.get('m');
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [messages, setMessages] = useState<Message[]>(() =>
+    currentFamily ? localChatStorage.peekMessages(currentFamily.id) : []
+  );
+  const [isLoading, setIsLoading] = useState(() =>
+    !(currentFamily && localChatStorage.peekMessages(currentFamily.id).length > 0)
+  );
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
@@ -297,9 +303,34 @@ export const ChatPage: React.FC = () => {
     userPinnedToBottomRef.current = true;
     isNearBottomRef.current = true;
     clearPendingPins();
+    if (currentFamily) {
+      const peeked = localChatStorage.peekMessages(currentFamily.id);
+      if (peeked.length > 0) {
+        setMessages(peeked);
+        setIsLoading(false);
+      }
+    }
     loadMessagesInstantAndSync(false);
     return () => clearPendingPins();
   }, [currentFamily?.id]);
+
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!focusMessageId || messages.length === 0) return;
+    const exists = messages.some((m) => m.id === focusMessageId);
+    if (!exists) return;
+    const node = document.getElementById(`msg-${focusMessageId}`);
+    if (!node) return;
+    userPinnedToBottomRef.current = false;
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setHighlightedMessageId(focusMessageId);
+    const timer = window.setTimeout(() => {
+      setHighlightedMessageId(null);
+      setSearchParams({}, { replace: true });
+    }, 2200);
+    return () => window.clearTimeout(timer);
+  }, [focusMessageId, messages, setSearchParams]);
 
   // Reconcile only when the app comes back to the foreground — never poll the DB on a timer.
   useEffect(() => {
@@ -370,6 +401,9 @@ export const ChatPage: React.FC = () => {
     channel
       .on('broadcast', { event: 'new_message' }, ({ payload }) => {
         const incomingMsg: Message = payload;
+        if (incomingMsg.media_type === 'audio' && incomingMsg.media_url) {
+          void localMediaVault.ensureCached(incomingMsg.media_url, 'audio');
+        }
         setMessages((prev) => {
           const merged = reconcileMessages(prev, [incomingMsg]);
           localChatStorage.saveMessages(currentFamily.id, merged);
@@ -1073,7 +1107,7 @@ export const ChatPage: React.FC = () => {
         className="flex-1 overflow-y-auto px-3 py-2 space-y-1 relative [overflow-anchor:none]"
       >
         {/* Loading Spinner */}
-        {isLoading && (
+        {isLoading && messages.length === 0 && (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="w-8 h-8 animate-spin text-family-600" />
           </div>
@@ -1132,6 +1166,7 @@ export const ChatPage: React.FC = () => {
                   setProfilePopup({ senderId, senderName, senderAvatar });
                 }}
                 onPollChange={persistPollUpdate}
+                highlighted={highlightedMessageId === msg.id}
               />
             </React.Fragment>
           );

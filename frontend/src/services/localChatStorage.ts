@@ -6,6 +6,8 @@ const STORE_NAME = 'chat_messages';
 const LOCAL_KEEP = 2000;
 const FALLBACK_KEEP = 40;
 
+const memoryCache = new Map<string, Message[]>();
+
 export function isEphemeralMediaUrl(url?: string | null): boolean {
   if (!url) return false;
   return url.startsWith('blob:') || url.startsWith('data:');
@@ -153,7 +155,25 @@ export function reconcileMessages(current: Message[], incoming: Message[]): Mess
 }
 
 export const localChatStorage = {
+  peekMessages(familyId: string): Message[] {
+    const cached = memoryCache.get(familyId);
+    if (cached) return cached;
+    try {
+      const fallback = localStorage.getItem(`ailem_msgs_${familyId}`);
+      if (!fallback) return [];
+      const parsed = JSON.parse(fallback) as Message[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        memoryCache.set(familyId, parsed);
+        return parsed;
+      }
+    } catch {
+      /* ignore */
+    }
+    return [];
+  },
+
   async getMessages(familyId: string): Promise<Message[]> {
+    const peeked = memoryCache.get(familyId);
     try {
       const db = await openDB();
       return new Promise((resolve) => {
@@ -162,29 +182,35 @@ export const localChatStorage = {
         const req = store.get(familyId);
         req.onsuccess = () => {
           if (req.result && Array.isArray(req.result.messages)) {
+            memoryCache.set(familyId, req.result.messages);
             resolve(req.result.messages);
           } else {
             const fallback = localStorage.getItem(`ailem_msgs_${familyId}`);
-            resolve(fallback ? JSON.parse(fallback) : []);
+            const parsed = fallback ? (JSON.parse(fallback) as Message[]) : peeked || [];
+            if (parsed.length) memoryCache.set(familyId, parsed);
+            resolve(parsed);
           }
         };
         req.onerror = () => {
           const fallback = localStorage.getItem(`ailem_msgs_${familyId}`);
-          resolve(fallback ? JSON.parse(fallback) : []);
+          const parsed = fallback ? (JSON.parse(fallback) as Message[]) : peeked || [];
+          resolve(parsed);
         };
       });
     } catch {
       try {
         const fallback = localStorage.getItem(`ailem_msgs_${familyId}`);
-        return fallback ? JSON.parse(fallback) : [];
+        const parsed = fallback ? (JSON.parse(fallback) as Message[]) : peeked || [];
+        return parsed;
       } catch {
-        return [];
+        return peeked || [];
       }
     }
   },
 
   async saveMessages(familyId: string, messages: Message[]): Promise<void> {
     const trimmed = sanitizeForDisk(messages);
+    memoryCache.set(familyId, trimmed);
     try {
       const db = await openDB();
       await new Promise<void>((resolve, reject) => {

@@ -399,7 +399,7 @@ export interface DrawingStrokeRecord {
   round_number: number;
   user_id: string;
   kind: 'stroke' | 'clear' | 'undo';
-  payload: { c: string; w: number; p: number[] } | null;
+  payload: { c: string; w: number; p: number[]; k?: string } | null;
 }
 
 export interface DrawingStrokesResponse {

@@ -50,7 +50,7 @@ export const WatchPartyChat: React.FC<WatchPartyChatProps> = ({
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-1 overflow-y-auto space-y-2.5 pr-0.5">
         {messages.length === 0 && (
-          <p className="text-[11px] text-violet-200/60 text-center py-8 leading-relaxed">
+          <p className="text-[11px] text-violet-200/60 text-center py-3 leading-relaxed">
             Video hakkında konuşun. Yorumlar odadakilere anında gider.
           </p>
         )}

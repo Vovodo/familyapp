@@ -37,12 +37,24 @@ class NotificationService {
   private pushListenersAttached = false;
   private pendingFcmToken: string | null = null;
   private onHeartReceivedCallbacks: Set<(data: { sender_name: string; event_id: string }) => void> = new Set();
+  private onChatOpenCallbacks: Set<(messageId?: string) => void> = new Set();
 
   public subscribeHeartReceived(cb: (data: { sender_name: string; event_id: string }) => void) {
     this.onHeartReceivedCallbacks.add(cb);
     return () => {
       this.onHeartReceivedCallbacks.delete(cb);
     };
+  }
+
+  public subscribeChatOpen(cb: (messageId?: string) => void) {
+    this.onChatOpenCallbacks.add(cb);
+    return () => {
+      this.onChatOpenCallbacks.delete(cb);
+    };
+  }
+
+  public openChatFromNotification(messageId?: string) {
+    this.onChatOpenCallbacks.forEach((cb) => cb(messageId));
   }
 
   public async init() {
@@ -158,6 +170,8 @@ class NotificationService {
             sender_name: extra.senderName || 'Aile Bireyi',
             event_id: extra.eventId || `heart-${Date.now()}`,
           });
+        } else if (extra.type === 'chat') {
+          this.openChatFromNotification(extra.message_id || extra.messageId);
         }
       });
     } catch (err) {
@@ -202,6 +216,8 @@ class NotificationService {
               sender_name: data.sender_name || 'Aile Bireyi',
               event_id: data.heart_id || `heart-${Date.now()}`,
             });
+          } else if (data.type === 'chat' || data.message_id) {
+            this.openChatFromNotification(data.message_id);
           }
         });
       }

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Camera, Image as ImageIcon, Smile, Loader2, Plus, Mic, Trash2, BarChart2 } from 'lucide-react';
 import { EmojiGifPicker } from './EmojiGifPicker';
+import { Capacitor } from '@capacitor/core';
 import { permissionService } from '../../services/permissionService';
 
 interface ChatInputProps {
@@ -77,19 +78,20 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
         });
         mediaStreamRef.current = stream;
 
-        // Choose best supported mime type
-        let mimeType = 'audio/webm;codecs=opus';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          if (MediaRecorder.isTypeSupported('audio/webm')) {
-            mimeType = 'audio/webm';
-          } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-            mimeType = 'audio/mp4';
-          } else if (MediaRecorder.isTypeSupported('audio/aac')) {
-            mimeType = 'audio/aac';
-          } else {
-            mimeType = '';
-          }
-        }
+        const nativePreferred = [
+          'audio/mp4',
+          'audio/aac',
+          'audio/webm;codecs=opus',
+          'audio/webm',
+        ];
+        const webPreferred = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/aac',
+        ];
+        const candidates = Capacitor.isNativePlatform() ? nativePreferred : webPreferred;
+        const mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type)) || '';
 
         const options = mimeType ? { mimeType } : undefined;
         const recorder = new MediaRecorder(stream, options);

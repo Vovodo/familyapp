@@ -21,6 +21,7 @@ interface MessageBubbleProps {
   onImageClick?: (url: string) => void;
   onAvatarClick?: (senderId: string, senderName: string, senderAvatar?: string | null) => void;
   onPollChange?: (messageId: string, poll: PollData) => void;
+  highlighted?: boolean;
 }
 
 // Extracts first http/https link from content
@@ -43,6 +44,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     onImageClick,
     onAvatarClick,
     onPollChange,
+    highlighted = false,
   }) => {
     const longPressTimerRef = useRef<any>(null);
     const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -155,9 +157,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
 
     return (
       <div
+        id={message.id ? `msg-${message.id}` : undefined}
         className={`flex items-start gap-2 ${
           isMe ? 'justify-end' : 'justify-start'
-        } ${isLastInGroup ? 'mb-2' : 'mb-0.5'} group select-none transition-all duration-150`}
+        } ${isLastInGroup ? 'mb-2' : 'mb-0.5'} group select-none transition-all duration-150 ${
+          highlighted ? 'rounded-2xl bg-violet-500/20 ring-2 ring-violet-400/70' : ''
+        }`}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}

@@ -287,6 +287,30 @@ def test_strokes_persist_and_since_seq_returns_only_the_delta(client):
     assert delta.json()["stroke_seq"] == 3
 
 
+def test_shape_kind_persists_in_payload(client):
+    host, guest, _ = _family_with_two_players(client)
+    round_state = _start_round(client, host)
+    drawer_headers = host if round_state["is_drawer"] else guest
+    guesser_headers = guest if round_state["is_drawer"] else host
+
+    posted = client.post(
+        "/api/v1/games/drawing/strokes",
+        json={
+            "round_number": round_state["round_number"],
+            "strokes": [
+                {"color": "#111827", "width": 20, "points": [100, 120, 400, 500], "kind": "rect"},
+                {"color": "#22c55e", "width": 16, "points": [250, 250], "kind": "fill"},
+            ],
+        },
+        headers=drawer_headers,
+    )
+    assert posted.status_code == 201, posted.text
+    strokes = client.get("/api/v1/games/drawing/strokes", headers=guesser_headers).json()["strokes"]
+    kinds = [row["payload"].get("k") for row in strokes]
+    assert "rect" in kinds
+    assert "fill" in kinds
+
+
 def test_only_drawer_can_draw_or_clear(client):
     host, guest, _ = _family_with_two_players(client)
     round_state = _start_round(client, host)
@@ -527,7 +551,7 @@ def test_countdown_left_when_round_starts(client):
     host, guest, _ = _family_with_two_players(client)
     body = _start_round(client, host)
     assert body["status"] == "drawing"
-    assert body["countdown_left"] in (2, 3)
+    assert body["countdown_left"] in (4, 5)
     assert body["seconds_left"] == 150
 
 

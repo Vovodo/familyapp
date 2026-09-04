@@ -2,17 +2,21 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
+  Circle,
   Eraser,
   Loader2,
   LogOut,
   MessageCircle,
   Music2,
+  PaintBucket,
   Pencil,
   Play,
   Send,
   Settings,
   Shuffle,
+  Square,
   Trash2,
+  Triangle,
   Trophy,
   Undo2,
   Users,
@@ -26,6 +30,7 @@ import { playApplauseSound, playGuessBlobSound, playLobbyJoinSound, playLobbyLea
 import {
   DrawingCanvas,
   DrawingCanvasHandle,
+  DrawTool,
   NormalizedStroke,
 } from '../../components/games/DrawingCanvas';
 import { DrawingConfetti } from '../../components/games/DrawingConfetti';
@@ -52,8 +57,8 @@ const BRUSHES = [
 ];
 
 const ERASER_COLOR = '#ffffff';
-const COUNTDOWN_SECONDS = 3;
-const AUTO_NEXT_ROUND_MS = 2600;
+const COUNTDOWN_SECONDS = 5;
+const AUTO_NEXT_ROUND_MS = 450;
 const ROUND_SECONDS = 150;
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -109,7 +114,7 @@ export const DrawGuessPage: React.FC = () => {
   const [guessText, setGuessText] = useState('');
   const [color, setColor] = useState(PALETTE[0].color);
   const [brushWidth, setBrushWidth] = useState(BRUSHES[1].width);
-  const [isEraser, setIsEraser] = useState(false);
+  const [drawTool, setDrawTool] = useState<DrawTool>('pen');
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
@@ -120,9 +125,16 @@ export const DrawGuessPage: React.FC = () => {
 
   const isDrawer =
     state?.status === 'drawing' && !!user?.id && state.drawer_user_id === user.id;
+  const isEraser = drawTool === 'eraser';
   const activeColor = isEraser ? ERASER_COLOR : color;
   const activeWidth = isEraser ? Math.max(brushWidth, 80) : brushWidth;
-  const inCountdown = state?.status === 'drawing' && countdown !== null && countdown > 0;
+  const startedMs = state?.round_started_at ? new Date(state.round_started_at).getTime() : 0;
+  const derivedCountdown =
+    state?.status === 'drawing' && startedMs
+      ? Math.max(0, Math.ceil((startedMs + COUNTDOWN_SECONDS * 1000 - Date.now()) / 1000))
+      : 0;
+  const shownCountdown = countdown ?? (derivedCountdown > 0 ? derivedCountdown : null);
+  const inCountdown = state?.status === 'drawing' && (shownCountdown || 0) > 0;
 
   const applyState = useCallback(
     (next: DrawingGameState) => {
@@ -177,7 +189,7 @@ export const DrawGuessPage: React.FC = () => {
   const celebrateCorrect = useCallback(() => {
     setShowConfetti(true);
     playApplauseSound();
-    window.setTimeout(() => setShowConfetti(false), 1600);
+    window.setTimeout(() => setShowConfetti(false), 500);
   }, []);
 
   const ingestGuess = useCallback(
@@ -205,7 +217,7 @@ export const DrawGuessPage: React.FC = () => {
         setGuessToasts((prev) => [...prev.slice(-3), guess]);
         window.setTimeout(() => {
           setGuessToasts((prev) => prev.filter((item) => item.id !== guess.id));
-        }, 2800);
+        }, 1100);
       }
     },
     [celebrateCorrect, user?.id]
@@ -228,7 +240,12 @@ export const DrawGuessPage: React.FC = () => {
       const res = await api.get<DrawingStrokesResponse>('/games/drawing/strokes');
       const strokes: NormalizedStroke[] = res.data.strokes
         .filter((s) => s.kind === 'stroke' && s.payload && s.payload.p.length >= 2)
-        .map((s) => ({ c: s.payload!.c, w: s.payload!.w, p: s.payload!.p }));
+        .map((s) => ({
+          c: s.payload!.c,
+          w: s.payload!.w,
+          p: s.payload!.p,
+          k: (s.payload!.k as NormalizedStroke['k']) || 'stroke',
+        }));
       canvasRef.current?.replaceAll(strokes);
     } catch {
       canvasRef.current?.clearAll();
@@ -253,7 +270,7 @@ export const DrawGuessPage: React.FC = () => {
   const handleStrokeDelta = useCallback((payload: StrokeDeltaPayload) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.beginRemoteStroke(payload.sid, payload.c || '#111827', payload.w || 36);
+    canvas.beginRemoteStroke(payload.sid, payload.c || '#111827', payload.w || 36, payload.k);
     if (payload.p.length > 0) {
       canvas.appendRemotePoints(payload.sid, payload.p);
     }
@@ -536,8 +553,8 @@ export const DrawGuessPage: React.FC = () => {
   };
 
   const handleStrokeStart = useCallback(
-    (strokeId: string, strokeColor: string, strokeWidth: number) => {
-      syncRef.current?.beginStroke(strokeId, strokeColor, strokeWidth);
+    (strokeId: string, strokeColor: string, strokeWidth: number, kind?: NormalizedStroke['k']) => {
+      syncRef.current?.beginStroke(strokeId, strokeColor, strokeWidth, kind);
     },
     []
   );
@@ -563,14 +580,14 @@ export const DrawGuessPage: React.FC = () => {
       .map((p) => p.user_id)
       .sort();
     const isLeader = onlineIds[0] === user?.id;
-    const delay = isLeader ? AUTO_NEXT_ROUND_MS : AUTO_NEXT_ROUND_MS + 1800;
+    if (!isLeader) return;
     const key = `${state.game_id}-${state.round_number}`;
     const timer = window.setTimeout(() => {
       if (autoNextKeyRef.current === key) return;
       if (stateRef.current?.status !== 'round_end') return;
       autoNextKeyRef.current = key;
       handleNextRoundRef.current();
-    }, delay);
+    }, AUTO_NEXT_ROUND_MS);
     return () => window.clearTimeout(timer);
   }, [state?.status, state?.round_number, state?.game_id, state?.is_player, onlineCount, state?.min_players, state?.players, user?.id]);
 
@@ -737,10 +754,10 @@ export const DrawGuessPage: React.FC = () => {
 
       {isPlay && state && (
         <div className="relative flex-1 min-h-0 flex flex-col">
-          <div className="relative flex-1 min-h-0 bg-white">
+          <div className={`relative min-h-0 ${isDrawer ? 'h-[80%]' : 'h-[60%]'}`}>
             <DrawingCanvas
               ref={canvasRef}
-              fillHeight
+              tool={drawTool}
               interactive={state.status === 'drawing' && isDrawer && !inCountdown}
               color={activeColor}
               width={activeWidth}
@@ -750,114 +767,36 @@ export const DrawGuessPage: React.FC = () => {
             />
 
             {state.status === 'drawing' && !inCountdown && (
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 pointer-events-none">
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5">
                 <div className="px-3 py-1 rounded-full bg-[#120F1D]/80 text-white text-[11px] font-black shadow-lg">
                   {isDrawer ? state.word : state.word_masked}
                 </div>
+                {isDrawer && (
+                  <button
+                    type="button"
+                    onClick={handleSkipWord}
+                    disabled={isBusy}
+                    className="px-2.5 py-1 rounded-full bg-[#120F1D]/80 text-white/80 text-[10px] font-bold shadow-lg cursor-pointer disabled:opacity-50 inline-flex items-center gap-1"
+                  >
+                    <Shuffle className="w-3 h-3" />
+                    Değiştir
+                  </button>
+                )}
               </div>
             )}
 
-            {isDrawer && state.status === 'drawing' && !inCountdown && (
-              <>
-                <div className="absolute left-2 top-1/2 -translate-y-1/2 z-10 flex flex-col items-center gap-1 px-1.5 py-2 rounded-full bg-[#1A1528]/92 shadow-xl">
-                  <button
-                    type="button"
-                    onClick={() => setIsEraser(false)}
-                    className={`w-9 h-9 rounded-full flex items-center justify-center cursor-pointer ${
-                      !isEraser ? 'bg-violet-600 text-white' : 'text-white/70'
-                    }`}
-                    aria-label="Kalem"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsEraser(true)}
-                    className={`w-9 h-9 rounded-full flex items-center justify-center cursor-pointer ${
-                      isEraser ? 'bg-violet-600 text-white' : 'text-white/70'
-                    }`}
-                    aria-label="Silgi"
-                  >
-                    <Eraser className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleClearCanvas}
-                    disabled={isBusy}
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-rose-300 cursor-pointer disabled:opacity-50"
-                    aria-label="Temizle"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-3 py-2 rounded-full bg-[#1A1528]/92 shadow-xl max-w-[92%]">
-                  {BRUSHES.map((brush) => (
-                    <button
-                      key={brush.width}
-                      type="button"
-                      onClick={() => setBrushWidth(brush.width)}
-                      className="flex items-center justify-center cursor-pointer"
-                      aria-label={brush.label}
-                    >
-                      <span
-                        className={`rounded-full ${brushWidth === brush.width ? 'ring-2 ring-violet-400' : 'ring-1 ring-white/20'}`}
-                        style={{
-                          width: 8 + brush.width / 28,
-                          height: 8 + brush.width / 28,
-                          backgroundColor: isEraser ? '#ffffff' : color,
-                        }}
-                      />
-                    </button>
-                  ))}
-                  <span className="w-px h-5 bg-white/15 mx-0.5" />
-                  {PALETTE.map((item) => (
-                    <button
-                      key={item.color}
-                      type="button"
-                      onClick={() => {
-                        setColor(item.color);
-                        setIsEraser(false);
-                      }}
-                      className={`w-6 h-6 rounded-full border-2 cursor-pointer ${
-                        !isEraser && color === item.color ? 'border-violet-400 scale-110' : 'border-white/20'
-                      }`}
-                      style={{ backgroundColor: item.color }}
-                      aria-label={item.label}
-                    />
-                  ))}
-                </div>
-
-                {guessToasts.length > 0 && (
-                  <div className="absolute top-12 right-2 z-20 w-[min(58%,13.5rem)] space-y-1.5 pointer-events-none">
-                    {guessToasts.map((guess) => (
-                      <div
-                        key={guess.id}
-                        className={`guess-toast-in px-2.5 py-1.5 rounded-xl text-[11px] shadow-lg ${
-                          guess.is_correct
-                            ? 'bg-emerald-500/90 text-white font-black'
-                            : 'bg-[#1A1528]/80 text-white/95'
-                        }`}
-                      >
-                        <span className="font-black opacity-80">{guess.name}: </span>
-                        <span>{guess.is_correct ? 'doğru!' : guess.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-
-            {!isDrawer && recentGuesses.length > 0 && (
-              <div className="absolute top-12 right-2 left-[38%] md:left-auto md:w-64 max-h-[42%] overflow-y-auto space-y-1 pointer-events-none">
-                {recentGuesses.slice(-6).map((guess) => (
+            {isDrawer && guessToasts.length > 0 && (
+              <div className="absolute top-11 right-2 z-20 w-[min(58%,13.5rem)] space-y-1.5 pointer-events-none">
+                {guessToasts.map((guess) => (
                   <div
                     key={guess.id}
-                    className={`px-2 py-1 rounded-xl text-[11px] shadow-sm ${
-                      guess.is_correct ? 'bg-emerald-500 text-white font-black' : 'bg-white/92 text-gray-800'
+                    className={`guess-toast-in px-2.5 py-1.5 rounded-xl text-[11px] shadow-lg ${
+                      guess.is_correct
+                        ? 'bg-emerald-500/90 text-white font-black'
+                        : 'bg-[#1A1528]/80 text-white/95'
                     }`}
                   >
-                    <span className="font-black opacity-70">{guess.name}: </span>
+                    <span className="font-black opacity-80">{guess.name}: </span>
                     <span>{guess.is_correct ? 'doğru!' : guess.text}</span>
                   </div>
                 ))}
@@ -865,48 +804,146 @@ export const DrawGuessPage: React.FC = () => {
             )}
 
             {isDrawer && inCountdown && (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#120F1D]/78 pointer-events-none">
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#120F1D]/78">
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/45">Konu</p>
-                <p className="text-3xl font-black text-pink-400 mt-1">{state.word}</p>
-                <p className="text-6xl font-black text-white mt-6">{countdown}</p>
+                <p className="text-3xl font-black text-violet-300 mt-1">{state.word}</p>
+                <p className="text-6xl font-black text-white mt-6">{shownCountdown}</p>
                 <p className="text-xs font-bold text-white/50 mt-2">Hazır olun!</p>
+                <button
+                  type="button"
+                  onClick={handleSkipWord}
+                  disabled={isBusy}
+                  className="mt-4 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/12 text-[11px] font-bold text-white cursor-pointer disabled:opacity-50"
+                >
+                  <Shuffle className="w-3.5 h-3.5" />
+                  Kelimeyi değiştir
+                </button>
               </div>
-            )}
-
-            {state.status === 'drawing' && !isDrawer && state.is_player && !inCountdown && (
-              <form
-                onSubmit={handleGuess}
-                className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/45 to-transparent"
-              >
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={guessText}
-                    onChange={(e) => setGuessText(e.target.value)}
-                    placeholder="Tahminini yaz..."
-                    maxLength={120}
-                    autoComplete="off"
-                    enterKeyHint="send"
-                    className="flex-1 px-3 py-2.5 bg-white border border-gray-200 rounded-2xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!guessText.trim()}
-                    className="px-4 bg-violet-600 hover:bg-violet-500 active:scale-98 text-white font-black rounded-2xl text-sm disabled:opacity-50 cursor-pointer"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </div>
-              </form>
             )}
           </div>
 
+          {isDrawer && state.status === 'drawing' && !inCountdown && (
+            <div className="flex-1 min-h-0 px-2 py-1.5 flex flex-col justify-center gap-1.5">
+              <div className="flex items-center justify-center gap-1 overflow-x-auto">
+                {(
+                  [
+                    { id: 'pen' as DrawTool, label: 'Kalem', Icon: Pencil },
+                    { id: 'eraser' as DrawTool, label: 'Silgi', Icon: Eraser },
+                    { id: 'rect' as DrawTool, label: 'Kare', Icon: Square },
+                    { id: 'circle' as DrawTool, label: 'Daire', Icon: Circle },
+                    { id: 'triangle' as DrawTool, label: 'Üçgen', Icon: Triangle },
+                    { id: 'fill' as DrawTool, label: 'Boya', Icon: PaintBucket },
+                  ] as const
+                ).map(({ id, label, Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setDrawTool(id)}
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center cursor-pointer ${
+                      drawTool === id ? 'bg-violet-600 text-white' : 'bg-white/8 text-white/70'
+                    }`}
+                    aria-label={label}
+                    title={label}
+                  >
+                    <Icon className="w-4 h-4" />
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleClearCanvas}
+                  disabled={isBusy}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center text-rose-300 bg-white/8 cursor-pointer disabled:opacity-50"
+                  aria-label="Temizle"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex items-center justify-center gap-2">
+                {BRUSHES.map((brush) => (
+                  <button
+                    key={brush.width}
+                    type="button"
+                    onClick={() => setBrushWidth(brush.width)}
+                    className="flex items-center justify-center cursor-pointer"
+                    aria-label={brush.label}
+                  >
+                    <span
+                      className={`rounded-full ${brushWidth === brush.width ? 'ring-2 ring-violet-400' : 'ring-1 ring-white/20'}`}
+                      style={{
+                        width: 8 + brush.width / 28,
+                        height: 8 + brush.width / 28,
+                        backgroundColor: isEraser ? '#ffffff' : color,
+                      }}
+                    />
+                  </button>
+                ))}
+                <span className="w-px h-5 bg-white/15 mx-0.5" />
+                {PALETTE.map((item) => (
+                  <button
+                    key={item.color}
+                    type="button"
+                    onClick={() => {
+                      setColor(item.color);
+                      if (drawTool === 'eraser') setDrawTool('pen');
+                    }}
+                    className={`w-6 h-6 rounded-full border-2 cursor-pointer ${
+                      !isEraser && color === item.color ? 'border-violet-400 scale-110' : 'border-white/20'
+                    }`}
+                    style={{ backgroundColor: item.color }}
+                    aria-label={item.label}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!isDrawer && (
+            <div className="flex-1 min-h-0 flex flex-col px-3 py-2 gap-2">
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-1">
+                {recentGuesses.slice(-8).map((guess) => (
+                  <div
+                    key={guess.id}
+                    className={`px-2.5 py-1.5 rounded-xl text-[12px] ${
+                      guess.is_correct ? 'bg-emerald-500 text-white font-black' : 'bg-white/10 text-white/95'
+                    }`}
+                  >
+                    <span className="font-black opacity-70">{guess.name}: </span>
+                    <span>{guess.is_correct ? 'doğru!' : guess.text}</span>
+                  </div>
+                ))}
+              </div>
+              {state.status === 'drawing' && state.is_player && !inCountdown && (
+                <form onSubmit={handleGuess} className="flex-shrink-0">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={guessText}
+                      onChange={(e) => setGuessText(e.target.value)}
+                      placeholder="Tahminini yaz..."
+                      maxLength={120}
+                      autoComplete="off"
+                      enterKeyHint="send"
+                      className="flex-1 px-3 py-2.5 bg-white border border-gray-200 rounded-2xl text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!guessText.trim()}
+                      className="px-4 bg-violet-600 hover:bg-violet-500 active:scale-98 text-white font-black rounded-2xl text-sm disabled:opacity-50 cursor-pointer"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
           {state.status === 'round_end' && (
-            <div className="flex-shrink-0 px-4 py-3 bg-emerald-500 text-white flex items-center justify-center gap-2 relative overflow-hidden">
+            <div className="flex-shrink-0 px-4 py-2.5 bg-emerald-500 text-white flex items-center justify-center gap-2 relative overflow-hidden">
               <Trophy className="w-5 h-5" />
               <p className="text-sm font-black">
                 {state.solved_by_name
-                  ? `Doğru tahmin! ${state.revealed_word}`
+                  ? `Doğru! ${state.revealed_word}`
                   : `Süre bitti · ${state.revealed_word}`}
               </p>
             </div>
@@ -977,19 +1014,19 @@ export const DrawGuessPage: React.FC = () => {
                     stroke="#A855F7"
                     strokeWidth="3"
                     strokeLinecap="round"
-                    strokeDasharray={`${((countdown || 0) / COUNTDOWN_SECONDS) * 97} 97`}
+                    strokeDasharray={`${((shownCountdown || 0) / COUNTDOWN_SECONDS) * 97} 97`}
                   />
                 </svg>
                 <span className="absolute inset-0 flex items-center justify-center text-5xl font-black">
-                  {countdown}
+                  {shownCountdown}
                 </span>
               </div>
               <p className="text-xs font-bold text-white/50">Hazır olun!</p>
               <div className="flex justify-center gap-1.5">
-                {[1, 2, 3].map((n) => (
+                {[1, 2, 3, 4, 5].map((n) => (
                   <span
                     key={n}
-                    className={`w-2 h-2 rounded-full ${n <= (COUNTDOWN_SECONDS - (countdown || 0) + 1) ? 'bg-violet-500' : 'bg-white/15'}`}
+                    className={`w-2 h-2 rounded-full ${n <= (COUNTDOWN_SECONDS - (shownCountdown || 0) + 1) ? 'bg-violet-500' : 'bg-white/15'}`}
                   />
                 ))}
               </div>

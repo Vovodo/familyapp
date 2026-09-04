@@ -40,7 +40,7 @@ router = APIRouter()
 
 MIN_PLAYERS = 2
 ROUND_SECONDS = 150
-COUNTDOWN_SECONDS = 3
+COUNTDOWN_SECONDS = 5
 MAX_STROKES_PER_ROUND = 4000
 MAX_POINTS_PER_STROKE = 1200
 GUESS_HISTORY_LIMIT = 60
@@ -119,8 +119,9 @@ class DrawingStateOut(BaseModel):
 
 class StrokePayload(BaseModel):
     color: str = Field(default="#111827", max_length=32)
-    width: float = Field(default=4, ge=0.5, le=80)
+    width: float = Field(default=4, ge=0.5, le=400)
     points: List[int] = Field(default_factory=list)
+    kind: Optional[str] = Field(default=None, max_length=16)
 
 
 class StrokeCreate(BaseModel):
@@ -196,7 +197,7 @@ def _seconds_left(game: DrawingGame) -> Optional[int]:
 
 
 def _countdown_left(game: DrawingGame) -> Optional[int]:
-    """Tur başındaki 3-2-1; çizim süresi bu bitince işler."""
+    """Tur başındaki 5-4-3-2-1; çizim süresi bu bitince işler."""
     if game.status != "drawing" or not game.round_started_at:
         return None
     started = _aware(game.round_started_at)
@@ -1012,6 +1013,9 @@ def append_strokes(
         if len(points) < 2:
             continue
         seq += 1
+        body = {"c": stroke.color, "w": stroke.width, "p": points}
+        if stroke.kind:
+            body["k"] = stroke.kind
         db.add(
             DrawingStroke(
                 game_id=game.id,
@@ -1019,7 +1023,7 @@ def append_strokes(
                 seq=seq,
                 user_id=current_user.id,
                 kind="stroke",
-                payload=json.dumps({"c": stroke.color, "w": stroke.width, "p": points}),
+                payload=json.dumps(body),
             )
         )
 
