@@ -350,8 +350,9 @@ export const resolveStoredThemeId = (): string => {
 
 const applyNativeChrome = (theme: ThemeDefinition) => {
   if (!Capacitor.isNativePlatform()) return;
-  StatusBar.setStyle({ style: theme.isDark ? Style.Light : Style.Dark }).catch(() => {});
-  StatusBar.setBackgroundColor({ color: theme.colors.headerBg }).catch(() => {});
+    StatusBar.setStyle({ style: theme.isDark ? Style.Light : Style.Dark }).catch(() => {});
+    StatusBar.setBackgroundColor({ color: theme.colors.headerBg }).catch(() => {});
+    StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
 };
 
 const applyThemeToDOM = (theme: ThemeDefinition) => {

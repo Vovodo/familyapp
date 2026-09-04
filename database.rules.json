@@ -3,7 +3,16 @@
     "voice": {
       "$familyId": {
         ".read": "auth != null && auth.token.family_id === $familyId",
-        ".write": "auth != null && auth.token.family_id === $familyId"
+        "peers": {
+          "$uid": {
+            ".write": "auth != null && auth.token.family_id === $familyId && auth.uid === $uid"
+          }
+        },
+        "inbox": {
+          "$uid": {
+            ".write": "auth != null && auth.token.family_id === $familyId"
+          }
+        }
       }
     }
   }

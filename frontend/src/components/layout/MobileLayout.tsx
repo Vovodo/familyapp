@@ -123,8 +123,10 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   const isChat = location.pathname === '/chat';
   const isWatchRoom = /^\/watch-party\/[^/]+/.test(location.pathname);
   const isDrawGame = location.pathname === '/games/draw';
+  const isWordWar = location.pathname === '/games/word';
+  const isImmersiveGame = isDrawGame || isWordWar;
   const hasFamily = !!currentFamily;
-  const lockMain = isChat || isWatchRoom || isDrawGame;
+  const lockMain = isChat || isWatchRoom || isImmersiveGame;
 
   return (
     <div className="flex flex-col h-screen w-full theme-bg theme-text-primary relative shadow-2xl overflow-hidden transition-colors duration-200">
@@ -132,9 +134,20 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
       {hasFamily && <PermissionAssistantModal />}
       <HeartCelebrationOverlay />
       <OfflineBanner />
-      {showHeader && !isWatchRoom && !isDrawGame && !isChat && <Header />}
+      {showHeader && !isWatchRoom && !isImmersiveGame && !isChat && <Header />}
       
-      <main className={`flex-1 flex flex-col ${lockMain ? (isDrawGame ? 'overflow-hidden pb-0' : 'overflow-hidden pb-16') : hasFamily ? 'overflow-y-auto pb-20' : 'overflow-y-auto pb-6'}`}>
+      <main
+        className={`flex-1 flex flex-col ${lockMain ? 'overflow-hidden' : hasFamily ? 'overflow-y-auto' : 'overflow-y-auto'}`}
+        style={{
+          paddingBottom: isImmersiveGame
+            ? '0px'
+            : lockMain
+              ? 'calc(4rem + var(--sab))'
+              : hasFamily
+                ? 'calc(5rem + var(--sab))'
+                : '1.5rem',
+        }}
+      >
         {!hasFamily && location.pathname !== '/' ? (
           <Navigate to="/" replace />
         ) : (
@@ -144,7 +157,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         )}
       </main>
 
-      {showBottomNav && hasFamily && !isDrawGame && <BottomNav />}
+      {showBottomNav && hasFamily && !isImmersiveGame && <BottomNav />}
       {hasFamily && <VoiceChannelDock />}
     </div>
   );

@@ -20,6 +20,9 @@ from backend.app.models.models import (
     WatchRoomParticipant,
     WatchRoomMessage,
     VoiceChannelParticipant,
+    WordWarGame,
+    WordWarPlayer,
+    WordWarWord,
 )
 
 __all__ = [
@@ -44,4 +47,7 @@ __all__ = [
     "WatchRoomParticipant",
     "WatchRoomMessage",
     "VoiceChannelParticipant",
+    "WordWarGame",
+    "WordWarPlayer",
+    "WordWarWord",
 ]

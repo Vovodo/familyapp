@@ -95,6 +95,7 @@ def _serialize_channel(
     family: Family,
     current_user_id: str,
     include_signaling: bool = False,
+    include_listen: bool = False,
 ) -> VoiceChannelOut:
     now = _utcnow()
     _prune_stale(db, family.id, now)
@@ -128,15 +129,16 @@ def _serialize_channel(
         for row in rows
     ]
     signaling: Dict[str, Any] = {}
-    if include_signaling and self_row:
+    if include_signaling or include_listen:
         token = create_voice_custom_token(current_user_id, family.id)
         if token:
             signaling = {
                 "firebase_token": token,
                 "firebase_config": firebase_web_config(),
-                "ice_servers": ice_servers_payload(),
             }
-        else:
+            if include_signaling:
+                signaling["ice_servers"] = ice_servers_payload()
+        elif include_signaling:
             signaling = {"ice_servers": ice_servers_payload()}
     return VoiceChannelOut(
         family_id=family.id,
@@ -164,7 +166,7 @@ def get_voice_channel(
     current_user: User = Depends(get_current_user),
 ):
     family = _family(db, member.family_id)
-    return _serialize_channel(db, family, current_user.id)
+    return _serialize_channel(db, family, current_user.id, include_listen=True)
 
 
 @router.post("/join", response_model=VoiceChannelOut)

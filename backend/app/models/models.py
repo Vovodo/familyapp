@@ -632,3 +632,83 @@ class VoiceChannelParticipant(Base):
 
     user = relationship("User", foreign_keys=[user_id])
 
+
+class WordWarGame(Base):
+    """Aile içi Kelime Savaşı partisinin sunucu otoriteli durumu."""
+    __tablename__ = "word_war_games"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    family_id = Column(String(36), ForeignKey("families.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(20), default="lobby", index=True)
+    # lobby | countdown | playing | round_end | winner | finished
+    round_number = Column(Integer, default=0)
+    current_player_id = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    previous_word = Column(String(80), nullable=True)
+    required_letter = Column(String(4), nullable=True)
+    event_type = Column(String(20), nullable=True)
+    event_category = Column(String(40), nullable=True)
+    turn_started_at = Column(DateTime(timezone=True), nullable=True)
+    turn_ends_at = Column(DateTime(timezone=True), nullable=True)
+    phase_ends_at = Column(DateTime(timezone=True), nullable=True)
+    turn_seconds = Column(Integer, default=8)
+    rotation_json = Column(Text, nullable=True)
+    turn_index = Column(Integer, default=0)
+    last_result_json = Column(Text, nullable=True)
+    round_summary_json = Column(Text, nullable=True)
+    winner_stats_json = Column(Text, nullable=True)
+    revision = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_word_war_games_family_status", "family_id", "status"),
+    )
+
+    family = relationship("Family", backref="word_war_games")
+    players = relationship("WordWarPlayer", back_populates="game", cascade="all, delete-orphan")
+
+
+class WordWarPlayer(Base):
+    __tablename__ = "word_war_players"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    game_id = Column(String(36), ForeignKey("word_war_games.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Integer, default=0)
+    correct_count = Column(Integer, default=0)
+    miss_count = Column(Integer, default=0)
+    fastest_ms = Column(Integer, nullable=True)
+    longest_word = Column(Integer, default=0)
+    event_hits = Column(Integer, default=0)
+    risky_hits = Column(Integer, default=0)
+    round_score = Column(Integer, default=0)
+    last_status = Column(String(20), default="idle")
+    is_present = Column(Boolean, default=True)
+    last_seen_at = Column(DateTime(timezone=True), default=get_utc_now)
+    joined_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("game_id", "user_id", name="uq_word_war_player"),
+        Index("idx_word_war_players_game", "game_id", "user_id"),
+    )
+
+    game = relationship("WordWarGame", back_populates="players")
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class WordWarWord(Base):
+    """Bu partide kullanılmış kelimeler. Tekrar yasak."""
+    __tablename__ = "word_war_words"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    game_id = Column(String(36), ForeignKey("word_war_games.id", ondelete="CASCADE"), nullable=False, index=True)
+    round_number = Column(Integer, nullable=False, default=0)
+    user_id = Column(String(36), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    word = Column(String(80), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+
+    __table_args__ = (
+        Index("idx_word_war_words_game_word", "game_id", "word"),
+    )
+

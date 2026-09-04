@@ -38,6 +38,7 @@ def test_join_lists_self_and_guest_sees_host(client):
     assert empty.json()["participant_count"] == 0
     assert empty.json()["self_in_channel"] is False
     assert empty.json()["family_name"] == "Ses Ailesi"
+    assert "firebase_config" in empty.json()
 
     joined = client.post("/api/v1/voice/join", headers=host_h)
     assert joined.status_code == 200, joined.text

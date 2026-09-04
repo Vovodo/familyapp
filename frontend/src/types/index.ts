@@ -324,6 +324,84 @@ export interface DrawingGameState {
   started_round?: boolean;
 }
 
+export type WordWarStatus = 'none' | 'lobby' | 'countdown' | 'playing' | 'round_end' | 'winner' | 'finished';
+
+export type WordWarPlayerStatus = 'idle' | 'thinking' | 'critical' | 'answered' | 'miss' | 'frozen' | 'won';
+
+export interface WordWarPlayer {
+  user_id: string;
+  name: string;
+  avatar_url?: string | null;
+  score: number;
+  correct_count: number;
+  miss_count: number;
+  round_score: number;
+  last_status: WordWarPlayerStatus | string;
+  is_current: boolean;
+  is_online: boolean;
+}
+
+export interface WordWarLastResult {
+  kind: 'accepted' | 'invalid' | 'timeout' | 'frozen' | string;
+  user_id?: string | null;
+  name?: string | null;
+  word?: string | null;
+  delta: number;
+  reason?: string | null;
+}
+
+export interface WordWarRoundSummary {
+  round_number: number;
+  scores: WordWarPlayer[];
+  fastest_user_id?: string | null;
+  fastest_name?: string | null;
+  correct_count: number;
+  miss_count: number;
+}
+
+export interface WordWarWinnerStats {
+  winner_user_id?: string | null;
+  winner_name?: string | null;
+  fastest_user_id?: string | null;
+  fastest_name?: string | null;
+  word_master_user_id?: string | null;
+  word_master_name?: string | null;
+  risk_taker_user_id?: string | null;
+  risk_taker_name?: string | null;
+}
+
+export interface WordWarState {
+  game_id: string | null;
+  status: WordWarStatus;
+  round_number: number;
+  total_rounds: number;
+  current_player_id: string | null;
+  current_player_name: string | null;
+  is_my_turn: boolean;
+  previous_word: string | null;
+  required_letter: string | null;
+  event_type: string | null;
+  event_label: string | null;
+  event_category: string | null;
+  turn_started_at: string | null;
+  turn_ends_at: string | null;
+  phase_ends_at: string | null;
+  seconds_left: number | null;
+  countdown_left?: number | null;
+  turn_seconds: number;
+  revision: number;
+  players: WordWarPlayer[];
+  last_result: WordWarLastResult | null;
+  round_summary: WordWarRoundSummary | null;
+  winner_stats: WordWarWinnerStats | null;
+  used_count: number;
+  is_player: boolean;
+  min_players: number;
+  family_member_count: number;
+  online_count: number;
+  server_now?: string | null;
+}
+
 export type WatchPlaybackState = 'idle' | 'playing' | 'paused' | 'ended';
 
 export interface WatchParticipant {

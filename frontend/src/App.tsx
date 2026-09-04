@@ -5,6 +5,7 @@ import { App as CapApp } from '@capacitor/app';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { FamilyProvider } from './contexts/FamilyContext';
 import { DrawingGameProvider } from './contexts/DrawingGameContext';
+import { WordWarProvider } from './contexts/WordWarContext';
 import { VoiceChannelProvider } from './contexts/VoiceChannelContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { MobileLayout } from './components/layout/MobileLayout';
@@ -22,10 +23,12 @@ import { JoinInviteRedirect, InviteDeepLinkListener } from './pages/family/JoinI
 import { FamilySettingsPage } from './pages/family/FamilySettingsPage';
 import { GamesPage } from './pages/games/GamesPage';
 import { DrawGuessPage } from './pages/games/DrawGuessPage';
+import { WordWarPage } from './pages/games/WordWarPage';
 import { WatchPartyPage } from './pages/watchparty/WatchPartyPage';
 import { WatchPartyRoomPage } from './pages/watchparty/WatchPartyRoomPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { liveUpdateService } from './services/liveUpdate';
+import { applySafeAreaInsets } from './services/safeArea';
 import { BrandLoading } from './components/branding/BrandLoading';
 
 const queryClient = new QueryClient({
@@ -68,6 +71,7 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 export const App: React.FC = () => {
   // Check for Live OTA Updates on startup and on foreground resume
   useEffect(() => {
+    applySafeAreaInsets();
     liveUpdateService.checkForUpdate();
 
     const stateListener = CapApp.addListener('appStateChange', (state) => {
@@ -89,6 +93,7 @@ export const App: React.FC = () => {
             <BrowserRouter>
               <InviteDeepLinkListener />
               <DrawingGameProvider>
+              <WordWarProvider>
               <VoiceChannelProvider>
               <Routes>
                 {/* Public Routes */}
@@ -128,6 +133,7 @@ export const App: React.FC = () => {
                   <Route path="/reminders" element={<RemindersPage />} />
                   <Route path="/games" element={<GamesPage />} />
                   <Route path="/games/draw" element={<DrawGuessPage />} />
+                  <Route path="/games/word" element={<WordWarPage />} />
                   <Route path="/watch-party" element={<WatchPartyPage />} />
                   <Route path="/watch-party/:roomId" element={<WatchPartyRoomPage />} />
                   <Route path="/family" element={<FamilySettingsPage />} />
@@ -138,6 +144,7 @@ export const App: React.FC = () => {
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
               </VoiceChannelProvider>
+              </WordWarProvider>
               </DrawingGameProvider>
             </BrowserRouter>
           </FamilyProvider>

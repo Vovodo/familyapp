@@ -14,7 +14,7 @@ export const VoiceChannelDock: React.FC = () => {
     speakingCount > 0 ? `${speakingCount} kişi konuşuyor` : `${Math.max(participantCount, 1)} kişi kanalda`;
 
   return (
-    <div className="fixed left-3 right-3 z-40" style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))' }}>
+    <div className="fixed left-3 right-3 z-40" style={{ bottom: 'calc(4.5rem + var(--sab))' }}>
       <div
         className="max-w-lg mx-auto flex items-center gap-2 rounded-2xl px-3 py-2 shadow-xl border theme-border"
         style={{ backgroundColor: 'var(--theme-surface)' }}

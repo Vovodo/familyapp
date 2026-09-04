@@ -431,7 +431,7 @@ export const HomePage: React.FC = () => {
     },
     {
       title: 'Oyunlar',
-      subtitle: 'Çiz ve tahmin et, birlikte oynayın',
+      subtitle: 'Çiz-tahmin ve kelime savaşı',
       icon: Gamepad2,
       to: '/games',
       bgColor: 'bg-fuchsia-50/80',

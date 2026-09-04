@@ -65,12 +65,15 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const userIdRef = useRef<string | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const speakingStopRef = useRef<(() => void) | null>(null);
+  const presenceLiveRef = useRef(false);
 
   const displayName = activeMember?.nickname || user?.full_name?.split(' ')[0] || 'Ben';
 
   const applyState = useCallback((data: VoiceChannelState) => {
     setFamilyName(data.family_name);
-    setParticipants((prev) => mergeParticipants(data.participants, prev));
+    if (!presenceLiveRef.current) {
+      setParticipants((prev) => mergeParticipants(data.participants, prev));
+    }
     if (joinedRef.current) {
       setIsMuted(data.self_muted);
       mutedRef.current = data.self_muted;
@@ -125,8 +128,9 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setIsMuted(false);
     setLinkState('idle');
     mutedRef.current = false;
+    setParticipants((prev) => prev.filter((p) => p.user_id !== selfId));
     stopLocalMedia();
-    await firebaseVoiceSignaling.disconnect();
+    await firebaseVoiceSignaling.leaveChannel();
     await voiceChannelNative.stop();
     if (playSound) playLobbyLeaveSound();
     try {
@@ -194,38 +198,37 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
             if (!joinedRef.current) return;
             void voiceMesh.handleSignal(msg);
           },
-          onPeerJoined: (peerId, presence) => {
-            if (!joinedRef.current || peerId === user.id) return;
-            setParticipants((prev) => {
-              if (prev.some((p) => p.user_id === peerId)) {
-                return prev.map((p) =>
-                  p.user_id === peerId
-                    ? { ...p, name: presence.name, muted: presence.muted, speaking: presence.speaking }
-                    : p
-                );
-              }
-              playLobbyJoinSound();
-              return [
-                ...prev,
-                {
-                  user_id: peerId,
-                  name: presence.name,
-                  muted: presence.muted,
-                  speaking: presence.speaking,
-                  is_self: false,
-                },
-              ];
-            });
+          onRoster: (peers) => {
+            presenceLiveRef.current = true;
+            setParticipants(
+              peers.map((peer) => {
+                const member = currentFamily.members?.find((m) => m.user_id === peer.userId);
+                const self = peer.userId === user.id;
+                return {
+                  user_id: peer.userId,
+                  name:
+                    peer.presence.name ||
+                    member?.nickname ||
+                    member?.user?.full_name?.split(' ')[0] ||
+                    'Aile Üyesi',
+                  avatar_url: (self ? user.avatar_url : member?.user?.avatar_url) || null,
+                  muted: peer.presence.muted,
+                  speaking: peer.presence.speaking,
+                  is_self: self,
+                };
+              })
+            );
+          },
+          onPeerJoined: (peerId) => {
+            if (peerId === user.id) return;
+            playLobbyJoinSound();
+            if (!joinedRef.current) return;
             voiceMesh.ensurePeer(peerId);
             voiceMesh.kickNegotiate(peerId);
           },
           onPeerLeft: (peerId) => {
             if (peerId === user.id) return;
-            setParticipants((prev) => {
-              if (!prev.some((p) => p.user_id === peerId)) return prev;
-              playLobbyLeaveSound();
-              return prev.filter((p) => p.user_id !== peerId);
-            });
+            playLobbyLeaveSound();
             voiceMesh.hangupPeer(peerId);
           },
           onPeerState: (peerId, presence) => {
@@ -293,7 +296,7 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
       };
     } catch (err: any) {
       stopLocalMedia();
-      await firebaseVoiceSignaling.disconnect();
+      await firebaseVoiceSignaling.leaveChannel();
       joinedRef.current = false;
       setIsJoined(false);
       setLinkState('idle');
@@ -347,10 +350,76 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (!currentFamily?.id || !user?.id) return;
 
     let cancelled = false;
+    presenceLiveRef.current = false;
+
+    const mapPeer = (userId: string, presence: { name: string; muted: boolean; speaking: boolean }) => {
+      const member = currentFamily.members?.find((m) => m.user_id === userId);
+      const self = userId === user.id;
+      return {
+        user_id: userId,
+        name: presence.name || member?.nickname || member?.user?.full_name?.split(' ')[0] || 'Aile Üyesi',
+        avatar_url: (self ? user.avatar_url : member?.user?.avatar_url) || null,
+        muted: presence.muted,
+        speaking: presence.speaking,
+        is_self: self,
+      };
+    };
+
+    const handlers = {
+      onSignal: (msg: Parameters<typeof voiceMesh.handleSignal>[0]) => {
+        if (!joinedRef.current) return;
+        void voiceMesh.handleSignal(msg);
+      },
+      onRoster: (peers: Array<{ userId: string; presence: { name: string; muted: boolean; speaking: boolean } }>) => {
+        if (cancelled) return;
+        presenceLiveRef.current = true;
+        setParticipants(peers.map((peer) => mapPeer(peer.userId, peer.presence)));
+      },
+      onPeerJoined: (peerId: string) => {
+        if (cancelled || peerId === user.id) return;
+        playLobbyJoinSound();
+        if (!joinedRef.current) return;
+        voiceMesh.ensurePeer(peerId);
+        voiceMesh.kickNegotiate(peerId);
+      },
+      onPeerLeft: (peerId: string) => {
+        if (cancelled || peerId === user.id) return;
+        playLobbyLeaveSound();
+        voiceMesh.hangupPeer(peerId);
+      },
+      onPeerState: (
+        peerId: string,
+        presence: { name?: string; muted?: boolean; speaking?: boolean }
+      ) => {
+        if (cancelled) return;
+        setParticipants((prev) =>
+          prev.map((p) =>
+            p.user_id === peerId
+              ? {
+                  ...p,
+                  muted: presence.muted ?? p.muted,
+                  speaking: presence.speaking ?? p.speaking,
+                  name: presence.name || p.name,
+                }
+              : p
+          )
+        );
+      },
+    };
+
     voiceChannelApi
       .get()
-      .then((res) => {
-        if (!cancelled) applyState(res.data);
+      .then(async (res) => {
+        if (cancelled) return;
+        applyState(res.data);
+        if (!res.data.firebase_token || !res.data.firebase_config) return;
+        await firebaseVoiceSignaling.listen(
+          currentFamily.id,
+          user.id,
+          res.data.firebase_token,
+          res.data.firebase_config,
+          handlers
+        );
       })
       .catch(() => {});
 
@@ -365,7 +434,9 @@ export const VoiceChannelProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     return () => {
       cancelled = true;
+      presenceLiveRef.current = false;
       window.clearInterval(refresh);
+      void firebaseVoiceSignaling.disconnect();
     };
   }, [applyState, currentFamily?.id, user?.id]);
 

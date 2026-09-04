@@ -241,7 +241,7 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(
     };
 
     return (
-      <div className="theme-nav border-t theme-border p-2 safe-area-bottom relative">
+      <div className="theme-nav border-t theme-border p-2 relative">
         {/* Error Toast */}
         {recordingError && (
           <div className="absolute bottom-full left-4 right-4 mb-2 p-2 bg-rose-600 text-white text-xs font-bold rounded-2xl shadow-lg text-center animate-in fade-in slide-in-from-bottom-2">

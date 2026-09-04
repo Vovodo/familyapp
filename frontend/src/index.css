@@ -6,6 +6,10 @@
   :root {
     --safe-area-top: env(safe-area-inset-top, 0px);
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --sat-fallback: 0px;
+    --sab-fallback: 0px;
+    --sat: max(env(safe-area-inset-top, 0px), var(--sat-fallback));
+    --sab: max(env(safe-area-inset-bottom, 0px), var(--sab-fallback));
     --theme-bg: #160F28;
     --theme-surface: #1E1638;
     --theme-surface-secondary: #2C1F4C;
@@ -49,6 +53,13 @@
   button, a, .interactive-card {
     transition: transform 0.12s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
   }
+}
+
+.safe-area-top {
+  padding-top: var(--sat);
+}
+.safe-area-bottom {
+  padding-bottom: var(--sab);
 }
 
 /* Custom sleek scrollbar */

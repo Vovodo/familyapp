@@ -29,6 +29,7 @@ import {
   Palette,
   ChevronRight,
   Crown,
+  Volume2,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useFamily } from '../../contexts/FamilyContext';
@@ -44,6 +45,7 @@ import { ThemeStoreModal } from '../../components/theme/ThemeStoreModal';
 import { FamilyInviteQr } from '../../components/family/FamilyInviteQr';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { isGameSfxEnabled, setGameSfxEnabled } from '../../services/soundService';
 
 export const FamilySettingsPage: React.FC = () => {
   const { user, logout, updateProfile } = useAuth();
@@ -56,6 +58,7 @@ export const FamilySettingsPage: React.FC = () => {
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
+  const [gameSfxOn, setGameSfxOn] = useState(isGameSfxEnabled);
 
   // Cloud Backup & Storage Quota State
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
@@ -640,6 +643,33 @@ export const FamilySettingsPage: React.FC = () => {
           </div>
           <ChevronRight className="w-4 h-4 text-gray-400" />
         </button>
+      </div>
+
+      <div className="bg-white dark:bg-gray-900 rounded-3xl p-5 border border-gray-100 dark:border-gray-800 shadow-md">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-violet-50 text-violet-600 flex items-center justify-center flex-shrink-0">
+              <Volume2 className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-black text-gray-900 dark:text-white">Oyun ses efektleri</h3>
+              <p className="text-[11px] text-gray-500">Kelime Savaşı geri sayım, süre ve kazanan sesleri</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !gameSfxOn;
+              setGameSfxOn(next);
+              setGameSfxEnabled(next);
+            }}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer ${
+              gameSfxOn ? 'bg-violet-600 text-white' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            {gameSfxOn ? 'Açık' : 'Kapalı'}
+          </button>
+        </div>
       </div>
 
       {/* Group Actions: Creator Delete vs Member Leave */}

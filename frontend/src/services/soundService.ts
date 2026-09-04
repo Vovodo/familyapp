@@ -4,6 +4,25 @@
  * (`/sounds/*.wav` ↔ `res/raw/*.wav`). Synth fallbacks cover web audio unlock failures.
  */
 
+const GAME_SFX_KEY = 'ailem_game_sfx';
+
+export const isGameSfxEnabled = (): boolean => {
+  if (typeof window === 'undefined') return true;
+  try {
+    return window.localStorage.getItem(GAME_SFX_KEY) !== '0';
+  } catch {
+    return true;
+  }
+};
+
+export const setGameSfxEnabled = (enabled: boolean): void => {
+  try {
+    window.localStorage.setItem(GAME_SFX_KEY, enabled ? '1' : '0');
+  } catch {
+    // yok say
+  }
+};
+
 let audioCtx: AudioContext | null = null;
 
 const getCtx = (): AudioContext | null => {
@@ -472,4 +491,73 @@ export const playApplauseSound = (): void => {
   } catch {
     // Silently ignore
   }
+};
+
+const beep = (freq: number, dur: number, type: OscillatorType, vol = 0.22, ramp = 0): void => {
+  if (!isGameSfxEnabled()) return;
+  const ctx = getCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, ctx.currentTime);
+  if (ramp) osc.frequency.exponentialRampToValueAtTime(Math.max(40, freq + ramp), ctx.currentTime + dur);
+  gain.gain.setValueAtTime(0.001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(vol, ctx.currentTime + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + dur + 0.02);
+};
+
+export const playWordWarStart = (): void => {
+  if (!isGameSfxEnabled()) return;
+  beep(392, 0.12, 'triangle', 0.2);
+  window.setTimeout(() => beep(523, 0.16, 'triangle', 0.22), 90);
+};
+
+export const playWordWarCountdown = (n: number): void => {
+  if (!isGameSfxEnabled()) return;
+  if (n <= 0) {
+    beep(784, 0.22, 'sawtooth', 0.16, 120);
+    return;
+  }
+  beep(330 + n * 80, 0.14, 'square', 0.14);
+};
+
+export const playWordWarTurn = (): void => {
+  beep(640, 0.1, 'sine', 0.2, 180);
+};
+
+export const playWordWarAccept = (): void => {
+  beep(523, 0.08, 'sine', 0.2, 200);
+};
+
+export const playWordWarReject = (): void => {
+  beep(220, 0.16, 'square', 0.16, -80);
+};
+
+export const playWordWarTick = (urgent: boolean): void => {
+  beep(urgent ? 880 : 620, urgent ? 0.08 : 0.05, 'square', urgent ? 0.18 : 0.1);
+};
+
+export const playWordWarTimeout = (): void => {
+  beep(140, 0.28, 'sawtooth', 0.2, -40);
+};
+
+export const playWordWarRoundEnd = (): void => {
+  if (!isGameSfxEnabled()) return;
+  beep(440, 0.1, 'triangle', 0.16);
+  window.setTimeout(() => beep(554, 0.14, 'triangle', 0.18), 80);
+};
+
+export const playWordWarWinner = (): void => {
+  if (!isGameSfxEnabled()) return;
+  playApplauseSound();
+  window.setTimeout(() => beep(784, 0.2, 'triangle', 0.2), 80);
+};
+
+export const playWordWarLobbyTick = (): void => {
+  beep(480, 0.06, 'sine', 0.1);
 };
