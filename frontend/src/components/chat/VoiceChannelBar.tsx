@@ -69,9 +69,15 @@ export const VoiceChannelBar: React.FC = () => {
     setError(null);
     try {
       await join();
-    } catch {
-      setError('Mikrofona erişilemedi. Lütfen izinleri kontrol edin.');
-      window.setTimeout(() => setError(null), 3500);
+    } catch (err: any) {
+      const denied =
+        /mikrofon|permission|NotAllowed|Denied/i.test(String(err?.name || err?.message || ''));
+      setError(
+        denied
+          ? 'Mikrofona erişilemedi. Lütfen izinleri kontrol edin.'
+          : err?.message || 'Ses kanalına bağlanılamadı.'
+      );
+      window.setTimeout(() => setError(null), 4000);
     }
   };
 

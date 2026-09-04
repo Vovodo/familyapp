@@ -1,12 +1,12 @@
 """
 Aile ses kanalı.
 
-Her ailenin tek odası vardır. Kimlerin içeride olduğu REST ile kilitlenir;
-WebRTC sinyali istemciler arasında Supabase broadcast ile akar.
+Kimlerin içeride olduğu REST ile kilitlenir (aile izolasyonu).
+WebRTC medya P2P akar; SDP/ICE sinyali Firebase Realtime Database üzerinden gider.
 Kopan istemci GET / heartbeat ile toparlanır.
 """
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -16,6 +16,11 @@ from sqlalchemy.orm import Session
 from backend.app.api.deps import get_current_family_member, get_current_user
 from backend.app.db.session import get_db
 from backend.app.models.models import Family, FamilyMember, User, VoiceChannelParticipant
+from backend.app.services.firebase_app import (
+    create_voice_custom_token,
+    firebase_web_config,
+    ice_servers_payload,
+)
 
 router = APIRouter()
 
@@ -40,6 +45,9 @@ class VoiceChannelOut(BaseModel):
     self_in_channel: bool = False
     self_muted: bool = False
     server_now: datetime
+    firebase_token: Optional[str] = None
+    firebase_config: Optional[Dict[str, str]] = None
+    ice_servers: List[Dict[str, Any]] = []
 
 
 class VoiceMuteIn(BaseModel):
@@ -86,6 +94,7 @@ def _serialize_channel(
     db: Session,
     family: Family,
     current_user_id: str,
+    include_signaling: bool = False,
 ) -> VoiceChannelOut:
     now = _utcnow()
     _prune_stale(db, family.id, now)
@@ -118,6 +127,17 @@ def _serialize_channel(
         )
         for row in rows
     ]
+    signaling: Dict[str, Any] = {}
+    if include_signaling and self_row:
+        token = create_voice_custom_token(current_user_id, family.id)
+        if token:
+            signaling = {
+                "firebase_token": token,
+                "firebase_config": firebase_web_config(),
+                "ice_servers": ice_servers_payload(),
+            }
+        else:
+            signaling = {"ice_servers": ice_servers_payload()}
     return VoiceChannelOut(
         family_id=family.id,
         family_name=family.name,
@@ -126,6 +146,7 @@ def _serialize_channel(
         self_in_channel=self_row is not None,
         self_muted=bool(self_row.muted) if self_row else False,
         server_now=now,
+        **signaling,
     )
 
 
@@ -169,7 +190,7 @@ def join_voice_channel(
         existing.muted = False
         db.commit()
         db.refresh(existing)
-        return _serialize_channel(db, family, current_user.id)
+        return _serialize_channel(db, family, current_user.id, include_signaling=True)
 
     live_count = (
         db.query(VoiceChannelParticipant)
@@ -205,7 +226,7 @@ def join_voice_channel(
         if existing:
             existing.last_heartbeat_at = now
             db.commit()
-    return _serialize_channel(db, family, current_user.id)
+    return _serialize_channel(db, family, current_user.id, include_signaling=True)
 
 
 @router.post("/leave", response_model=VoiceChannelOut)

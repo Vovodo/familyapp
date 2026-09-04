@@ -85,9 +85,19 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "Admin1234!*"
     ADMIN_NAME: str = "Sistem Yöneticisi (Ege)"
 
-    # Firebase Cloud Messaging (FCM)
+    # Firebase Cloud Messaging (FCM) + ses kanalı (WebRTC sinyal)
     FIREBASE_CREDENTIALS_JSON: str = ""
     FIREBASE_CREDENTIALS_PATH: str = ""
+    FIREBASE_PROJECT_ID: str = "ailem-b2489"
+    FIREBASE_WEB_API_KEY: str = "AIzaSyB-UqdkE5u4vbli9uq6NyZmDvTMV4yXW5o"
+    FIREBASE_AUTH_DOMAIN: str = "ailem-b2489.firebaseapp.com"
+    FIREBASE_DATABASE_URL: str = "https://ailem-b2489-default-rtdb.europe-west1.firebasedatabase.app"
+    FIREBASE_STORAGE_BUCKET: str = "ailem-b2489.firebasestorage.app"
+    FIREBASE_MESSAGING_SENDER_ID: str = "856921346242"
+    FIREBASE_APP_ID: str = "1:856921346242:web:b72500ebd2f9944a95ab5b"
+    TURN_URLS: str = ""
+    TURN_USERNAME: str = ""
+    TURN_CREDENTIAL: str = ""
 
     model_config = SettingsConfigDict(
         env_file=_ENV_FILES,

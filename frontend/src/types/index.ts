@@ -463,4 +463,15 @@ export interface VoiceChannelState {
   self_in_channel: boolean;
   self_muted: boolean;
   server_now: string;
+  firebase_token?: string | null;
+  firebase_config?: {
+    apiKey: string;
+    authDomain: string;
+    databaseURL: string;
+    projectId: string;
+    storageBucket: string;
+    messagingSenderId: string;
+    appId: string;
+  } | null;
+  ice_servers?: RTCIceServer[];
 }

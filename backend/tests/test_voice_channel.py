@@ -58,6 +58,7 @@ def test_join_lists_self_and_guest_sees_host(client):
     assert guest_join.json()["participant_count"] == 2
     ids = {p["user_id"] for p in guest_join.json()["participants"]}
     assert ids == {host_id, guest_id}
+    assert "ice_servers" in guest_join.json()
 
 
 def test_leave_and_mute_and_heartbeat(client):

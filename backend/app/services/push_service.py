@@ -39,6 +39,12 @@ class PushNotificationService:
             self.is_initialized = True
             return
 
+        from backend.app.services.firebase_app import ensure_firebase_app
+
+        if ensure_firebase_app():
+            self.is_initialized = True
+            return
+
         inline_json = (settings.FIREBASE_CREDENTIALS_JSON or "").strip()
         cred_path = Path(settings.FIREBASE_CREDENTIALS_PATH.strip()) if settings.FIREBASE_CREDENTIALS_PATH else _DEFAULT_CRED_PATH
 

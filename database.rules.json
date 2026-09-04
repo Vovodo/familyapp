@@ -1,0 +1,10 @@
+{
+  "rules": {
+    "voice": {
+      "$familyId": {
+        ".read": "auth != null && auth.token.family_id === $familyId",
+        ".write": "auth != null && auth.token.family_id === $familyId"
+      }
+    }
+  }
+}
